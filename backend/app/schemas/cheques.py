@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from app.db.models import ChequeEstado
 from app.schemas.prestamos import PrestamoCreateFromCheque, PrestamoRead
@@ -37,7 +37,8 @@ class ChequeFiarRequest(BaseModel):
 
 
 class ChequeRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    class Config:
+        from_attributes = True
 
     nro_cheque: str
     monto: Decimal
