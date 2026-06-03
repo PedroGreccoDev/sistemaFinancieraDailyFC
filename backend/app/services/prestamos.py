@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -17,7 +18,7 @@ from app.db.models import (
     PrestamoEstado,
 )
 from app.schemas.prestamos import PrestamoCreate
-from app.services.exceptions import DatabaseWriteError, NotFoundError
+from app.services.exceptions import ConflictError, DatabaseWriteError, NotFoundError
 
 
 def _add_months(value: date, months: int) -> date:
@@ -107,7 +108,7 @@ def create_prestamo(db: Session, payload: PrestamoCreate) -> Prestamo:
         raise DatabaseWriteError("No se pudo crear el prestamo.") from exc
 
 
-def get_prestamo(db: Session, prestamo_id: object) -> Prestamo:
+def get_prestamo(db: Session, prestamo_id: uuid.UUID) -> Prestamo:
     prestamo = db.scalar(
         select(Prestamo)
         .options(selectinload(Prestamo.cuotas_detalle))
@@ -125,10 +126,21 @@ def list_prestamos(db: Session, estado: PrestamoEstado | None = None) -> list[Pr
     return list(db.scalars(query.order_by(Prestamo.created_at.desc())))
 
 
-def cobrar_cuota(db: Session, cuota_id: object, fecha_cobro: date | None = None) -> Cuota:
-    cuota = db.scalar(select(Cuota).where(Cuota.id == cuota_id).with_for_update())
+def cobrar_cuota(
+    db: Session,
+    prestamo_id: uuid.UUID,
+    cuota_id: uuid.UUID,
+    fecha_cobro: date | None = None,
+) -> Cuota:
+    cuota = db.scalar(
+        select(Cuota)
+        .where(Cuota.id == cuota_id, Cuota.prestamo_id == prestamo_id)
+        .with_for_update()
+    )
     if cuota is None:
         raise NotFoundError("Cuota no encontrada.")
+    if cuota.estado == CuotaEstado.COBRADA:
+        raise ConflictError("La cuota ya fue cobrada.")
 
     cuota.estado = CuotaEstado.COBRADA
     cuota.fecha_cobro = fecha_cobro or date.today()

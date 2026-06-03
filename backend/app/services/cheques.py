@@ -132,6 +132,7 @@ def fiar_cheque(
         total_a_cobrar=prestamo_payload.total_a_cobrar,
     )
 
+    prestamo_id = prestamo.id
     try:
         cheque.transition_to(
             ChequeEstado.FIADO,
@@ -142,17 +143,18 @@ def fiar_cheque(
         db.add(prestamo)
         db.commit()
         db.refresh(cheque)
-        prestamo = db.scalar(
-            select(Prestamo)
-            .options(selectinload(Prestamo.cuotas_detalle))
-            .where(Prestamo.id == prestamo.id)
-        )
-        if prestamo is None:
-            raise DatabaseWriteError("No se pudo recuperar el prestamo creado.")
-        return cheque, prestamo
     except (InvalidChequeStateTransition, ManualOperationRequired) as exc:
         db.rollback()
         raise ValidationError(str(exc)) from exc
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("No se pudo fiar el cheque.") from exc
+
+    prestamo = db.scalar(
+        select(Prestamo)
+        .options(selectinload(Prestamo.cuotas_detalle))
+        .where(Prestamo.id == prestamo_id)
+    )
+    if prestamo is None:
+        raise DatabaseWriteError("No se pudo recuperar el prestamo creado.")
+    return cheque, prestamo

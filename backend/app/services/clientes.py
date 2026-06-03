@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -24,7 +26,7 @@ def create_cliente(db: Session, payload: ClienteCreate) -> Cliente:
         raise DatabaseWriteError("No se pudo crear el cliente.") from exc
 
 
-def get_cliente(db: Session, cliente_id: object) -> Cliente:
+def get_cliente(db: Session, cliente_id: uuid.UUID) -> Cliente:
     cliente = db.get(Cliente, cliente_id)
     if cliente is None:
         raise NotFoundError("Cliente no encontrado.")

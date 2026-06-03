@@ -40,11 +40,12 @@ def get_prestamo(prestamo_id: UUID, db: DbSession) -> PrestamoRead:
     return service.get_prestamo(db, prestamo_id)
 
 
-@router.post("/cuotas/{cuota_id}/cobros", response_model=CuotaRead)
+@router.post("/{prestamo_id}/cuotas/{cuota_id}/cobros", response_model=CuotaRead)
 def cobrar_cuota(
+    prestamo_id: UUID,
     cuota_id: UUID,
     payload: CuotaCobroRequest,
     db: DbSession,
 ) -> CuotaRead:
-    return service.cobrar_cuota(db, cuota_id, payload.fecha_cobro)
+    return service.cobrar_cuota(db, prestamo_id, cuota_id, payload.fecha_cobro)
 

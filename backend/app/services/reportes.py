@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import Cheque, MovimientoEfectivo, Prestamo
+from app.db.models import Cheque, ChequeEstado, MovimientoEfectivo, Prestamo
 from app.schemas.reportes import ReporteGananciasRead
 
 
@@ -25,8 +25,9 @@ def get_reporte_ganancias(db: Session, desde: date, hasta: date) -> ReporteGanan
     ganancia_cheques = _money(
         db.scalar(
             select(func.coalesce(func.sum(Cheque.ganancia), 0)).where(
-                Cheque.updated_at >= desde_dt,
-                Cheque.updated_at <= hasta_dt,
+                Cheque.estado == ChequeEstado.VENDIDO,
+                Cheque.ultimo_evento_manual_at >= desde_dt,
+                Cheque.ultimo_evento_manual_at <= hasta_dt,
             )
         )
     )
