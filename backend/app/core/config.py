@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     app_name: str = "Sistema de Gestion Financiera y Cartera Privada"
     api_v1_prefix: str = "/api/v1"
+<<<<<<< HEAD
 
     # Base de datos
     database_url: str = Field(
@@ -34,7 +35,18 @@ class Settings(BaseSettings):
     # Número del operador autorizado (sin @s.whatsapp.net, solo dígitos)
     whatsapp_operator_phone: str = Field(default="")
 
+=======
+    database_url: str = Field(
+        default="postgresql+psycopg://postgres:postgres@localhost:5432/financiera"
+    )
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+
+>>>>>>> 3ab33fdda97af856ccedd4601fcc92275968326f
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+<<<<<<< HEAD
+=======
+
+>>>>>>> 3ab33fdda97af856ccedd4601fcc92275968326f

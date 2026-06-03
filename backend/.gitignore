@@ -1,0 +1,51 @@
+# ── Entornos virtuales ───────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Variables de entorno  (NUNCA commitear claves reales) ────────────
+.env
+.env.local
+.env.*.local
+
+# ── Python ───────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+*.whl
+
+# ── Mypy / Ruff / Pytest ─────────────────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Alembic ──────────────────────────────────────────────────────────
+# (las versiones SÍ se commitean; solo excluimos temporales)
+alembic/versions/__pycache__/
+
+# ── Node / Frontend ──────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# ── IDEs ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Sistema operativo ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Railway / Docker ─────────────────────────────────────────────────
+*.log
