@@ -1,0 +1,6 @@
+Alembic migrations for the financial backend.
+
+Run from backend/:
+
+  alembic upgrade head
+

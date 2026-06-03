@@ -1,0 +1,18 @@
+# =============================================================================
+# Railway — Configuración del monorepo
+# Documentación: https://docs.railway.app/reference/config-as-code
+# =============================================================================
+
+[build]
+builder          = "dockerfile"
+dockerfilePath   = "backend/Dockerfile"
+buildContext     = "."
+
+[deploy]
+# Railway usa el healthcheck para saber cuándo el deploy está listo
+healthcheckPath    = "/health"
+healthcheckTimeout = 60
+
+# Reintentar en fallo (no en crash de proceso, eso lo maneja Railway)
+restartPolicyType  = "on_failure"
+restartPolicyMaxRetries = 3

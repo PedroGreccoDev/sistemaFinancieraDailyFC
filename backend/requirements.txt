@@ -1,0 +1,20 @@
+# ── API & servidor ──────────────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# ── Base de datos ────────────────────────────────────────────────────
+sqlalchemy==2.0.36
+psycopg[binary]==3.2.3
+alembic==1.14.0
+
+# ── Validación / configuración ───────────────────────────────────────
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+
+# ── IA ───────────────────────────────────────────────────────────────
+anthropic==0.49.0        # Claude API (OCR, razonamiento, bot WhatsApp)
+openai==1.82.0           # Whisper API (transcripción de audio)
+
+# ── HTTP client (requests salientes) ─────────────────────────────────
+httpx==0.28.1

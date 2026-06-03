@@ -1,0 +1,56 @@
+# Arquitectura y Requerimientos - Sistema de Gestión Financiera Inteligente
+
+## 1. Contexto del Negocio y Reglas Core
+* **Nicho:** Financiera informal (mercado negro / "cuevas").
+* **Regla de Oro:** Cero facturación, cero AFIP. Los cheques y divisas se tratan estrictamente como **inventario/stock físico**.
+* **Flujo "Human in the Loop":** El sistema automatiza la extracción de datos y la matemática, pero **el operador tiene el control total**. La IA no asume cotizaciones ni toma decisiones autónomas de estado sin la orden explícita del usuario por WhatsApp.
+
+## 2. Stack Tecnológico
+* **Backend:** FastAPI (Python).
+* **Base de Datos:** PostgreSQL para garantizar integridad referencial y transacciones ACID.
+* **Frontend:** React.js + Vite.
+* **Infraestructura:** Monorepo alojado en Railway.
+* **Conexión WhatsApp:** Evolution API (vía Webhook directo a FastAPI, sin intermediarios).
+* **IA de Transcripción (Audio):** Whisper API (OpenAI) para procesar notas de voz.
+* **IA de Razonamiento y Visión:** API de Claude (Anthropic).
+
+## 3. Modelo de Base de Datos (PostgreSQL)
+*Nota estricta para la IA: El concepto de facturación o blanqueo no existe en este sistema. Ninguna tabla debe contener campos como `incluir_factura`.*
+* **`clientes`**: nombre, CUIT (opcional), teléfono.
+* **`cheques`**: nro_cheque (identificador principal), monto, fechas, porcentaje_compra, porcentaje_venta, ganancia, estado.
+    * *Máquina de estados estricta:* `EN_CARTERA`, `VENDIDO`, `FIADO`, `COBRADO`, `RECHAZADO`.
+* **`prestamos`**: crédito, moneda (`ARS` o `USD`), cuotas, total_a_cobrar, ganancia, estado (`activo`, `cancelado`, `en_mora`).
+* **`cuotas`**: registro individual por préstamo, con fecha de vencimiento (que puede variar por frecuencia) y estado de cobro individual. //variable
+* **`movimientos_efectivo`**: tipo (compra/venta), moneda, monto, cotización aplicada, ganancia.
+
+## 4. Lógica de Módulos y Flujos de IA
+
+### A. Chequera Virtual (Gestión Fina de Estados)
+* **Ingreso (Compra):** El operador envía foto del cheque + texto/audio indicando el porcentaje de compra. Claude extrae OCR y porcentaje. El backend guarda el cheque exclusivamente en estado `EN_CARTERA` (stock).
+* **Egreso Manual (3 Opciones):** Para sacar un cheque de la cartera, el operador envía foto del cheque físico y dicta la acción.
+    1.  **Venta:** Ej: "Lo vendí al 3%". FastAPI busca el cheque, calcula la ganancia (spread) y cambia el estado a `VENDIDO`.
+    2.  **Fiado/Préstamo:** Ej: "Se lo fié a Juan Pérez". FastAPI cambia el estado a `FIADO` y genera la deuda en el módulo correspondiente.
+    3.  **Rechazo:** Ej: "Rebotó este cheque". FastAPI cambia el estado a `RECHAZADO` para seguimiento.
+* *Nota:* Los estados `COBRADO` (por fecha en ventanilla) y `RECHAZADO` siempre son manuales por orden del operador.
+
+### B. Préstamos y Deudores
+* **Monedas Soportadas:** Pesos Argentinos (ARS) y Dólares Estadounidenses (USD).
+* **Frecuencias Multi-tiempo:** El bot debe interpretar la periodicidad dictada por el usuario (Diaria, Semanal, Quincenal, Mensual, Anual).
+* **Alta:** Audio/Texto (Ej: "Presté $1000 a Juan en 4 cuotas semanales de 300"). Claude extrae el JSON. FastAPI crea el registro maestro en `prestamos` y calcula las fechas exactas de las 4 `cuotas` según la frecuencia indicada.
+
+### C. Movimientos de Efectivo (Divisas)
+* **Cotización Dictada:** La IA **NO** debe buscar cotizaciones externas. El operador es el único que define a qué valor se cerró la operación de compra/venta de moneda al enviar el mensaje.
+* **Widget Decorativo:** El frontend consultará a `DolarAPI` para mostrar el Dólar Blue actual en la barra de navegación, pero esto es puramente informativo para el usuario final y no afecta la lógica de cálculo del backend.
+
+### D. Reportes y Arqueo (Módulo Crítico)
+* **Caja Diaria/Semanal/Mensual:** El panel web debe contar con un módulo de reportes robusto que consolide las ganancias generadas en todos los submódulos (spread de cheques + intereses de préstamos + compra/venta de divisas). Debe permitir agrupar y filtrar por día, semana y mes para realizar el arqueo.
+
+## 5. Interfaz de Usuario (React Dashboard)
+* **Widget Informativo:** Cotización del Dólar Blue visible en el navbar (consumiendo DolarAPI).
+* **Arqueo de Cartera:** La vista principal opera como un inventario vivo. Muestra **únicamente** los cheques en estado `EN_CARTERA`. Al cambiar a cualquier estado de egreso, desaparecen de esta vista.
+* **Semáforo de Cuotas:** Grilla con código de colores para identificar cuotas al día, próximas a vencer y en mora.
+* **Centro de Reportes:** Dashboard de consolidados (Caja diaria/histórica).
+
+## 6. Orquestación y Memoria de Claude
+* El bot es conversacional. FastAPI envía a Claude el mensaje actual junto con el historial corto de la sesión.
+* **Regla de Limpieza:** Una vez que FastAPI impacta exitosamente una transacción comercial en PostgreSQL (por ejemplo, confirma la carga de un cheque), el historial temporal de esa sesión en FastAPI **se limpia y reinicia**. Esto es imperativo para evitar que Claude arrastre contexto innecesario y mezcle datos entre operaciones consecutivas.
