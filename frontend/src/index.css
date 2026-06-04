@@ -6,6 +6,14 @@
   box-sizing: border-box;
 }
 
+/* Evita el degradé blanco del overscroll rubber-band de iOS Safari */
+body {
+  background-color: #f8fafc; /* slate-50 — light mode */
+}
+html.dark body {
+  background-color: #0f172a; /* slate-900 — dark mode */
+}
+
 /* Safe area utilities para iPhone (notch + home indicator) */
 @layer utilities {
   .pt-safe {
