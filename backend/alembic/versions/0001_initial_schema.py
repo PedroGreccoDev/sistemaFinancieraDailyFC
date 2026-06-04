@@ -24,14 +24,7 @@ depends_on: Union[str, Sequence[str], None] = None
 # ---------------------------------------------------------------------------
 
 def _create_enum(name: str, *values: str) -> None:
-    values_sql = ", ".join(f"'{v}'" for v in values)
-    op.execute(sa.text(
-        f"DO $$ BEGIN "
-        f"IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{name}') THEN "
-        f"CREATE TYPE {name} AS ENUM ({values_sql}); "
-        f"END IF; "
-        f"END $$;"
-    ))
+    postgresql.ENUM(*values, name=name).create(op.get_bind(), checkfirst=True)
 
 
 def _drop_enum(name: str) -> None:
@@ -130,7 +123,7 @@ def upgrade() -> None:
         ),
         sa.Column(
             "estado",
-            sa.Enum(
+            postgresql.ENUM(
                 "EN_CARTERA", "VENDIDO", "FIADO", "COBRADO", "RECHAZADO",
                 name="cheque_estado",
                 create_type=False,
@@ -206,13 +199,13 @@ def upgrade() -> None:
         sa.Column("credito", sa.Numeric(18, 2), nullable=False),
         sa.Column(
             "moneda",
-            sa.Enum("ARS", "USD", name="moneda", create_type=False),
+            postgresql.ENUM("ARS", "USD", name="moneda", create_type=False),
             nullable=False,
         ),
         sa.Column("cuotas", sa.Integer, nullable=False),
         sa.Column(
             "frecuencia",
-            sa.Enum(
+            postgresql.ENUM(
                 "diaria", "semanal", "quincenal", "mensual", "anual",
                 name="frecuencia_cuotas",
                 create_type=False,
@@ -223,7 +216,7 @@ def upgrade() -> None:
         sa.Column("ganancia", sa.Numeric(18, 2), nullable=False),
         sa.Column(
             "estado",
-            sa.Enum(
+            postgresql.ENUM(
                 "activo", "cancelado", "en_mora",
                 name="prestamo_estado",
                 create_type=False,
@@ -272,7 +265,7 @@ def upgrade() -> None:
         sa.Column("monto", sa.Numeric(18, 2), nullable=False),
         sa.Column(
             "estado",
-            sa.Enum(
+            postgresql.ENUM(
                 "pendiente", "cobrada", "en_mora",
                 name="cuota_estado",
                 create_type=False,
@@ -318,12 +311,12 @@ def upgrade() -> None:
         ),
         sa.Column(
             "tipo",
-            sa.Enum("compra", "venta", name="movimiento_efectivo_tipo", create_type=False),
+            postgresql.ENUM("compra", "venta", name="movimiento_efectivo_tipo", create_type=False),
             nullable=False,
         ),
         sa.Column(
             "moneda",
-            sa.Enum("ARS", "USD", name="moneda", create_type=False),
+            postgresql.ENUM("ARS", "USD", name="moneda", create_type=False),
             nullable=False,
         ),
         sa.Column("monto", sa.Numeric(18, 2), nullable=False),
