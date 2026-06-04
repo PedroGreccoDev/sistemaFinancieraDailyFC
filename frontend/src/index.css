@@ -5,3 +5,16 @@
 * {
   box-sizing: border-box;
 }
+
+/* Safe area utilities para iPhone (notch + home indicator) */
+@layer utilities {
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .min-h-dvh {
+    min-height: 100dvh;
+  }
+}

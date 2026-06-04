@@ -11,14 +11,10 @@ function SunIcon() {
   return (
     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="5" />
-      <line x1="12" y1="1" x2="12" y2="3" />
-      <line x1="12" y1="21" x2="12" y2="23" />
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-      <line x1="1" y1="12" x2="3" y2="12" />
-      <line x1="21" y1="12" x2="23" y2="12" />
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+      <line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
     </svg>
   )
 }
@@ -31,6 +27,13 @@ function MoonIcon() {
   )
 }
 
+const NAV_LINKS = [
+  { to: '/',          label: 'Inicio',   end: true  },
+  { to: '/cartera',   label: 'Cartera',  end: false },
+  { to: '/deudores',  label: 'Deudores', end: false },
+  { to: '/reportes',  label: 'Reportes', end: false },
+]
+
 export default function Navbar({ dark, onToggle }: NavbarProps) {
   const { data: dolar } = useQuery({
     queryKey: ['dolar-blue'],
@@ -39,32 +42,33 @@ export default function Navbar({ dark, onToggle }: NavbarProps) {
     staleTime: 3 * 60 * 1000,
   })
 
+  const horaActualizacion = dolar?.fechaActualizacion
+    ? new Date(dolar.fechaActualizacion).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+    : null
+
   return (
-    <nav className="bg-slate-900 text-white shadow-md">
+    <nav className="bg-slate-900 text-white shadow-md pt-safe">
       {/* Fila 1: logo + links + toggle */}
       <div className="flex items-center px-4 h-12 gap-3">
         <span className="font-bold text-base tracking-tight shrink-0">Daily FC</span>
 
-        <div className="flex gap-1 flex-1">
-          {(['/', '/deudores', '/reportes'] as const).map((to, i) => {
-            const labels = ['Cartera', 'Deudores', 'Reportes']
-            return (
-              <NavLink
-                key={to}
-                to={to}
-                end={to === '/'}
-                className={({ isActive }) =>
-                  `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-slate-700 text-white'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                  }`
-                }
-              >
-                {labels[i]}
-              </NavLink>
-            )
-          })}
+        <div className="flex gap-0.5 flex-1 overflow-x-auto scrollbar-none">
+          {NAV_LINKS.map(({ to, label, end }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              className={({ isActive }) =>
+                `px-2.5 py-1.5 rounded text-sm font-medium transition-colors whitespace-nowrap ${
+                  isActive
+                    ? 'bg-slate-700 text-white'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                }`
+              }
+            >
+              {label}
+            </NavLink>
+          ))}
         </div>
 
         <button
@@ -77,13 +81,10 @@ export default function Navbar({ dark, onToggle }: NavbarProps) {
       </div>
 
       {/* Fila 2: barra del dólar blue */}
-      <div className="border-t border-slate-800 bg-slate-800/60 px-4 py-2.5">
+      <div className="border-t border-slate-800 bg-slate-800/60 px-4 py-2">
         {dolar ? (
-          <div className="flex items-center justify-center gap-6 sm:gap-10">
-            <span className="text-slate-500 text-xs uppercase tracking-widest hidden sm:block">
-              Dólar Blue
-            </span>
-            <div className="flex items-center gap-6 sm:gap-10">
+          <div className="flex flex-col items-center gap-1">
+            <div className="flex items-center gap-5 sm:gap-10">
               <div className="text-center">
                 <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Compra</p>
                 <p className="text-green-400 font-mono font-bold text-xl sm:text-2xl leading-none">
@@ -97,6 +98,7 @@ export default function Navbar({ dark, onToggle }: NavbarProps) {
                   ${dolar.venta.toLocaleString('es-AR')}
                 </p>
               </div>
+              <div className="hidden sm:block w-px h-8 bg-slate-700" />
               <div className="hidden sm:block text-center">
                 <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Spread</p>
                 <p className="text-slate-300 font-mono font-semibold text-xl leading-none">
@@ -104,6 +106,10 @@ export default function Navbar({ dark, onToggle }: NavbarProps) {
                 </p>
               </div>
             </div>
+            <p className="text-slate-600 text-[10px]">
+              Dólar Blue · Fuente: El Cronista
+              {horaActualizacion && <span> · Actualizado {horaActualizacion}</span>}
+            </p>
           </div>
         ) : (
           <p className="text-center text-slate-600 text-xs py-1">Cargando cotización…</p>
