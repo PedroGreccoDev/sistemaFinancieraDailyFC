@@ -24,11 +24,14 @@ depends_on: Union[str, Sequence[str], None] = None
 # ---------------------------------------------------------------------------
 
 def _create_enum(name: str, *values: str) -> None:
-    op.execute(
-        sa.text(
-            f"CREATE TYPE IF NOT EXISTS {name} AS ENUM ({', '.join(repr(v) for v in values)})"
-        )
-    )
+    values_sql = ", ".join(f"'{v}'" for v in values)
+    op.execute(sa.text(
+        f"DO $$ BEGIN "
+        f"IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{name}') THEN "
+        f"CREATE TYPE {name} AS ENUM ({values_sql}); "
+        f"END IF; "
+        f"END $$;"
+    ))
 
 
 def _drop_enum(name: str) -> None:
