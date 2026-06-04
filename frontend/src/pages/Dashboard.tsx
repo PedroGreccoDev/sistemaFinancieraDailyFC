@@ -43,7 +43,7 @@ function KpiCard({
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 sm:p-5">
       <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-1">{label}</p>
-      <p className={`text-2xl sm:text-3xl font-bold leading-none ${valueClass}`}>{value}</p>
+      <p className={`text-xl sm:text-2xl lg:text-3xl font-bold leading-none ${valueClass}`}>{value}</p>
       {sub && <p className="text-xs text-slate-400 mt-1.5">{sub}</p>}
     </div>
   )

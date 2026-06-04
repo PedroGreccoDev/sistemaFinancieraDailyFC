@@ -17,4 +17,10 @@
   .min-h-dvh {
     min-height: 100dvh;
   }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
 }

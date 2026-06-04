@@ -111,10 +111,11 @@ export default function Deudores() {
                   <span className="font-medium text-slate-800 dark:text-slate-200">{fmtMonto(p.total_a_cobrar, p.moneda)}</span>
                 </div>
                 {proxima && (
-                  <div className="flex justify-between">
-                    <span>Próxima cuota</span>
-                    <span className="font-medium text-slate-800 dark:text-slate-200">
-                      {fmtDate(proxima.fecha_vencimiento)} · {fmtMonto(proxima.monto, p.moneda)}
+                  <div className="flex justify-between gap-2">
+                    <span className="shrink-0">Próxima cuota</span>
+                    <span className="font-medium text-slate-800 dark:text-slate-200 text-right min-w-0">
+                      <span className="block">{fmtDate(proxima.fecha_vencimiento)}</span>
+                      <span className="block">{fmtMonto(proxima.monto, p.moneda)}</span>
                     </span>
                   </div>
                 )}

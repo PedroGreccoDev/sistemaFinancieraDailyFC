@@ -124,7 +124,7 @@ export default function Reportes() {
             />
             <div className="bg-indigo-600 text-white rounded-lg p-5">
               <p className="text-xs text-indigo-200 uppercase tracking-wide font-medium">Ganancia total</p>
-              <p className="text-3xl font-bold mt-1">{fmtARS(data.total)}</p>
+              <p className="text-2xl sm:text-3xl font-bold mt-1">{fmtARS(data.total)}</p>
               <p className="text-xs text-indigo-300 mt-1">Todos los módulos</p>
             </div>
           </div>
