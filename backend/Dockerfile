@@ -25,7 +25,7 @@ COPY --from=frontend-build /frontend/dist ./static
 
 EXPOSE 8000
 
-COPY entrypoint.sh .
+COPY backend/entrypoint.sh .
 RUN chmod +x entrypoint.sh
 
 CMD ["./entrypoint.sh"]
