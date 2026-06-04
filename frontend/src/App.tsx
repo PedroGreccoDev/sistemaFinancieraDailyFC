@@ -18,7 +18,7 @@ const queryClient = new QueryClient({
 
 function SunIcon() {
   return (
-    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="5" />
       <line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
       <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
@@ -30,7 +30,7 @@ function SunIcon() {
 
 function MoonIcon() {
   return (
-    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
     </svg>
   )
@@ -57,8 +57,8 @@ export default function App() {
         <button
           onClick={toggleDark}
           aria-label={dark ? 'Activar modo claro' : 'Activar modo oscuro'}
-          className="fixed left-4 z-50 w-11 h-11 flex items-center justify-center rounded-full bg-slate-800 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors"
-          style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+          className="fixed left-3 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-slate-800/40 dark:bg-slate-600/40 text-slate-400 dark:text-slate-500 hover:bg-slate-800/70 dark:hover:bg-slate-600/70 hover:text-white transition-all"
+          style={{ bottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
         >
           {dark ? <SunIcon /> : <MoonIcon />}
         </button>
