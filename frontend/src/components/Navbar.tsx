@@ -56,14 +56,14 @@ export default function Navbar() {
             <div className="flex items-center gap-5 sm:gap-10">
               <div className="text-center">
                 <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Compra</p>
-                <p className="text-green-400 font-mono font-bold text-xl sm:text-2xl leading-none">
+                <p className="text-red-400 font-mono font-bold text-xl sm:text-2xl leading-none">
                   ${dolar.compra.toLocaleString('es-AR')}
                 </p>
               </div>
               <div className="w-px h-8 bg-slate-700" />
               <div className="text-center">
                 <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Venta</p>
-                <p className="text-red-400 font-mono font-bold text-xl sm:text-2xl leading-none">
+                <p className="text-green-400 font-mono font-bold text-xl sm:text-2xl leading-none">
                   ${dolar.venta.toLocaleString('es-AR')}
                 </p>
               </div>
