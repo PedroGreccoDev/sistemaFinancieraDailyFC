@@ -24,10 +24,9 @@ depends_on: Union[str, Sequence[str], None] = None
 # ---------------------------------------------------------------------------
 
 def _create_enum(name: str, *values: str) -> None:
-    """Crea un tipo ENUM de PostgreSQL solo si no existe."""
     op.execute(
         sa.text(
-            f"CREATE TYPE {name} AS ENUM ({', '.join(repr(v) for v in values)})"
+            f"CREATE TYPE IF NOT EXISTS {name} AS ENUM ({', '.join(repr(v) for v in values)})"
         )
     )
 
