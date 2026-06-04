@@ -44,7 +44,7 @@ export default function Reportes() {
   })
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Reportes</h1>
         <p className="text-sm text-slate-500 mt-0.5">Arqueo de caja y ganancias consolidadas</p>
@@ -69,7 +69,7 @@ export default function Reportes() {
         </div>
 
         {preset === 'custom' && (
-          <div className="flex gap-4 items-center">
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-center">
             <div>
               <label className="block text-xs text-slate-500 mb-1">Desde</label>
               <input
@@ -107,7 +107,7 @@ export default function Reportes() {
       )}
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-4">
             <MetricCard
               label="Cheques (spread)"
               value={fmtARS(data.ganancia_cheques)}
@@ -132,7 +132,8 @@ export default function Reportes() {
 
           {/* Tabla desglose */}
           <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[320px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
                   <th className="text-left px-4 py-3 font-medium text-slate-600">Módulo</th>
@@ -164,6 +165,7 @@ export default function Reportes() {
                 </tr>
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}

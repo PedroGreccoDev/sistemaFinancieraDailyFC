@@ -59,16 +59,18 @@ export default function Deudores() {
   const cancelados = (prestamos ?? []).filter((p) => p.estado !== 'activo')
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Deudores</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Semáforo de cuotas activas</p>
-        </div>
-        <div className="flex gap-3 text-xs text-slate-600">
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-red-400 inline-block" />En mora</span>
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-yellow-400 inline-block" />Vence en 7 días</span>
-          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-green-400 inline-block" />Al día</span>
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+      <div className="mb-6">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Deudores</h1>
+            <p className="text-sm text-slate-500 mt-0.5">Semáforo de cuotas activas</p>
+          </div>
+          <div className="flex flex-wrap gap-3 text-xs text-slate-600">
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-red-400 inline-block" />En mora</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-yellow-400 inline-block" />Vence en 7 días</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-green-400 inline-block" />Al día</span>
+          </div>
         </div>
       </div>
 
