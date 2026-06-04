@@ -6,14 +6,14 @@ import type { Cheque } from '../types'
 function diasBadge(dias: number | null) {
   if (dias === null) return <span className="text-slate-400 text-xs">Sin fecha</span>
   if (dias < 0)
-    return <span className="inline-flex items-center text-xs font-medium bg-red-100 text-red-700 rounded-full px-2 py-0.5">Vencido {Math.abs(dias)}d</span>
+    return <span className="inline-flex items-center text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 rounded-full px-2 py-0.5">Vencido {Math.abs(dias)}d</span>
   if (dias === 0)
-    return <span className="inline-flex items-center text-xs font-medium bg-orange-100 text-orange-700 rounded-full px-2 py-0.5">Hoy</span>
+    return <span className="inline-flex items-center text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 rounded-full px-2 py-0.5">Hoy</span>
   if (dias <= 7)
-    return <span className="inline-flex items-center text-xs font-medium bg-orange-100 text-orange-700 rounded-full px-2 py-0.5">{dias}d</span>
+    return <span className="inline-flex items-center text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 rounded-full px-2 py-0.5">{dias}d</span>
   if (dias <= 30)
-    return <span className="inline-flex items-center text-xs font-medium bg-yellow-100 text-yellow-700 rounded-full px-2 py-0.5">{dias}d</span>
-  return <span className="inline-flex items-center text-xs font-medium bg-green-100 text-green-700 rounded-full px-2 py-0.5">{dias}d</span>
+    return <span className="inline-flex items-center text-xs font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400 rounded-full px-2 py-0.5">{dias}d</span>
+  return <span className="inline-flex items-center text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 rounded-full px-2 py-0.5">{dias}d</span>
 }
 
 function totalCartera(cheques: Cheque[]): number {
@@ -40,12 +40,12 @@ export default function Cartera() {
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Cartera</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Cartera</h1>
           <p className="text-sm text-slate-500 mt-0.5">Cheques en stock</p>
         </div>
         <button
           onClick={() => refetch()}
-          className="text-sm text-slate-600 hover:text-slate-900 border border-slate-200 rounded px-3 py-1.5 hover:bg-slate-50 transition-colors"
+          className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 border border-slate-200 dark:border-slate-700 rounded px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
         >
           Actualizar
         </button>
@@ -53,25 +53,23 @@ export default function Cartera() {
 
       {cheques && (
         <div className="grid grid-cols-2 gap-3 mb-5">
-          <div className="bg-white border border-slate-200 rounded-lg p-3 sm:p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
             <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">En cartera</p>
-            <p className="text-2xl sm:text-3xl font-bold text-slate-900 mt-1">{cheques.length}</p>
+            <p className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mt-1">{cheques.length}</p>
           </div>
-          <div className="bg-white border border-slate-200 rounded-lg p-3 sm:p-4">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
             <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Total</p>
-            <p className="text-lg sm:text-3xl font-bold text-slate-900 mt-1">{fmtARS(totalCartera(cheques))}</p>
+            <p className="text-lg sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mt-1">{fmtARS(totalCartera(cheques))}</p>
           </div>
         </div>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
         {isLoading && (
           <div className="p-12 text-center text-slate-400">Cargando cartera…</div>
         )}
         {error && (
-          <div className="p-12 text-center text-red-500">
-            Error al cargar la cartera.
-          </div>
+          <div className="p-12 text-center text-red-500">Error al cargar la cartera.</div>
         )}
         {cheques && cheques.length === 0 && (
           <div className="p-12 text-center text-slate-400">
@@ -83,26 +81,26 @@ export default function Cartera() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[540px]">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  <th className="text-left px-4 py-3 font-medium text-slate-600">Nº Cheque</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600">Monto</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600 hidden sm:table-cell">Compra %</th>
-                  <th className="text-center px-4 py-3 font-medium text-slate-600">Fecha pago</th>
-                  <th className="text-center px-4 py-3 font-medium text-slate-600">Vence</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600 hidden sm:table-cell">Ingresado</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50">
+                  <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Nº Cheque</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Monto</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400 hidden sm:table-cell">Compra %</th>
+                  <th className="text-center px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Fecha pago</th>
+                  <th className="text-center px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Vence</th>
+                  <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400 hidden sm:table-cell">Ingresado</th>
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((cheque) => {
                   const dias = cheque.fecha_pago ? daysUntil(cheque.fecha_pago) : null
                   return (
-                    <tr key={cheque.nro_cheque} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-mono font-medium text-slate-800 text-xs sm:text-sm">{cheque.nro_cheque}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">{fmtARS(cheque.monto)}</td>
-                      <td className="px-4 py-3 text-right text-slate-600 hidden sm:table-cell">{parseFloat(cheque.porcentaje_compra).toFixed(2)}%</td>
-                      <td className="px-4 py-3 text-center text-slate-600">{fmtDate(cheque.fecha_pago)}</td>
+                    <tr key={cheque.nro_cheque} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
+                      <td className="px-4 py-3 font-mono font-medium text-slate-800 dark:text-slate-200 text-xs sm:text-sm">{cheque.nro_cheque}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900 dark:text-slate-100">{fmtARS(cheque.monto)}</td>
+                      <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-400 hidden sm:table-cell">{parseFloat(cheque.porcentaje_compra).toFixed(2)}%</td>
+                      <td className="px-4 py-3 text-center text-slate-600 dark:text-slate-400">{fmtDate(cheque.fecha_pago)}</td>
                       <td className="px-4 py-3 text-center">{diasBadge(dias)}</td>
-                      <td className="px-4 py-3 text-slate-400 text-xs hidden sm:table-cell">{fmtDate(cheque.created_at.slice(0, 10))}</td>
+                      <td className="px-4 py-3 text-slate-400 dark:text-slate-500 text-xs hidden sm:table-cell">{fmtDate(cheque.created_at.slice(0, 10))}</td>
                     </tr>
                   )
                 })}

@@ -4,6 +4,7 @@ import Navbar from './components/Navbar'
 import Cartera from './pages/Cartera'
 import Deudores from './pages/Deudores'
 import Reportes from './pages/Reportes'
+import { useDarkMode } from './hooks/useDarkMode'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -15,11 +16,13 @@ const queryClient = new QueryClient({
 })
 
 export default function App() {
+  const [dark, toggleDark] = useDarkMode()
+
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <div className="min-h-screen bg-slate-50 flex flex-col">
-          <Navbar />
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col transition-colors duration-200">
+          <Navbar dark={dark} onToggle={toggleDark} />
           <main className="flex-1">
             <Routes>
               <Route path="/" element={<Cartera />} />
