@@ -8,7 +8,7 @@ type Semaforo = 'mora' | 'proximo' | 'ok' | 'cancelado'
 
 function getSemaforo(prestamo: Prestamo): Semaforo {
   if (prestamo.estado !== 'activo') return 'cancelado'
-  const pendientes = prestamo.cuotas_detalle.filter((c) => c.estado === 'PENDIENTE')
+  const pendientes = prestamo.cuotas_detalle.filter((c) => c.estado === 'pendiente')
   if (pendientes.length === 0) return 'cancelado'
   const enMora = pendientes.some((c) => daysUntil(c.fecha_vencimiento) < 0)
   if (enMora) return 'mora'
@@ -20,7 +20,7 @@ function getSemaforo(prestamo: Prestamo): Semaforo {
 function proximaCuota(prestamo: Prestamo): Cuota | null {
   return (
     prestamo.cuotas_detalle
-      .filter((c) => c.estado === 'PENDIENTE')
+      .filter((c) => c.estado === 'pendiente')
       .sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))[0] ?? null
   )
 }
@@ -89,7 +89,7 @@ export default function Deudores() {
           const sem = getSemaforo(p)
           const style = semaforoStyle[sem]
           const proxima = proximaCuota(p)
-          const cobradas = p.cuotas_detalle.filter((c) => c.estado === 'COBRADA').length
+          const cobradas = p.cuotas_detalle.filter((c) => c.estado === 'cobrada').length
           const nombre = clienteMap.get(p.cliente_id) ?? '…'
 
           return (

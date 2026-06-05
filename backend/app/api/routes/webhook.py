@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
-from app.db.session import get_db
+from app.db.session import SessionLocal
 from app.services.ia import claude as ia_claude
 from app.services.ia import whisper as ia_whisper
 from app.services.whatsapp import client as wa_client
@@ -18,6 +18,20 @@ from app.services.whatsapp import session as wa_session
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
+
+# Palabras que el operador usa para confirmar o cancelar una operación pendiente
+_CONFIRM_WORDS = frozenset({"sí", "si", "ok", "dale", "confirmar", "confirmo", "yes", "va", "s", "👍"})
+_REJECT_WORDS  = frozenset({"no", "cancelar", "cancelá", "cancel", "nop", "nope", "n"})
+
+
+def _clasificar_respuesta(text: str) -> str | None:
+    """Devuelve 'confirm', 'reject' o None si no se puede clasificar."""
+    normalized = text.strip().lower().rstrip(".!¡¿?")
+    if normalized in _CONFIRM_WORDS:
+        return "confirm"
+    if normalized in _REJECT_WORDS:
+        return "reject"
+    return None
 
 
 @router.post("/whatsapp")
@@ -62,13 +76,12 @@ async def _procesar_mensaje(
     msg: wa_parser.IncomingMessage,
     settings: Any,
 ) -> None:
-    """Pipeline completo: media → transcripción → IA → dispatch → respuesta WA."""
+    """Pipeline completo: media → transcripción → confirmación/IA → dispatch → respuesta WA."""
 
     phone = msg.phone
 
     # ── 3a. Obtener media si hace falta ──────────────────────────────────────
     if msg.message_type in ("audio", "image") and msg.media_bytes is None:
-        # WEBHOOK_BASE64 no está activo: descargamos vía API
         try:
             msg.media_bytes, msg.media_mime_type = await wa_client.get_media_bytes(
                 msg.message_key
@@ -94,37 +107,65 @@ async def _procesar_mensaje(
     if not text_content and msg.message_type != "image":
         return  # Mensaje vacío sin imagen — ignorar
 
-    # ── 3c. Historial de sesión ──────────────────────────────────────────────
+    # ── 3c. Flujo de confirmación ─────────────────────────────────────────────
+    # Si había un intent esperando confirmación, resolver antes de llamar a Claude
+    pending = wa_session.get_pending_intent(phone)
+    if pending is not None and msg.message_type == "text":
+        clasificacion = _clasificar_respuesta(text_content)
+        if clasificacion == "confirm":
+            logger.info("Operación confirmada por %s (intent=%s)", phone, pending.intent)
+            wa_session.clear_pending_intent(phone)
+            wa_session.add_user_message(phone, text_content)
+            await _ejecutar_y_responder(phone=phone, intent_result=pending)
+            return
+        if clasificacion == "reject":
+            logger.info("Operación cancelada por %s", phone)
+            wa_session.clear_pending_intent(phone)
+            wa_session.clear_session(phone)
+            await wa_client.send_text(phone, "✅ Operación cancelada.")
+            return
+        # Respuesta ambigua: descarta el pending y procesa como mensaje nuevo
+        logger.info("Respuesta ambigua de %s — descartando pending intent", phone)
+        wa_session.clear_pending_intent(phone)
+
+    # ── 3d. Historial de sesión ──────────────────────────────────────────────
     history = wa_session.get_history(phone)
     wa_session.add_user_message(phone, text_content or "(imagen de cheque)")
 
-    # ── 3d. Llamar a Claude ──────────────────────────────────────────────────
+    # ── 3e. Llamar a Claude ──────────────────────────────────────────────────
     image_bytes = msg.media_bytes if msg.message_type == "image" else None
     intent_result = await ia_claude.extraer_intencion(
         text=text_content,
         image_bytes=image_bytes,
         history=history,
+        media_mime_type=msg.media_mime_type if msg.message_type == "image" else "image/jpeg",
     )
     logger.info("Intent extraído: %s (phone=%s)", intent_result.intent, phone)
 
-    # ── 3e. Agregar respuesta de Claude al historial ─────────────────────────
+    # ── 3f. Agregar respuesta de Claude al historial ─────────────────────────
     wa_session.add_assistant_message(phone, intent_result.respuesta_usuario)
 
-    # ── 3f. Dispatch: ejecutar en BD ─────────────────────────────────────────
-    # Si requiere confirmación del operador, solo enviamos la pregunta
+    # ── 3g. Dispatch ─────────────────────────────────────────────────────────
     if intent_result.confirmacion_requerida:
+        wa_session.set_pending_intent(phone, intent_result)
         await wa_client.send_text(phone, intent_result.respuesta_usuario)
         return
 
-    db = next(get_db())
+    await _ejecutar_y_responder(phone=phone, intent_result=intent_result)
+
+
+async def _ejecutar_y_responder(
+    phone: str,
+    intent_result: ia_claude.IntentResult,
+) -> None:
+    """Ejecuta el dispatch en BD y envía la respuesta al operador."""
+    db = SessionLocal()
     try:
         limpiar_sesion, respuesta = wa_dispatcher.dispatch(db, phone, intent_result)
     finally:
         db.close()
 
-    # ── 3g. Limpiar sesión post-transacción ──────────────────────────────────
     if limpiar_sesion:
         wa_session.clear_session(phone)
 
-    # ── 3h. Enviar respuesta al operador ─────────────────────────────────────
     await wa_client.send_text(phone, respuesta)

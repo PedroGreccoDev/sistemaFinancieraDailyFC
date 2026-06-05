@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Cartera from './pages/Cartera'
 import Deudores from './pages/Deudores'
 import Reportes from './pages/Reportes'
+import Movimientos from './pages/Movimientos'
 import { useDarkMode } from './hooks/useDarkMode'
 
 const queryClient = new QueryClient({
@@ -49,7 +50,8 @@ export default function App() {
               <Route path="/"          element={<Dashboard />} />
               <Route path="/cartera"   element={<Cartera />} />
               <Route path="/deudores"  element={<Deudores />} />
-              <Route path="/reportes"  element={<Reportes />} />
+              <Route path="/reportes"    element={<Reportes />} />
+              <Route path="/movimientos" element={<Movimientos />} />
             </Routes>
           </main>
         </div>

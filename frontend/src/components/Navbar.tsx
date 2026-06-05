@@ -7,7 +7,8 @@ const NAV_LINKS = [
   { to: '/',          label: 'Inicio',   end: true  },
   { to: '/cartera',   label: 'Cartera',  end: false },
   { to: '/deudores',  label: 'Deudores', end: false },
-  { to: '/reportes',  label: 'Reportes', end: false },
+  { to: '/reportes',    label: 'Reportes',    end: false },
+  { to: '/movimientos', label: 'Movimientos', end: false },
 ]
 
 export default function Navbar() {

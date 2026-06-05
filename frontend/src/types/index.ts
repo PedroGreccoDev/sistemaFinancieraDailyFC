@@ -1,5 +1,5 @@
 export type ChequeEstado = 'EN_CARTERA' | 'VENDIDO' | 'FIADO' | 'COBRADO' | 'RECHAZADO'
-export type CuotaEstado = 'PENDIENTE' | 'COBRADA'
+export type CuotaEstado = 'pendiente' | 'cobrada' | 'en_mora'
 export type PrestamoEstado = 'activo' | 'cancelado' | 'en_mora'
 export type Moneda = 'ARS' | 'USD'
 export type Frecuencia = 'diaria' | 'semanal' | 'quincenal' | 'mensual' | 'anual'
@@ -67,6 +67,22 @@ export interface ReporteGanancias {
   ganancia_prestamos: string
   ganancia_movimientos_efectivo: string
   total: string
+}
+
+export type MovimientoTipo = 'compra' | 'venta'
+
+export interface MovimientoEfectivo {
+  id: string
+  cliente_id: string | null
+  tipo: MovimientoTipo
+  moneda: Moneda
+  monto: string
+  cotizacion_aplicada: string
+  ganancia: string
+  fecha_operacion: string
+  observaciones: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface DolarBlue {

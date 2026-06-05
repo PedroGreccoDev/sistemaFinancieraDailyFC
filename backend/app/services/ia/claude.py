@@ -158,6 +158,9 @@ FORMATO DE RESPUESTA — SIEMPRE ESTE EXACTO
 """.strip()
 
 
+# MIME types que acepta la API de Claude para imágenes
+_VALID_IMAGE_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+
 # ---------------------------------------------------------------------------
 # Resultado de la extracción
 # ---------------------------------------------------------------------------
@@ -183,6 +186,7 @@ async def extraer_intencion(
     text: str,
     image_bytes: bytes | None,
     history: list[dict[str, Any]],
+    media_mime_type: str = "image/jpeg",
 ) -> IntentResult:
     """Llama a Claude con el mensaje actual + historial y devuelve la intención extraída.
 
@@ -200,12 +204,15 @@ async def extraer_intencion(
     # Construir el contenido del mensaje actual
     if image_bytes:
         b64 = base64.standard_b64encode(image_bytes).decode()
+        base_mime = media_mime_type.split(";")[0].strip()
+        if base_mime not in _VALID_IMAGE_MIME_TYPES:
+            base_mime = "image/jpeg"
         user_content: list[dict[str, Any]] = [
             {
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": "image/jpeg",
+                    "media_type": base_mime,
                     "data": b64,
                 },
             },
@@ -225,7 +232,7 @@ async def extraer_intencion(
 
     try:
         response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=1024,
             system=_SYSTEM_PROMPT,
             messages=messages,

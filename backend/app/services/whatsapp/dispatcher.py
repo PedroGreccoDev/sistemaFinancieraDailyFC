@@ -274,7 +274,7 @@ def _cobrar_cuota(db: Session, data: dict[str, Any]) -> DispatchResult:
         # Cobrar la primera (más próxima a vencer)
         cuota = pendientes[0]
 
-    cobrada = svc_prestamos.cobrar_cuota(db, cuota.id, fecha_cobro=date.today())
+    cobrada = svc_prestamos.cobrar_cuota(db, cuota.prestamo_id, cuota.id, fecha_cobro=date.today())
 
     # Si todas las cuotas están cobradas, informarlo
     restantes = len(pendientes) - 1

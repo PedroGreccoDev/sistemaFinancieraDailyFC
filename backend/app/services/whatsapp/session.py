@@ -9,11 +9,12 @@ _TTL_MINUTES = 30        # Tiempo de inactividad antes de expirar la sesión
 
 
 class _SessionData:
-    __slots__ = ("history", "last_active")
+    __slots__ = ("history", "last_active", "pending_intent")
 
     def __init__(self) -> None:
         self.history: list[dict[str, Any]] = []
         self.last_active: datetime = datetime.now(UTC)
+        self.pending_intent: Any = None  # IntentResult | None
 
     def touch(self) -> None:
         self.last_active = datetime.now(UTC)
@@ -46,6 +47,25 @@ def add_assistant_message(phone: str, text: str) -> None:
     session = _get_or_create(phone)
     session.history.append({"role": "assistant", "content": text})
     _trim(session)
+
+
+def set_pending_intent(phone: str, intent: Any) -> None:
+    """Guarda el intent que espera confirmación del operador."""
+    session = _get_or_create(phone)
+    session.pending_intent = intent
+
+
+def get_pending_intent(phone: str) -> Any:
+    """Devuelve el intent pendiente de confirmación, o None si no hay."""
+    session = _sessions.get(phone)
+    return session.pending_intent if session is not None else None
+
+
+def clear_pending_intent(phone: str) -> None:
+    """Elimina el intent pendiente (tras ejecutarlo o cancelarlo)."""
+    session = _sessions.get(phone)
+    if session is not None:
+        session.pending_intent = None
 
 
 def clear_session(phone: str) -> None:

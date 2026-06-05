@@ -5,7 +5,7 @@ import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -146,6 +146,17 @@ def cobrar_cuota(
     cuota.fecha_cobro = fecha_cobro or date.today()
 
     try:
+        db.flush()
+        pendientes_restantes = db.scalar(
+            select(func.count()).select_from(Cuota).where(
+                Cuota.prestamo_id == prestamo_id,
+                Cuota.estado == CuotaEstado.PENDIENTE,
+            )
+        )
+        if pendientes_restantes == 0:
+            prestamo = db.get(Prestamo, prestamo_id)
+            if prestamo is not None:
+                prestamo.estado = PrestamoEstado.CANCELADO
         db.commit()
         db.refresh(cuota)
         return cuota
