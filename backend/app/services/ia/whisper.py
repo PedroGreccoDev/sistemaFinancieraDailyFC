@@ -21,7 +21,7 @@ async def transcribir_audio(audio_bytes: bytes, mime_type: str = "audio/ogg") ->
 
     Args:
         audio_bytes: Bytes crudos del archivo de audio.
-        mime_type: MIME type reportado por Evolution API.
+        mime_type: MIME type reportado por WAHA.
 
     Returns:
         Texto transcripto en español.

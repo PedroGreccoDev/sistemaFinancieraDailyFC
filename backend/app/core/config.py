@@ -36,10 +36,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="")
     openai_api_key: str = Field(default="")
 
-    # Evolution API (WhatsApp)
-    evolution_api_url: str = Field(default="http://localhost:8080")
-    evolution_api_key: str = Field(default="")
-    evolution_instance: str = Field(default="financiera")
+    # WAHA (WhatsApp HTTP API — gateway no oficial, engine NOWEB)
+    waha_api_url: str = Field(default="http://localhost:3000")
+    waha_api_key: str = Field(default="")
+    waha_session: str = Field(default="default")
 
     # Número del operador autorizado (sin @s.whatsapp.net, solo dígitos)
     whatsapp_operator_phone: str = Field(default="")

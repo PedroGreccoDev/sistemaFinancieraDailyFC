@@ -36,9 +36,9 @@ def _clasificar_respuesta(text: str) -> str | None:
 
 @router.post("/whatsapp")
 async def recibir_mensaje(request: Request) -> JSONResponse:
-    """Endpoint que recibe los webhooks de Evolution API.
+    """Endpoint que recibe los webhooks de WAHA.
 
-    Siempre responde 200 rápidamente para que Evolution API no reintente.
+    Siempre responde 200 rápidamente para que WAHA no reintente.
     El procesamiento ocurre en el mismo hilo pero es tolerante a errores.
     """
     settings = get_settings()
@@ -84,7 +84,7 @@ async def _procesar_mensaje(
     if msg.message_type in ("audio", "image") and msg.media_bytes is None:
         try:
             msg.media_bytes, msg.media_mime_type = await wa_client.get_media_bytes(
-                msg.message_key
+                msg.media_url
             )
         except Exception as exc:
             logger.error("No se pudo descargar media de %s: %s", phone, exc)
