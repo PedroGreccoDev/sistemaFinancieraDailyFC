@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -27,20 +24,6 @@ _CONFIRM_WORDS = frozenset({"sí", "si", "ok", "dale", "confirmar", "confirmo", 
 _REJECT_WORDS  = frozenset({"no", "cancelar", "cancelá", "cancel", "nop", "nope", "n"})
 
 
-def _normalizar_telefono(phone: str) -> str:
-    """Normaliza un número argentino para comparar de forma robusta.
-
-    Meta (Cloud API) suele entregar el `from` de los celulares argentinos SIN
-    el 9 intermedio (54 11... en vez de 54 9 11...), mientras que el operador
-    casi siempre se configura CON el 9. Sacamos ese 9 de ambos lados para que
-    `549 11 ...` y `54 11 ...` se consideren el mismo número.
-    """
-    digits = "".join(c for c in phone if c.isdigit())
-    if digits.startswith("549"):
-        return "54" + digits[3:]
-    return digits
-
-
 def _clasificar_respuesta(text: str) -> str | None:
     """Devuelve 'confirm', 'reject' o None si no se puede clasificar."""
     normalized = text.strip().lower().rstrip(".!¡¿?")
@@ -51,57 +34,17 @@ def _clasificar_respuesta(text: str) -> str | None:
     return None
 
 
-@router.get("/whatsapp")
-async def verificar_webhook(request: Request) -> Response:
-    """Verificación inicial del webhook (Meta envía un GET con un challenge).
-
-    Meta llama a este endpoint una vez al configurar el webhook. Hay que
-    devolver el `hub.challenge` en texto plano si el `hub.verify_token`
-    coincide con el configurado.
-    """
-    settings = get_settings()
-    params = request.query_params
-
-    mode = params.get("hub.mode")
-    token = params.get("hub.verify_token")
-    challenge = params.get("hub.challenge", "")
-
-    if mode == "subscribe" and token and token == settings.whatsapp_verify_token:
-        return PlainTextResponse(content=challenge)
-
-    logger.warning("Verificación de webhook fallida (token inválido)")
-    return PlainTextResponse(content="Forbidden", status_code=403)
-
-
-def _firma_valida(raw_body: bytes, signature_header: str | None, app_secret: str) -> bool:
-    """Valida la firma HMAC-SHA256 que Meta envía en X-Hub-Signature-256."""
-    if not signature_header or not signature_header.startswith("sha256="):
-        return False
-    expected = hmac.new(app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    received = signature_header.removeprefix("sha256=")
-    return hmac.compare_digest(expected, received)
-
-
 @router.post("/whatsapp")
 async def recibir_mensaje(request: Request) -> JSONResponse:
-    """Endpoint que recibe los webhooks de la WhatsApp Cloud API.
+    """Endpoint que recibe los webhooks de Evolution API.
 
-    Siempre responde 200 rápidamente para que Meta no reintente.
+    Siempre responde 200 rápidamente para que Evolution API no reintente.
     El procesamiento ocurre en el mismo hilo pero es tolerante a errores.
     """
     settings = get_settings()
 
-    raw_body = await request.body()
-
-    # Validación de firma (solo si hay app_secret configurado).
-    if settings.whatsapp_app_secret:
-        signature = request.headers.get("X-Hub-Signature-256")
-        if not _firma_valida(raw_body, signature, settings.whatsapp_app_secret):
-            logger.warning("Webhook con firma inválida — descartado")
-            return JSONResponse(content={"ok": True})
-
     try:
-        body: dict[str, Any] = json.loads(raw_body)
+        body: dict[str, Any] = await request.json()
     except Exception:
         return JSONResponse(content={"ok": True})
 
@@ -112,7 +55,7 @@ async def recibir_mensaje(request: Request) -> JSONResponse:
 
     # ── 2. Verificar operador autorizado ─────────────────────────────────────
     operator_phone = settings.whatsapp_operator_phone.strip()
-    if operator_phone and _normalizar_telefono(msg.phone) != _normalizar_telefono(operator_phone):
+    if operator_phone and msg.phone != operator_phone:
         logger.warning("Mensaje de número no autorizado: %s", msg.phone)
         return JSONResponse(content={"ok": True})
 
@@ -138,10 +81,10 @@ async def _procesar_mensaje(
     phone = msg.phone
 
     # ── 3a. Obtener media si hace falta ──────────────────────────────────────
-    if msg.message_type in ("audio", "image") and msg.media_bytes is None and msg.media_id:
+    if msg.message_type in ("audio", "image") and msg.media_bytes is None:
         try:
             msg.media_bytes, msg.media_mime_type = await wa_client.get_media_bytes(
-                msg.media_id
+                msg.message_key
             )
         except Exception as exc:
             logger.error("No se pudo descargar media de %s: %s", phone, exc)

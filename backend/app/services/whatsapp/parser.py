@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import base64
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -11,78 +12,104 @@ logger = logging.getLogger(__name__)
 class IncomingMessage:
     """Representación normalizada de un mensaje entrante de WhatsApp."""
 
-    phone: str                          # Número en formato internacional (solo dígitos)
+    phone: str                          # Número sin @s.whatsapp.net
     message_type: str                   # "text" | "audio" | "image"
     text: str = ""                      # Texto o caption
-    media_bytes: bytes | None = None    # Se descarga aparte vía client.get_media_bytes
+    media_bytes: bytes | None = None    # Ya decodificado si venía en base64
     media_mime_type: str = ""           # MIME type del media
-    media_id: str = ""                  # ID del media en la Cloud API (para descargarlo)
+    message_key: dict[str, Any] = field(default_factory=dict)  # Para descargar media
     message_id: str = ""
 
 
 def parse_webhook(body: dict[str, Any]) -> IncomingMessage | None:
-    """Parsea el payload de la WhatsApp Cloud API y devuelve un IncomingMessage.
+    """Parsea el payload de Evolution API y devuelve un IncomingMessage normalizado.
 
-    Retorna None si el evento no es un mensaje entrante procesable
-    (por ejemplo, los webhooks de estado: enviado/entregado/leído).
-
-    Estructura del payload:
-        entry[].changes[].value.messages[]
+    Retorna None si el evento no es un mensaje entrante procesable.
     """
-    if body.get("object") != "whatsapp_business_account":
+    # Solo procesar eventos de nuevos mensajes
+    if body.get("event") != "messages.upsert":
         return None
 
-    try:
-        change = body["entry"][0]["changes"][0]
-        value: dict[str, Any] = change["value"]
-    except (KeyError, IndexError, TypeError):
+    data: dict[str, Any] = body.get("data", {})
+    key: dict[str, Any] = data.get("key", {})
+
+    # Ignorar mensajes propios (enviados por el bot)
+    if key.get("fromMe", True):
         return None
 
-    # Los webhooks de estado (statuses) no traen "messages": ignorarlos.
-    messages = value.get("messages")
-    if not messages:
+    remote_jid: str = key.get("remoteJid", "")
+
+    # Ignorar grupos (@g.us) y broadcasts
+    if "@g.us" in remote_jid or "broadcast" in remote_jid:
         return None
 
-    message: dict[str, Any] = messages[0]
-    phone: str = message.get("from", "")
+    # Extraer número limpio (solo dígitos)
+    phone = remote_jid.split("@")[0]
     if not phone.isdigit():
         return None
 
-    message_id: str = message.get("id", "")
-    msg_type: str = message.get("type", "")
+    message: dict[str, Any] = data.get("message", {})
+    message_type: str = data.get("messageType", "")
+    message_id: str = key.get("id", "")
 
     # ── Texto plano ──────────────────────────────────────────────────────────
-    if msg_type == "text":
-        text = message.get("text", {}).get("body", "")
+    if message_type in ("conversation", "extendedTextMessage"):
+        text = message.get("conversation") or message.get(
+            "extendedTextMessage", {}
+        ).get("text", "")
         return IncomingMessage(
             phone=phone,
             message_type="text",
             text=text.strip(),
+            message_key=key,
             message_id=message_id,
         )
 
     # ── Audio / nota de voz ──────────────────────────────────────────────────
-    if msg_type == "audio":
-        audio: dict[str, Any] = message.get("audio", {})
+    if message_type in ("audioMessage", "pttMessage"):
+        audio_msg: dict[str, Any] = message.get("audioMessage", message.get("pttMessage", {}))
+        mime_type: str = audio_msg.get("mimetype", "audio/ogg; codecs=opus")
+
+        media_bytes = _extract_base64(message)
         return IncomingMessage(
             phone=phone,
             message_type="audio",
-            media_id=audio.get("id", ""),
-            media_mime_type=audio.get("mime_type", "audio/ogg; codecs=opus"),
+            media_bytes=media_bytes,
+            media_mime_type=mime_type,
+            message_key=key,
             message_id=message_id,
         )
 
     # ── Imagen ───────────────────────────────────────────────────────────────
-    if msg_type == "image":
-        image: dict[str, Any] = message.get("image", {})
+    if message_type == "imageMessage":
+        img_msg: dict[str, Any] = message.get("imageMessage", {})
+        caption: str = img_msg.get("caption", "").strip()
+        mime_type = img_msg.get("mimetype", "image/jpeg")
+
+        media_bytes = _extract_base64(message)
         return IncomingMessage(
             phone=phone,
             message_type="image",
-            text=image.get("caption", "").strip(),
-            media_id=image.get("id", ""),
-            media_mime_type=image.get("mime_type", "image/jpeg"),
+            text=caption,
+            media_bytes=media_bytes,
+            media_mime_type=mime_type,
+            message_key=key,
             message_id=message_id,
         )
 
-    logger.debug("Tipo de mensaje no manejado: %s", msg_type)
+    logger.debug("Tipo de mensaje no manejado: %s", message_type)
     return None
+
+
+def _extract_base64(message: dict[str, Any]) -> bytes | None:
+    """Extrae y decodifica el campo base64 del payload si existe.
+
+    Evolution API incluye este campo cuando WEBHOOK_BASE64=true está configurado.
+    """
+    raw: str | None = message.get("base64")
+    if not raw:
+        return None
+    try:
+        return base64.b64decode(raw)
+    except Exception:
+        return None

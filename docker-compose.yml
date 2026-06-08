@@ -15,6 +15,31 @@ services:
       timeout: 5s
       retries: 5
 
+  evolution:
+    image: atendai/evolution-api:v2.2.3
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER_URL: http://${SERVER_IP}:8080
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/evolution
+      DATABASE_CONNECTION_CLIENT_NAME: evolution_exchange
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      CACHE_REDIS_ENABLED: "false"
+      DEL_INSTANCE: "false"
+    volumes:
+      - evolution_instances:/evolution/instances
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
   backend:
     build:
       context: .
@@ -26,11 +51,9 @@ services:
       CORS_ORIGINS: '["*"]'
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      # WhatsApp Cloud API (Meta oficial)
-      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN}
-      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID}
-      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN}
-      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET}
+      EVOLUTION_API_URL: http://evolution:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+      EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE}
       WHATSAPP_OPERATOR_PHONE: ${WHATSAPP_OPERATOR_PHONE}
     restart: unless-stopped
     depends_on:
@@ -39,3 +62,4 @@ services:
 
 volumes:
   postgres_data:
+  evolution_instances:
