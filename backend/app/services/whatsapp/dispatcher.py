@@ -448,8 +448,14 @@ def _req_enum(data: dict, key: str, enum_cls: type) -> Any:
     val = data.get(key)
     if val is None:
         raise ValueError(f"Falta el campo '{key}'.")
+    str_val = str(val)
+    # Try exact value match first, then uppercase (Claude may return lowercase)
     try:
-        return enum_cls(str(val))
+        return enum_cls(str_val)
+    except ValueError:
+        pass
+    try:
+        return enum_cls(str_val.upper())
     except ValueError:
         valid = [e.value for e in enum_cls]
         raise ValueError(f"Valor inválido para '{key}': {val!r}. Válidos: {valid}")

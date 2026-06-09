@@ -17,7 +17,7 @@ function fmtMontoMovimiento(mov: MovimientoEfectivo): string {
 }
 
 function TipoBadge({ tipo }: { tipo: MovimientoTipo }) {
-  return tipo === 'compra' ? (
+  return tipo === 'COMPRA' ? (
     <span className="inline-flex items-center text-xs font-semibold bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 rounded-full px-2 py-0.5 capitalize">
       Compra
     </span>
@@ -33,7 +33,7 @@ function calcularTotales(movs: MovimientoEfectivo[]) {
   for (const m of movs) {
     const monto = parseFloat(m.monto)
     const ganancia = parseFloat(m.ganancia)
-    if (m.tipo === 'compra') montoCompra += monto
+    if (m.tipo === 'COMPRA') montoCompra += monto
     else montoVenta += monto
     gananciaTotal += ganancia
   }
@@ -112,7 +112,7 @@ export default function Movimientos() {
                   {fmtUSD(montoCompra)}
                 </p>
                 <p className="text-xs text-slate-400 mt-1">
-                  {todos.filter((m) => m.tipo === 'compra').length} operaciones
+                  {todos.filter((m) => m.tipo === 'COMPRA').length} operaciones
                 </p>
               </div>
               <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
@@ -121,7 +121,7 @@ export default function Movimientos() {
                   {fmtUSD(montoVenta)}
                 </p>
                 <p className="text-xs text-slate-400 mt-1">
-                  {todos.filter((m) => m.tipo === 'venta').length} operaciones
+                  {todos.filter((m) => m.tipo === 'VENTA').length} operaciones
                 </p>
               </div>
               <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
@@ -135,7 +135,7 @@ export default function Movimientos() {
           )}
 
           <div className="flex gap-2 mb-4">
-            {(['todos', 'compra', 'venta'] as const).map((f) => (
+            {(['todos', 'COMPRA', 'VENTA'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFiltro(f)}
@@ -145,7 +145,7 @@ export default function Movimientos() {
                     : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                 }`}
               >
-                {f === 'todos' ? 'Todos' : f === 'compra' ? 'Compras' : 'Ventas'}
+                {f === 'todos' ? 'Todos' : f === 'COMPRA' ? 'Compras' : 'Ventas'}
               </button>
             ))}
           </div>

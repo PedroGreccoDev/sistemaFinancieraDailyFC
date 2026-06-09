@@ -32,28 +32,28 @@ class Moneda(str, enum.Enum):
 
 
 class PrestamoEstado(str, enum.Enum):
-    ACTIVO    = "activo"
-    CANCELADO = "cancelado"
-    EN_MORA   = "en_mora"
+    ACTIVO    = "ACTIVO"
+    CANCELADO = "CANCELADO"
+    EN_MORA   = "EN_MORA"
 
 
 class FrecuenciaCuotas(str, enum.Enum):
-    DIARIA    = "diaria"
-    SEMANAL   = "semanal"
-    QUINCENAL = "quincenal"
-    MENSUAL   = "mensual"
-    ANUAL     = "anual"
+    DIARIA    = "DIARIA"
+    SEMANAL   = "SEMANAL"
+    QUINCENAL = "QUINCENAL"
+    MENSUAL   = "MENSUAL"
+    ANUAL     = "ANUAL"
 
 
 class CuotaEstado(str, enum.Enum):
-    PENDIENTE = "pendiente"
-    COBRADA   = "cobrada"
-    EN_MORA   = "en_mora"
+    PENDIENTE = "PENDIENTE"
+    COBRADA   = "COBRADA"
+    EN_MORA   = "EN_MORA"
 
 
 class MovimientoEfectivoTipo(str, enum.Enum):
-    COMPRA = "compra"
-    VENTA  = "venta"
+    COMPRA = "COMPRA"
+    VENTA  = "VENTA"
 
 
 class PasivoEstado(str, enum.Enum):

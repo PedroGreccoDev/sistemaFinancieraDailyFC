@@ -10,10 +10,10 @@ import type { Cheque, Prestamo } from '../types'
 
 function cuotasVencidas(prestamos: Prestamo[]) {
   return prestamos
-    .filter((p) => p.estado === 'activo')
+    .filter((p) => p.estado === 'ACTIVO')
     .flatMap((p) =>
       p.cuotas_detalle
-        .filter((c) => c.estado === 'pendiente' && daysUntil(c.fecha_vencimiento) < 0)
+        .filter((c) => c.estado === 'PENDIENTE' && daysUntil(c.fecha_vencimiento) < 0)
         .map((c) => ({ ...c, prestamo_id: p.id, cliente_id: p.cliente_id, moneda: p.moneda }))
     )
     .sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))
@@ -75,7 +75,7 @@ export default function Dashboard() {
   const clienteMap = new Map(clientes?.map((c) => [c.id, c.nombre]) ?? [])
 
   const totalCartera    = (cheques  ?? []).reduce((s, c) => s + parseFloat(c.monto), 0)
-  const prestamosActivos = (prestamos ?? []).filter((p) => p.estado === 'activo')
+  const prestamosActivos = (prestamos ?? []).filter((p) => p.estado === 'ACTIVO')
   const capitalEnCalle  = prestamosActivos.reduce((s, p) => s + parseFloat(p.credito), 0)
   const vencidas        = cuotasVencidas(prestamos ?? [])
   const proximos        = chequesPorVencer(cheques ?? [], 7)

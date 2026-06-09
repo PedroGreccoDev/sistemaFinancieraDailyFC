@@ -1,8 +1,8 @@
 export type ChequeEstado = 'EN_CARTERA' | 'VENDIDO' | 'FIADO' | 'COBRADO' | 'RECHAZADO'
-export type CuotaEstado = 'pendiente' | 'cobrada' | 'en_mora'
-export type PrestamoEstado = 'activo' | 'cancelado' | 'en_mora'
+export type CuotaEstado = 'PENDIENTE' | 'COBRADA' | 'EN_MORA'
+export type PrestamoEstado = 'ACTIVO' | 'CANCELADO' | 'EN_MORA'
 export type Moneda = 'ARS' | 'USD'
-export type Frecuencia = 'diaria' | 'semanal' | 'quincenal' | 'mensual' | 'anual'
+export type Frecuencia = 'DIARIA' | 'SEMANAL' | 'QUINCENAL' | 'MENSUAL' | 'ANUAL'
 export type PasivoEstado = 'PENDIENTE' | 'CANCELADA'
 
 export interface Cheque {
@@ -78,7 +78,7 @@ export interface ReporteGanancias {
   saldo_pasivos: SaldoPasivos
 }
 
-export type MovimientoTipo = 'compra' | 'venta'
+export type MovimientoTipo = 'COMPRA' | 'VENTA'
 
 export interface MovimientoEfectivo {
   id: string
