@@ -48,8 +48,6 @@ async def recibir_mensaje(request: Request) -> JSONResponse:
     except Exception:
         return JSONResponse(content={"ok": True})
 
-    logger.info("WAHA RAW PAYLOAD: %s", body)  # DEBUG temporal — revertir
-
     # ── 1. Parsear el payload ────────────────────────────────────────────────
     msg = wa_parser.parse_webhook(body)
     if msg is None:

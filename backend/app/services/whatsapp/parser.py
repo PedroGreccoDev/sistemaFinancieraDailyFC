@@ -41,6 +41,14 @@ def parse_webhook(body: dict[str, Any]) -> IncomingMessage | None:
     if "@g.us" in remote_jid or "broadcast" in remote_jid:
         return None
 
+    # WhatsApp puede direccionar por LID (@lid) en vez del teléfono real.
+    # En ese caso WAHA pone el LID en `from` y el número real en
+    # _data.key.remoteJidAlt (ej. "549...@s.whatsapp.net"). Usamos ese.
+    if remote_jid.endswith("@lid"):
+        alt: str = payload.get("_data", {}).get("key", {}).get("remoteJidAlt", "")
+        if alt:
+            remote_jid = alt
+
     # Extraer número limpio (solo dígitos)
     phone = remote_jid.split("@")[0]
     if not phone.isdigit():
