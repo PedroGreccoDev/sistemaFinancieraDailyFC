@@ -6,6 +6,7 @@ import Cartera from './pages/Cartera'
 import Deudores from './pages/Deudores'
 import Pasivos from './pages/Pasivos'
 import Reportes from './pages/Reportes'
+import Fiados from './pages/Fiados'
 import Movimientos from './pages/Movimientos'
 import { useDarkMode } from './hooks/useDarkMode'
 
@@ -52,6 +53,7 @@ export default function App() {
               <Route path="/cartera"      element={<Cartera />} />
               <Route path="/deudores"     element={<Deudores />} />
               <Route path="/pasivos"      element={<Pasivos />} />
+              <Route path="/fiados"       element={<Fiados />} />
               <Route path="/reportes"     element={<Reportes />} />
               <Route path="/movimientos" element={<Movimientos />} />
             </Routes>

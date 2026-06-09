@@ -4,6 +4,7 @@ export type PrestamoEstado = 'ACTIVO' | 'CANCELADO' | 'EN_MORA'
 export type Moneda = 'ARS' | 'USD'
 export type Frecuencia = 'DIARIA' | 'SEMANAL' | 'QUINCENAL' | 'MENSUAL' | 'ANUAL'
 export type PasivoEstado = 'PENDIENTE' | 'CANCELADA'
+export type FiadoEstado = 'ABIERTO' | 'CANCELADO'
 
 export interface Cheque {
   nro_cheque: string
@@ -117,6 +118,25 @@ export interface GastoOperativo {
   observaciones: string | null
   created_at: string
   updated_at: string
+}
+
+export interface Fiado {
+  id: string
+  cheque_nro: string
+  cliente_id: string
+  monto_original: string
+  porcentaje_venta: string
+  saldo_pendiente: string
+  estado: FiadoEstado
+  fecha_fiado: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CobrarConChequeResult {
+  fiado: Fiado
+  cheque_ingresado: Cheque
+  diferencia: string
 }
 
 export interface DolarBlue {

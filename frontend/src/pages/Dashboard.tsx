@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { getChequeCartera } from '../api/cheques'
+import { getFiados } from '../api/fiados'
 import { getPrestamos } from '../api/prestamos'
 import { getClientes } from '../api/clientes'
 import { getReporteGanancias } from '../api/reportes'
@@ -64,9 +65,10 @@ function EmptyState({ text }: { text: string }) {
 // ── página ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { data: cheques }   = useQuery({ queryKey: ['cartera'],   queryFn: getChequeCartera, refetchInterval: 30_000 })
-  const { data: prestamos } = useQuery({ queryKey: ['prestamos'], queryFn: () => getPrestamos(), refetchInterval: 30_000 })
-  const { data: clientes }  = useQuery({ queryKey: ['clientes'],  queryFn: getClientes, staleTime: 60_000 })
+  const { data: cheques }   = useQuery({ queryKey: ['cartera'],       queryFn: getChequeCartera,              refetchInterval: 30_000 })
+  const { data: prestamos } = useQuery({ queryKey: ['prestamos'],     queryFn: () => getPrestamos(),          refetchInterval: 30_000 })
+  const { data: clientes }  = useQuery({ queryKey: ['clientes'],      queryFn: getClientes,                   staleTime: 60_000 })
+  const { data: fiados }    = useQuery({ queryKey: ['fiados', 'ABIERTO'], queryFn: () => getFiados('ABIERTO'), refetchInterval: 30_000 })
   const { data: reporte }   = useQuery({
     queryKey: ['reporte', monthStartISO(), todayISO()],
     queryFn: () => getReporteGanancias(monthStartISO(), todayISO()),
@@ -163,6 +165,42 @@ export default function Dashboard() {
               )}
             </div>
           </div>
+
+          {/* Fiados abiertos */}
+          {((fiados && fiados.length > 0) || !fiados) && (
+            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl mb-4 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Fiados abiertos</span>
+                {fiados && fiados.length > 0 && (
+                  <span className="ml-auto text-xs font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-full px-2 py-0.5">
+                    {fiados.length}
+                  </span>
+                )}
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                {!fiados && <div className="px-4 py-3 text-sm text-slate-400">Cargando…</div>}
+                {fiados?.slice(0, 4).map((f) => (
+                  <div key={f.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
+                        {clienteMap.get(f.cliente_id) ?? '…'}
+                      </p>
+                      <p className="text-xs text-slate-400 font-mono">{f.cheque_nro}</p>
+                    </div>
+                    <span className="text-sm font-semibold text-amber-600 dark:text-amber-400 shrink-0">
+                      {fmtARS(f.saldo_pendiente)}
+                    </span>
+                  </div>
+                ))}
+                {fiados && fiados.length > 4 && (
+                  <div className="px-4 py-2 text-xs text-slate-400 text-center">
+                    +{fiados.length - 4} más en Fiados
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Cheques próximos a vencer */}
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
