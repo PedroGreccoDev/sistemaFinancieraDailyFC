@@ -1,147 +1,126 @@
-# CLAUDE.md
+# CLAUDE.md — Sistema Financiera Daily FC
 
-Guía para trabajar en este repositorio. Lee esto antes de hacer cambios.
+Guía de referencia rápida para el asistente de IA. Lee esto antes de tocar cualquier archivo.
 
-## Qué es
-
-Sistema de gestión para una **financiera informal** ("cueva"). El operador maneja
-todo por **WhatsApp** (texto, audio, fotos de cheques); la IA extrae los datos y
-hace la matemática, pero **el operador siempre confirma**. Hay además un dashboard
-web (React) para arqueo, cartera y reportes.
-
-**Regla de oro del negocio:** cero facturación, cero AFIP. Cheques y divisas son
-**stock/inventario físico**. Ninguna tabla o lógica debe incluir conceptos de
-facturación/blanqueo (ej. nada de `incluir_factura`).
-
-**Human in the loop:** la IA nunca asume cotizaciones ni cambia estados sin orden
-explícita del operador. Las cotizaciones las dicta siempre el operador.
+---
 
 ## Stack
 
-- **Backend:** FastAPI (Python), SQLAlchemy + Alembic, PostgreSQL.
-- **Frontend:** React + Vite + TailwindCSS.
-- **Infra:** monorepo en **Railway** (build por `backend/Dockerfile`, ver `railway.toml`).
-- **WhatsApp:** **WAHA** (WhatsApp HTTP API — gateway no oficial, engine NOWEB).
-  Webhook directo a FastAPI.
-- **IA visión/razonamiento:** Claude (Anthropic) — `app/services/ia/claude.py`.
-- **IA transcripción de audio:** Whisper (OpenAI) — `app/services/ia/whisper.py`.
+| Capa | Tecnología |
+|------|-----------|
+| Backend API | FastAPI + Python 3.12 |
+| Base de datos | PostgreSQL (psycopg3) |
+| ORM / migraciones | SQLAlchemy 2.0 + Alembic |
+| Frontend | React + Vite + TypeScript |
+| IA (razonamiento/OCR) | Claude (Anthropic) |
+| IA (transcripción audio) | Whisper (OpenAI) |
+| Bot WhatsApp | WAHA (NOWEB) → webhook FastAPI |
+| Deploy | Railway (monorepo) |
 
-> Nota histórica: se usó Evolution API y se intentó migrar a la Cloud API oficial de
-> Meta (commit `b2f662c`, revertido en `e0ff326`). Se eligió **WAHA** porque a este
-> volumen (≈25 msj/día, 2 números, horario humano) el ban no es el riesgo real, y su
-> engine `NOWEB` (sin Chromium) evita el problema de Evolution de no generar el QR.
-> Al ser gateway no oficial, **no hay ventana de 24h ni plantillas**: se manda texto
-> libre siempre.
+---
 
-## Estructura
+## Módulos de negocio
 
+### 1. Chequera Virtual
+
+- Un cheque nuevo **siempre** entra en estado `EN_CARTERA`.
+- La máquina de estados es **estricta**: `EN_CARTERA` → `VENDIDO | FIADO | COBRADO | RECHAZADO`.
+- Los estados `VENDIDO`, `FIADO`, `COBRADO` y `RECHAZADO` son **terminales**: no admiten más cambios.
+- `COBRADO` y `RECHAZADO` son eventos exclusivamente manuales del operador.
+- `FIADO` **solo** se procesa con la transacción atómica `fiar_cheque` (crea cheque FIADO + préstamo + cuotas en el mismo commit).
+- Toda transición manual requiere `operador_id` y `motivo` no vacíos.
+
+### 2. Préstamos y Cuotas
+
+- Monedas soportadas: `ARS` y `USD`.
+- Frecuencias: `diaria | semanal | quincenal | mensual | anual`.
+- La ganancia del préstamo se calcula como `total_a_cobrar - credito`.
+- El préstamo pasa a estado `CANCELADO` automáticamente cuando se cobra la última cuota.
+- El monto de cada cuota se divide uniformemente; el centavo sobrante cae en la **última** cuota.
+
+### 3. Movimientos de Efectivo
+
+- Operaciones de compra/venta de divisas (ARS ↔ USD).
+- **Regla crítica:** la cotización **siempre** la dicta el operador. El sistema jamás la asume ni la consulta.
+- El widget de Dólar Blue en el frontend es **solo decorativo** (consume DolarAPI externamente).
+
+### 4. Pasivos _(módulo agregado 2026-06-08)_
+
+- Registro de **deudas del negocio** con clientes y proveedores (cuentas a pagar).
+- **Carga exclusivamente manual desde el panel web.** El bot de WhatsApp no interviene.
+- Estados: `PENDIENTE` → `CANCELADA` (transición única, irreversible).
+- Campos: `acreedor`, `concepto`, `monto`, `moneda`, `fecha_vencimiento` (opcional).
+- El cierre de caja incluye un snapshot de pasivos pendientes por moneda, **sin filtro de periodo**.
+- No existe facturación ni concepto fiscal asociado.
+
+### 5. Gastos Operativos _(módulo agregado 2026-06-08)_
+
+- Registro de gastos de caja del negocio (nafta, insumos, comida, parking, etc.).
+- **Carga via bot de WhatsApp** (intent `REGISTRAR_GASTO`) o manual vía API.
+- Campos: `concepto`, `monto`, `moneda` (default ARS), `fecha_operacion`, `observaciones`.
+- Se descuentan del bruto en el reporte de ganancias para obtener el **neto del período**.
+
+### 6. Reportes y Cierre de Caja
+
+- El endpoint `GET /api/v1/reportes/ganancias?desde=&hasta=` consolida:
+  - Ganancias de cheques (por `ultimo_evento_manual_at` dentro del periodo).
+  - Ganancias de préstamos (por `created_at` del préstamo).
+  - Ganancias de movimientos de efectivo (por `fecha_operacion`).
+  - `gastos_operativos`: suma de gastos ARS en el periodo.
+  - `saldo_pasivos`: snapshot de pasivos PENDIENTE (no filtrado por periodo).
+- `total_ganancias` = suma bruta de ganancias; `neto` = total_ganancias − gastos_operativos.
+
+---
+
+## Bot WhatsApp
+
+- El bot opera vía WAHA (WhatsApp HTTP API) → webhook `POST /webhook/whatsapp`.
+- Solo el número configurado en `WHATSAPP_OPERATOR_PHONE` puede operar.
+- Flujo: mensaje → parser → (audio: Whisper) → Claude → dispatcher → BD → respuesta WA.
+- La sesión de Claude **se limpia tras cada transacción exitosa** (Regla de Limpieza).
+- Los **pasivos** no son accesibles desde el bot; el operador debe usar el panel web.
+- Los **gastos operativos** sí son registrables desde el bot via intent `REGISTRAR_GASTO`.
+
+---
+
+## Reglas de código
+
+- No existe facturación, AFIP, impuestos ni campos fiscales en ninguna tabla. No los agregues.
+- Los cheques y divisas son **inventario físico interno**, no instrumentos financieros regulados.
+- Los ENUMs de PostgreSQL se crean en las migraciones Alembic con `create_type=False` en los modelos.
+- Cada tabla tiene trigger `updated_at` vía `fn_set_updated_at()` (creada en migración 0001).
+- Las transacciones críticas usan `SELECT ... FOR UPDATE` para evitar race conditions.
+
+---
+
+## Comandos frecuentes
+
+```powershell
+# Activar venv
+cd backend
+.\.venv\Scripts\Activate.ps1
+
+# Instalar dependencias
+pip install -r requirements-dev.txt
+
+# Migrar BD
+alembic upgrade head
+
+# Correr API local
+uvicorn app.main:app --reload
+
+# Tests
+pytest
 ```
-backend/app/
-  main.py                  # FastAPI app, routers, healthcheck, SPA fallback
-  core/config.py           # Settings (pydantic-settings, lee .env / env de Railway)
-  api/routes/              # Endpoints REST + webhook de WhatsApp
-    webhook.py             # POST: mensajes entrantes de WAHA
-  services/
-    whatsapp/
-      client.py            # Envío de texto y descarga de media (WAHA)
-      parser.py            # Normaliza el payload del webhook -> IncomingMessage
-      dispatcher.py        # Aplica el intent extraído sobre la BD
-      session.py           # Historial corto en memoria + pending intents
-    ia/claude.py           # Extracción de intención (texto/imagen + historial)
-    ia/whisper.py          # Transcripción de notas de voz
-    cheques.py / prestamos.py / movimientos.py / clientes.py / reportes.py
-  db/models.py             # Modelos SQLAlchemy
-  schemas/                 # Esquemas Pydantic de la API REST
-frontend/src/
-  pages/                   # Cartera, Deudores, Movimientos, Reportes, Dashboard
-  api/                     # Clientes HTTP al backend + DolarAPI (dólar blue)
-```
 
-## Comandos
+---
 
-```bash
-# Backend (desde backend/)
-pip install -r requirements.txt -r requirements-dev.txt
-alembic upgrade head            # migraciones
-uvicorn app.main:app --reload   # dev server (localhost:8000)
-pytest                          # tests (ver tests/test_business_rules.py)
+## Variables de entorno requeridas
 
-# Frontend (desde frontend/)
-npm install
-npm run dev                     # Vite dev server
-npm run build                   # genera el build que sirve FastAPI en prod
+Ver `backend/.env.example`. Las críticas para producción:
 
-# Todo junto (local)
-docker-compose up               # db + backend
-```
-
-## Pipeline de WhatsApp (flujo de un mensaje)
-
-1. WAHA hace `POST /webhook/whatsapp` (evento `message`) → `webhook.py` parsea con
-   `parser.parse_webhook`.
-2. Se filtra por operador autorizado (`WHATSAPP_OPERATOR_PHONE`).
-3. Si es audio/imagen → se descarga el media (`client.get_media_bytes`): WAHA manda
-   `payload.media.url` y se baja con un GET autenticado con `X-Api-Key`.
-4. Audio → Whisper transcribe. Imagen/texto → Claude extrae el intent.
-5. Si el intent requiere confirmación → se guarda como *pending* y se le pregunta
-   al operador. La próxima respuesta sí/no resuelve el pending.
-6. `dispatcher.dispatch` impacta la BD y se responde por WhatsApp.
-7. **Al confirmar una transacción, la sesión se limpia** (`session.clear_session`)
-   para no arrastrar contexto entre operaciones.
-
-> WAHA no tiene verificación de webhook tipo Meta (`hub.challenge`); solo `POST`.
-> El emparejamiento es por **QR**: se escanea una vez desde el dashboard de WAHA.
-
-## Variables de entorno (WhatsApp)
-
-| Variable | Qué es |
-|---|---|
-| `WAHA_API_URL` | URL del servidor WAHA (ej. `https://tu-waha.railway.app`) |
-| `WAHA_API_KEY` | API key de WAHA (header `X-Api-Key` en cada request) |
-| `WAHA_SESSION` | Nombre de la sesión de WAHA (default `default`) |
-| `WHATSAPP_OPERATOR_PHONE` | Número del operador autorizado (solo dígitos) |
-
-En el lado de WAHA (su propio servicio/contenedor), conviene setear
-`WAHA_DEFAULT_ENGINE=NOWEB` (sin Chromium) y apuntar su webhook a
-`…/webhook/whatsapp` con el evento `message`.
-
-Ver `backend/.env.example` para la lista completa (BD, Claude, OpenAI).
-
-## Reglas de negocio clave
-
-- **Cheques** — máquina de estados estricta: `EN_CARTERA` → `VENDIDO` / `FIADO` /
-  `COBRADO` / `RECHAZADO`. La cartera web muestra **solo** `EN_CARTERA`.
-  - **Advertencias (no bloquean, human in the loop):** al registrar/vender el bot
-    avisa por chat pero igual ejecuta. Casos en `dispatcher._advertencias_cheque` y
-    `_vender_cheque`: cheque vencido (`fecha_pago < hoy`, distingue si sigue
-    presentable dentro del plazo de 30 días o ya venció), fecha de emisión futura,
-    y venta a pérdida (`ganancia < 0`, venta% < compra%).
-- **Préstamos** — monedas `ARS`/`USD`; frecuencias diaria/semanal/quincenal/
-  mensual/anual; el alta genera el préstamo + sus `cuotas` con fechas calculadas.
-- **Movimientos de efectivo** — la cotización la dicta el operador, nunca la IA.
-  El dólar blue del navbar (DolarAPI) es decorativo, no afecta cálculos.
-- **Reportes** — consolidan ganancias de los tres módulos (spread de cheques +
-  intereses de préstamos + spread de divisas), filtrables por día/semana/mes.
-
-## Notificaciones proactivas (recordatorios de cobranza)
-
-> **No implementado todavía.** El job `app/jobs/recordatorios.py` (y `client.send_template`)
-> que describían versiones anteriores de esta guía pertenecían al intento de Cloud API,
-> que fue revertido — no existen en el código actual.
->
-> Con WAHA es más simple: **no hay ventana de 24h ni plantillas aprobadas**, así que un
-> job de recordatorios solo necesitaría usar `client.send_text` con texto libre. Si se
-> implementa: leer cuotas pendientes que vencen hoy o ya vencieron y mandar un mensaje al
-> operador; en Railway, correrlo desde un servicio **Cron** 1×/día.
-
-## Gotchas
-
-- **WAHA es gateway no oficial:** el emparejamiento es por QR (sesión de WhatsApp Web).
-  Si la sesión se cae, hay que re-escanear el QR desde el dashboard de WAHA. Usar el
-  engine `NOWEB` evita la dependencia de Chromium (la causa de que Evolution no generara
-  el QR).
-- **El "9" de Argentina:** WAHA puede entregar el `from` sin el 9 intermedio. Si aparece
-  "Mensaje de número no autorizado" en los logs, revisar la comparación contra
-  `WHATSAPP_OPERATOR_PHONE`.
-- **Railway no usa `docker-compose.yml`** — usa `railway.toml` + `backend/Dockerfile`.
-  El compose es solo para desarrollo local. WAHA corre como **servicio aparte**.
+- `DATABASE_URL`
+- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
+- `EVOLUTION_API_URL` / `EVOLUTION_API_KEY` / `EVOLUTION_INSTANCE`
+- `WHATSAPP_OPERATOR_PHONE`
