@@ -111,6 +111,11 @@ Ver `backend/.env.example` para la lista completa (BD, Claude, OpenAI).
 
 - **Cheques** — máquina de estados estricta: `EN_CARTERA` → `VENDIDO` / `FIADO` /
   `COBRADO` / `RECHAZADO`. La cartera web muestra **solo** `EN_CARTERA`.
+  - **Advertencias (no bloquean, human in the loop):** al registrar/vender el bot
+    avisa por chat pero igual ejecuta. Casos en `dispatcher._advertencias_cheque` y
+    `_vender_cheque`: cheque vencido (`fecha_pago < hoy`, distingue si sigue
+    presentable dentro del plazo de 30 días o ya venció), fecha de emisión futura,
+    y venta a pérdida (`ganancia < 0`, venta% < compra%).
 - **Préstamos** — monedas `ARS`/`USD`; frecuencias diaria/semanal/quincenal/
   mensual/anual; el alta genera el préstamo + sus `cuotas` con fechas calculadas.
 - **Movimientos de efectivo** — la cotización la dicta el operador, nunca la IA.
