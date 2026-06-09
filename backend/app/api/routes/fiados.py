@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.db.models import FiadoEstado
 from app.db.session import get_db
+from app.schemas.cheques import FiadoCobrarConChequeResponse
 from app.schemas.fiados import (
     FiadoCobrarConChequeRequest,
-    FiadoCobrarConChequeResponse,
     FiadoCobrarEfectivoRequest,
     FiadoRead,
 )

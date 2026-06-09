@@ -9,10 +9,9 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.models import Cheque, ChequeEstado, Fiado, FiadoEstado
-from app.schemas.cheques import ChequeRead
+from app.schemas.cheques import ChequeRead, FiadoCobrarConChequeResponse
 from app.schemas.fiados import (
     FiadoCobrarConChequeRequest,
-    FiadoCobrarConChequeResponse,
     FiadoCobrarEfectivoRequest,
     FiadoRead,
 )

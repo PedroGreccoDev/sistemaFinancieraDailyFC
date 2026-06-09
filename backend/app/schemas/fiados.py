@@ -7,7 +7,6 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import FiadoEstado
-from app.schemas.cheques import ChequeRead
 
 
 class FiadoRead(BaseModel):
@@ -37,9 +36,3 @@ class FiadoCobrarConChequeRequest(BaseModel):
     fecha_emision: date | None = None
     fecha_pago: date | None = None
     operador_id: str = Field(min_length=1, max_length=80)
-
-
-class FiadoCobrarConChequeResponse(BaseModel):
-    fiado: FiadoRead
-    cheque_ingresado: ChequeRead
-    diferencia: Decimal

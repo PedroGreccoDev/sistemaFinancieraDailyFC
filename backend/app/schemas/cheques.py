@@ -69,3 +69,9 @@ class ChequeRead(BaseModel):
 class ChequeFiarResponse(BaseModel):
     cheque: ChequeRead
     fiado: FiadoRead
+
+
+class FiadoCobrarConChequeResponse(BaseModel):
+    fiado: FiadoRead
+    cheque_ingresado: ChequeRead
+    diferencia: Decimal
