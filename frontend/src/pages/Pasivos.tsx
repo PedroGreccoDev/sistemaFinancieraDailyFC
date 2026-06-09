@@ -75,7 +75,7 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
             <label className={labelCls()}>A quién le debo</label>
             <input
               type="text" value={acreedor} onChange={(e) => setAcreedor(e.target.value)}
-              placeholder="Ej: Fernando Cuello" required
+              required
               className={inputCls()}
             />
           </div>
@@ -84,7 +84,7 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
             <label className={labelCls()}>Concepto / razón</label>
             <input
               type="text" value={concepto} onChange={(e) => setConcepto(e.target.value)}
-              placeholder="Ej: Préstamo personal, materiales, etc." required
+              required
               className={inputCls()}
             />
           </div>
@@ -95,7 +95,7 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
               <input
                 type="number" step="0.01" min="0.01"
                 value={monto} onChange={(e) => setMonto(e.target.value)}
-                placeholder="0,00" required
+                required
                 className={inputCls()}
               />
             </div>
@@ -123,7 +123,7 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
             <label className={labelCls()}>Observaciones <span className="text-slate-400 font-normal">(opcional)</span></label>
             <textarea
               value={observaciones} onChange={(e) => setObservaciones(e.target.value)}
-              placeholder="Notas adicionales…" rows={2}
+              rows={2}
               className={`${inputCls()} resize-none`}
             />
           </div>
