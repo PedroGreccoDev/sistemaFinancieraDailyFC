@@ -17,18 +17,19 @@ from app.services.prestamos import construir_cuotas
 
 
 def test_cheque_entra_en_cartera_y_venta_calcula_spread() -> None:
+    # Compra al 5%, venta al 3% → ganancia = 2% de 100000 = 2000
     cheque = Cheque(
         nro_cheque="CHK-001",
         monto=Decimal("100000.00"),
-        porcentaje_compra=Decimal("3.0000"),
+        porcentaje_compra=Decimal("5.0000"),
         estado=ChequeEstado.EN_CARTERA,
     )
 
     cheque.transition_to(
         ChequeEstado.VENDIDO,
         operador_id="operador-1",
-        motivo="Venta manual al 5%",
-        porcentaje_venta=Decimal("5.0000"),
+        motivo="Venta manual al 3%",
+        porcentaje_venta=Decimal("3.0000"),
     )
 
     assert cheque.estado == ChequeEstado.VENDIDO

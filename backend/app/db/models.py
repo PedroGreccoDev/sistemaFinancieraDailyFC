@@ -246,7 +246,7 @@ class Cheque(Base):
                 )
             self.porcentaje_venta = porcentaje_venta
             self.ganancia = (
-                self.monto * (porcentaje_venta - self.porcentaje_compra) / Decimal("100")
+                self.monto * (self.porcentaje_compra - porcentaje_venta) / Decimal("100")
             ).quantize(Decimal("0.01"))
 
         if target == ChequeEstado.FIADO:
