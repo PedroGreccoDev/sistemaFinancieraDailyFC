@@ -116,7 +116,7 @@ export default function Dashboard() {
         />
         <KpiCard
           label="Ganancia del mes"
-          value={reporte ? fmtARS(reporte.total) : '—'}
+          value={reporte ? fmtARS(reporte.neto) : '—'}
           sub="Todos los módulos"
           accent="green"
         />
