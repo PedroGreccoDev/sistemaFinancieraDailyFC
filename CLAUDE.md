@@ -27,10 +27,38 @@ Guía de referencia rápida para el asistente de IA. Lee esto antes de tocar cua
 - La máquina de estados es **estricta**: `EN_CARTERA` → `VENDIDO | FIADO | COBRADO | RECHAZADO`.
 - Los estados `VENDIDO`, `FIADO`, `COBRADO` y `RECHAZADO` son **terminales**: no admiten más cambios.
 - `COBRADO` y `RECHAZADO` son eventos exclusivamente manuales del operador.
-- `FIADO` **solo** se procesa con la transacción atómica `fiar_cheque` (crea cheque FIADO + préstamo + cuotas en el mismo commit).
+- `FIADO` **solo** se procesa con la transacción atómica `fiar_cheque` (crea cheque FIADO + registro `Fiado` en el mismo commit). **No genera préstamo ni cuotas.**
 - Toda transición manual requiere `operador_id` y `motivo` no vacíos.
 
-### 2. Préstamos y Cuotas
+### 2. Fiados _(módulo agregado 2026-06-09)_
+
+Cuando se **fía** un cheque se genera una **deuda abierta** del cliente, sin cuotas fijas.
+
+**Saldo inicial:** `monto_cheque × (1 − porcentaje_venta / 100)`
+(el porcentaje_venta es el descuento pactado al entregar el cheque).
+
+El cliente puede cancelar esa deuda de dos formas:
+
+**a) En efectivo:**
+- Se registra con `POST /fiados/{id}/cobrar-efectivo` (`monto_cobrado`).
+- El monto debe ser ≤ `saldo_pendiente`. Se puede pagar en partes.
+- Cuando `saldo_pendiente` llega a 0, el fiado pasa a `CANCELADO`.
+
+**b) Con otro cheque:**
+- Se registra con `POST /fiados/{id}/cobrar-con-cheque`.
+- `valor_neto_cheque = monto_cheque × (1 − porcentaje_compra / 100)`
+- `diferencia = valor_neto_cheque − saldo_pendiente`
+  - `diferencia ≥ 0` → fiado `CANCELADO`; si `diferencia > 0` el negocio **le debe** al cliente esa diferencia.
+  - `diferencia < 0` → `saldo_pendiente = −diferencia`; el cliente aún debe el resto (puede saldar en efectivo).
+- El cheque recibido **siempre** entra al sistema como `EN_CARTERA` con `cliente_origen_id = cliente del fiado`.
+
+**Estados:** `ABIERTO` → `CANCELADO` (único estado terminal).
+**Restricción:** un cheque solo puede originar un fiado (`UNIQUE` en `cheque_nro`).
+**Bot WhatsApp:** intents `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
+
+---
+
+### 3. Préstamos y Cuotas _(sin cheque asociado)_
 
 - Monedas soportadas: `ARS` y `USD`.
 - Frecuencias: `diaria | semanal | quincenal | mensual | anual`.
@@ -38,13 +66,13 @@ Guía de referencia rápida para el asistente de IA. Lee esto antes de tocar cua
 - El préstamo pasa a estado `CANCELADO` automáticamente cuando se cobra la última cuota.
 - El monto de cada cuota se divide uniformemente; el centavo sobrante cae en la **última** cuota.
 
-### 3. Movimientos de Efectivo
+### 4. Movimientos de Efectivo
 
 - Operaciones de compra/venta de divisas (ARS ↔ USD).
 - **Regla crítica:** la cotización **siempre** la dicta el operador. El sistema jamás la asume ni la consulta.
 - El widget de Dólar Blue en el frontend es **solo decorativo** (consume DolarAPI externamente).
 
-### 4. Pasivos _(módulo agregado 2026-06-08)_
+### 5. Pasivos _(módulo agregado 2026-06-08)_
 
 - Registro de **deudas del negocio** con clientes y proveedores (cuentas a pagar).
 - **Carga exclusivamente manual desde el panel web.** El bot de WhatsApp no interviene.
@@ -53,14 +81,14 @@ Guía de referencia rápida para el asistente de IA. Lee esto antes de tocar cua
 - El cierre de caja incluye un snapshot de pasivos pendientes por moneda, **sin filtro de periodo**.
 - No existe facturación ni concepto fiscal asociado.
 
-### 5. Gastos Operativos _(módulo agregado 2026-06-08)_
+### 6. Gastos Operativos _(módulo agregado 2026-06-08)_
 
 - Registro de gastos de caja del negocio (nafta, insumos, comida, parking, etc.).
 - **Carga via bot de WhatsApp** (intent `REGISTRAR_GASTO`) o manual vía API.
 - Campos: `concepto`, `monto`, `moneda` (default ARS), `fecha_operacion`, `observaciones`.
 - Se descuentan del bruto en el reporte de ganancias para obtener el **neto del período**.
 
-### 6. Reportes y Cierre de Caja
+### 7. Reportes y Cierre de Caja
 
 - El endpoint `GET /api/v1/reportes/ganancias?desde=&hasta=` consolida:
   - Ganancias de cheques (por `ultimo_evento_manual_at` dentro del periodo).
@@ -80,6 +108,7 @@ Guía de referencia rápida para el asistente de IA. Lee esto antes de tocar cua
 - La sesión de Claude **se limpia tras cada transacción exitosa** (Regla de Limpieza).
 - Los **pasivos** no son accesibles desde el bot; el operador debe usar el panel web.
 - Los **gastos operativos** sí son registrables desde el bot via intent `REGISTRAR_GASTO`.
+- Los **fiados** son operables desde el bot: `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
 
 ---
 
