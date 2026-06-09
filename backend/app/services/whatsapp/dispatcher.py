@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -117,6 +117,12 @@ def _registrar_cheque(db: Session, phone: str, data: dict[str, Any]) -> Dispatch
     ]
     if cheque.fecha_pago:
         lines.append(f"Pago: {_fmt_date(cheque.fecha_pago)}")
+
+    # Se registra igual (human in the loop); solo avisamos para que el operador revise.
+    advertencias = _advertencias_cheque(fecha_emision, fecha_pago)
+    if advertencias:
+        lines.append("")
+        lines.extend(advertencias)
     return True, "\n".join(lines)
 
 
@@ -144,6 +150,13 @@ def _vender_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchRes
         f"Venta: {cheque.porcentaje_venta}% | Compra: {cheque.porcentaje_compra}%",
         f"Ganancia: {_ars(cheque.ganancia)}",
     ]
+    # Venta por debajo del % de compra ⇒ pérdida. Se registra igual, solo avisamos.
+    if cheque.ganancia is not None and cheque.ganancia < 0:
+        lines.append("")
+        lines.append(
+            f"⚠️ *Venta a pérdida*: vendiste al {cheque.porcentaje_venta}%, "
+            f"por debajo del {cheque.porcentaje_compra}% de compra."
+        )
     return True, "\n".join(lines)
 
 
@@ -451,3 +464,36 @@ def _fmt_date(d: date | None) -> str:
     if d is None:
         return "—"
     return d.strftime("%d/%m/%y")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Advertencias de negocio (no bloquean — solo avisan al operador)
+# ────────────────────────────────────────────────────────────────────────────
+
+# Plazo legal de presentación de un cheque desde su fecha de pago (Argentina).
+_PLAZO_PRESENTACION_DIAS = 30
+
+
+def _advertencias_cheque(fecha_emision: date | None, fecha_pago: date | None) -> list[str]:
+    """Avisos al registrar un cheque. Nunca bloquea: el operador decide."""
+    hoy = date.today()
+    avisos: list[str] = []
+
+    if fecha_pago is not None and fecha_pago < hoy:
+        limite = fecha_pago + timedelta(days=_PLAZO_PRESENTACION_DIAS)
+        if hoy <= limite:
+            avisos.append(
+                f"⚠️ La fecha de pago ({_fmt_date(fecha_pago)}) ya pasó. "
+                f"Todavía es presentable hasta el {_fmt_date(limite)} (plazo de 30 días)."
+            )
+        else:
+            dias = (hoy - fecha_pago).days
+            avisos.append(
+                f"⚠️ Cheque *vencido*: la fecha de pago ({_fmt_date(fecha_pago)}) pasó hace "
+                f"{dias} días y superó el plazo de presentación de 30 días."
+            )
+
+    if fecha_emision is not None and fecha_emision > hoy:
+        avisos.append(f"⚠️ La fecha de emisión ({_fmt_date(fecha_emision)}) es futura.")
+
+    return avisos
