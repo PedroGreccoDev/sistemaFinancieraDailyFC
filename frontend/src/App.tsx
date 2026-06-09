@@ -4,6 +4,7 @@ import Navbar from './components/Navbar'
 import Dashboard from './pages/Dashboard'
 import Cartera from './pages/Cartera'
 import Deudores from './pages/Deudores'
+import Pasivos from './pages/Pasivos'
 import Reportes from './pages/Reportes'
 import Movimientos from './pages/Movimientos'
 import { useDarkMode } from './hooks/useDarkMode'
@@ -48,9 +49,10 @@ export default function App() {
           <main className="flex-1">
             <Routes>
               <Route path="/"          element={<Dashboard />} />
-              <Route path="/cartera"   element={<Cartera />} />
-              <Route path="/deudores"  element={<Deudores />} />
-              <Route path="/reportes"    element={<Reportes />} />
+              <Route path="/cartera"      element={<Cartera />} />
+              <Route path="/deudores"     element={<Deudores />} />
+              <Route path="/pasivos"      element={<Pasivos />} />
+              <Route path="/reportes"     element={<Reportes />} />
               <Route path="/movimientos" element={<Movimientos />} />
             </Routes>
           </main>

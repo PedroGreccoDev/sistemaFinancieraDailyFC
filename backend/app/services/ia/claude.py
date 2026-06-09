@@ -24,6 +24,7 @@ INTENTS = {
     "NUEVO_PRESTAMO",
     "COBRAR_CUOTA",
     "MOVIMIENTO_EFECTIVO",
+    "REGISTRAR_GASTO",
     "CONSULTA_CARTERA",
     "ACLARACION_REQUERIDA",
     "DESCONOCIDO",
@@ -120,12 +121,20 @@ OPERACIONES DISPONIBLES
    Ej: "Qué cheques tengo?", "Estado de cartera", "Cuánto hay en cartera?"
    data: {}
 
-10. ACLARACION_REQUERIDA
+10. REGISTRAR_GASTO
+    Cuándo: El operador cargó un gasto operativo del negocio (nafta, comida, parking, insumos, etc.)
+    Ej: "Cargué 10.000 de nafta", "Gasté 5000 en almuerzo", "Pagué 3500 de estacionamiento"
+    data:
+      - concepto: string (descripción del gasto, ej: "nafta", "almuerzo")
+      - monto: number (en ARS salvo que especifiquen USD)
+      - moneda: "ARS" o "USD" (default ARS)
+
+11. ACLARACION_REQUERIDA
     Cuándo: Falta información esencial para completar la operación.
     data:
       - pregunta: string (pregunta concreta y puntual al operador)
 
-11. DESCONOCIDO
+12. DESCONOCIDO
     Cuándo: El mensaje no corresponde a ninguna operación del sistema.
     data: {}
 

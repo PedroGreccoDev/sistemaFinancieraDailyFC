@@ -20,6 +20,8 @@ from app.db.models import (
     Moneda,
     MovimientoEfectivoTipo,
 )
+from app.schemas.gastos_operativos import GastoOperativoCreate
+from app.services import gastos_operativos as svc_gastos
 from app.schemas.cheques import ChequeFiarRequest, ChequeCreate, ChequeManualTransition
 from app.schemas.clientes import ClienteCreate
 from app.schemas.movimientos import MovimientoEfectivoCreate
@@ -69,6 +71,8 @@ def dispatch(db: Session, phone: str, result: IntentResult) -> DispatchResult:
             return _cobrar_cuota(db, data)
         if intent == "MOVIMIENTO_EFECTIVO":
             return _movimiento_efectivo(db, data)
+        if intent == "REGISTRAR_GASTO":
+            return _registrar_gasto(db, data)
         if intent == "CONSULTA_CARTERA":
             return _consulta_cartera(db)
         # ACLARACION_REQUERIDA y DESCONOCIDO no tocan la BD
@@ -332,6 +336,26 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any]) -> DispatchResult:
     if mov.ganancia:
         lines.append(f"Ganancia: {_ars(mov.ganancia)}")
     return True, "\n".join(lines)
+
+
+def _registrar_gasto(db: Session, data: dict[str, Any]) -> DispatchResult:
+    concepto = _req_str(data, "concepto")
+    monto = _req_decimal(data, "monto")
+    moneda = _req_enum(data, "moneda", Moneda) if data.get("moneda") else Moneda.ARS
+
+    payload = GastoOperativoCreate(
+        concepto=concepto,
+        monto=monto,
+        moneda=moneda,
+    )
+    gasto = svc_gastos.create_gasto(db, payload)
+
+    simbolo = "U$D" if gasto.moneda == Moneda.USD else "$"
+    return True, (
+        f"💸 *Gasto registrado*\n"
+        f"Concepto: {gasto.concepto}\n"
+        f"Monto: {simbolo}{_fmt_num(gasto.monto)}"
+    )
 
 
 def _consulta_cartera(db: Session) -> DispatchResult:

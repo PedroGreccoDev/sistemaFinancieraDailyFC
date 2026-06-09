@@ -6,8 +6,17 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import Cheque, ChequeEstado, MovimientoEfectivo, Prestamo
-from app.schemas.reportes import ReporteGananciasRead
+from app.db.models import (
+    Cheque,
+    ChequeEstado,
+    GastoOperativo,
+    Moneda,
+    MovimientoEfectivo,
+    Pasivo,
+    PasivoEstado,
+    Prestamo,
+)
+from app.schemas.reportes import ReporteGananciasRead, SaldoPasivos
 
 
 def _money(value: object) -> Decimal:
@@ -47,6 +56,18 @@ def get_reporte_ganancias(db: Session, desde: date, hasta: date) -> ReporteGanan
             )
         )
     )
+    gastos = _money(
+        db.scalar(
+            select(func.coalesce(func.sum(GastoOperativo.monto), 0)).where(
+                GastoOperativo.fecha_operacion >= desde,
+                GastoOperativo.fecha_operacion <= hasta,
+                GastoOperativo.moneda == Moneda.ARS,
+            )
+        )
+    )
+
+    total_ganancias = ganancia_cheques + ganancia_prestamos + ganancia_movimientos
+    saldo_pasivos = _get_saldo_pasivos(db)
 
     return ReporteGananciasRead(
         desde=desde,
@@ -54,5 +75,25 @@ def get_reporte_ganancias(db: Session, desde: date, hasta: date) -> ReporteGanan
         ganancia_cheques=ganancia_cheques,
         ganancia_prestamos=ganancia_prestamos,
         ganancia_movimientos_efectivo=ganancia_movimientos,
-        total=ganancia_cheques + ganancia_prestamos + ganancia_movimientos,
+        gastos_operativos=gastos,
+        total_ganancias=total_ganancias,
+        neto=total_ganancias - gastos,
+        saldo_pasivos=saldo_pasivos,
+    )
+
+
+def _get_saldo_pasivos(db: Session) -> SaldoPasivos:
+    def _sum(moneda: Moneda) -> Decimal:
+        return _money(
+            db.scalar(
+                select(func.coalesce(func.sum(Pasivo.monto), 0)).where(
+                    Pasivo.estado == PasivoEstado.PENDIENTE,
+                    Pasivo.moneda == moneda,
+                )
+            )
+        )
+
+    return SaldoPasivos(
+        pendiente_ars=_sum(Moneda.ARS),
+        pendiente_usd=_sum(Moneda.USD),
     )

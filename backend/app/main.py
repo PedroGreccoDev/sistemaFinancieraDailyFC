@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import cheques, clientes, movimientos, prestamos, reportes, webhook
+from app.api.routes import cheques, clientes, gastos_operativos, movimientos, pasivos, prestamos, reportes, webhook
 from app.core.config import get_settings
 from app.services.exceptions import ServiceError
 
@@ -49,6 +49,8 @@ app.include_router(cheques.router, prefix=settings.api_v1_prefix)
 app.include_router(prestamos.router, prefix=settings.api_v1_prefix)
 app.include_router(movimientos.router, prefix=settings.api_v1_prefix)
 app.include_router(reportes.router, prefix=settings.api_v1_prefix)
+app.include_router(pasivos.router, prefix=settings.api_v1_prefix)
+app.include_router(gastos_operativos.router, prefix=settings.api_v1_prefix)
 
 # WhatsApp Bot
 app.include_router(webhook.router)

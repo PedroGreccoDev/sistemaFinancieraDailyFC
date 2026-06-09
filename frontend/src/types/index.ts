@@ -3,6 +3,7 @@ export type CuotaEstado = 'pendiente' | 'cobrada' | 'en_mora'
 export type PrestamoEstado = 'activo' | 'cancelado' | 'en_mora'
 export type Moneda = 'ARS' | 'USD'
 export type Frecuencia = 'diaria' | 'semanal' | 'quincenal' | 'mensual' | 'anual'
+export type PasivoEstado = 'PENDIENTE' | 'CANCELADA'
 
 export interface Cheque {
   nro_cheque: string
@@ -60,13 +61,21 @@ export interface Cliente {
   updated_at: string
 }
 
+export interface SaldoPasivos {
+  pendiente_ars: string
+  pendiente_usd: string
+}
+
 export interface ReporteGanancias {
   desde: string
   hasta: string
   ganancia_cheques: string
   ganancia_prestamos: string
   ganancia_movimientos_efectivo: string
-  total: string
+  gastos_operativos: string
+  total_ganancias: string
+  neto: string
+  saldo_pasivos: SaldoPasivos
 }
 
 export type MovimientoTipo = 'compra' | 'venta'
@@ -79,6 +88,31 @@ export interface MovimientoEfectivo {
   monto: string
   cotizacion_aplicada: string
   ganancia: string
+  fecha_operacion: string
+  observaciones: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Pasivo {
+  id: string
+  acreedor: string
+  concepto: string
+  monto: string
+  moneda: Moneda
+  estado: PasivoEstado
+  fecha_vencimiento: string | null
+  fecha_cancelacion: string | null
+  observaciones: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface GastoOperativo {
+  id: string
+  concepto: string
+  monto: string
+  moneda: Moneda
   fecha_operacion: string
   observaciones: string | null
   created_at: string

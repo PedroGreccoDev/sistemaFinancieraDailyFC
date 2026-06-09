@@ -1,16 +1,5 @@
 """
 models.py — Modelos SQLAlchemy 2.0 para el Sistema Financiero DailyFC
-=====================================================================
-Cubre las 5 tablas del esquema: clientes, cheques, prestamos,
-cuotas y movimientos_efectivo.
-
-Convenciones:
-  · Todos los ENUMs usan create_type=False porque la migración Alembic
-    ya los creó como tipos nativos de PostgreSQL.
-  · Las PKs de tipo UUID se generan en Python (uuid.uuid4) para que
-    los objetos tengan id antes del INSERT (útil en tests y relaciones).
-  · updated_at usa onupdate=sa.func.now() para actualizarse en cada
-    flush via SQLAlchemy (además del server_default).
 """
 
 from __future__ import annotations
@@ -26,7 +15,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  ENUMERACIONES  —  espejo 1:1 de los ENUM nativos en PostgreSQL
+#  ENUMERACIONES
 # ══════════════════════════════════════════════════════════════════════
 
 class ChequeEstado(str, enum.Enum):
@@ -65,6 +54,11 @@ class CuotaEstado(str, enum.Enum):
 class MovimientoEfectivoTipo(str, enum.Enum):
     COMPRA = "compra"
     VENTA  = "venta"
+
+
+class PasivoEstado(str, enum.Enum):
+    PENDIENTE = "PENDIENTE"
+    CANCELADA = "CANCELADA"
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -127,7 +121,7 @@ class Cliente(Base):
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  MÁQUINA DE ESTADOS  —  tabla de transiciones del cheque
+#  MÁQUINA DE ESTADOS — tabla de transiciones del cheque
 # ══════════════════════════════════════════════════════════════════════
 
 _ESTADOS_TERMINALES: frozenset[ChequeEstado] = frozenset({
@@ -148,7 +142,7 @@ _TRANSICIONES: dict[ChequeEstado, frozenset[ChequeEstado]] = {
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  MODELO: Cheque  (con máquina de estados integrada)
+#  MODELO: Cheque (con máquina de estados integrada)
 # ══════════════════════════════════════════════════════════════════════
 
 class Cheque(Base):
@@ -381,3 +375,62 @@ class MovimientoEfectivo(Base):
     )
 
     cliente: Mapped[Cliente | None] = relationship("Cliente", back_populates="movimientos")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: Pasivo (deudas del negocio con terceros)
+# ══════════════════════════════════════════════════════════════════════
+
+class Pasivo(Base):
+    __tablename__ = "pasivos"
+    __table_args__ = (
+        sa.CheckConstraint("monto > 0", name="ck_pasivos_monto_positive"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    acreedor:          Mapped[str]            = mapped_column(sa.String(200), nullable=False)
+    concepto:          Mapped[str]            = mapped_column(sa.Text(),      nullable=False)
+    monto:             Mapped[Decimal]        = mapped_column(sa.Numeric(18, 2))
+    moneda:            Mapped[Moneda]         = mapped_column(
+        sa.Enum(Moneda, name="moneda", create_type=False)
+    )
+    estado:            Mapped[PasivoEstado]   = mapped_column(
+        sa.Enum(PasivoEstado, name="pasivo_estado", create_type=False),
+        default=PasivoEstado.PENDIENTE, index=True,
+    )
+    fecha_vencimiento: Mapped[date | None]    = mapped_column(sa.Date(), nullable=True, index=True)
+    fecha_cancelacion: Mapped[date | None]    = mapped_column(sa.Date(), nullable=True)
+    observaciones:     Mapped[str | None]     = mapped_column(sa.Text(), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: GastoOperativo
+# ══════════════════════════════════════════════════════════════════════
+
+class GastoOperativo(Base):
+    __tablename__ = "gastos_operativos"
+    __table_args__ = (
+        sa.CheckConstraint("monto > 0", name="ck_gastos_operativos_monto_positive"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    concepto:        Mapped[str]      = mapped_column(sa.String(300), nullable=False)
+    monto:           Mapped[Decimal]  = mapped_column(sa.Numeric(18, 2))
+    moneda:          Mapped[Moneda]   = mapped_column(
+        sa.Enum(Moneda, name="moneda", create_type=False),
+        default=Moneda.ARS,
+    )
+    fecha_operacion: Mapped[date]     = mapped_column(sa.Date(), index=True)
+    observaciones:   Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
