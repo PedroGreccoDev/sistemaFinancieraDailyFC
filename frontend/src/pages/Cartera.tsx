@@ -1,7 +1,35 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getChequeCartera } from '../api/cheques'
-import { fmtARS, fmtDate, daysUntil } from '../lib/fmt'
+import { getChequeCartera, getCheques } from '../api/cheques'
+import { fmtARS, fmtDate, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
 import type { Cheque } from '../types'
+
+type FilterPreset = 'hoy' | 'semana' | 'mes' | 'anio' | 'custom'
+
+const PRESETS: { key: FilterPreset; label: string }[] = [
+  { key: 'hoy',    label: 'Hoy' },
+  { key: 'semana', label: 'Esta semana' },
+  { key: 'mes',    label: 'Este mes' },
+  { key: 'anio',   label: 'Este año' },
+  { key: 'custom', label: 'Personalizado' },
+]
+
+function presetRange(preset: FilterPreset, desde: string, hasta: string): [string, string] {
+  const hoy = todayISO()
+  if (preset === 'hoy')    return [hoy, hoy]
+  if (preset === 'semana') return [weekStartISO(), hoy]
+  if (preset === 'mes')    return [monthStartISO(), hoy]
+  if (preset === 'anio')   return [yearStartISO(), hoy]
+  return [desde, hasta]
+}
+
+function filterByRange(cheques: Cheque[], start: string, end: string): Cheque[] {
+  return cheques.filter(c => {
+    if (!c.ultimo_evento_manual_at) return false
+    const fecha = c.ultimo_evento_manual_at.slice(0, 10)
+    return fecha >= start && fecha <= end
+  })
+}
 
 function diasBadge(dias: number | null) {
   if (dias === null) return <span className="text-slate-400 text-xs">Sin fecha</span>
@@ -21,10 +49,20 @@ function totalCartera(cheques: Cheque[]): number {
 }
 
 export default function Cartera() {
+  const [preset, setPreset] = useState<FilterPreset>('mes')
+  const [desde, setDesde] = useState(monthStartISO())
+  const [hasta, setHasta] = useState(todayISO())
+
   const { data: cheques, isLoading, error, refetch } = useQuery({
     queryKey: ['cartera'],
     queryFn: getChequeCartera,
     refetchInterval: 30_000,
+  })
+
+  const { data: vendidos } = useQuery({
+    queryKey: ['cheques-vendidos'],
+    queryFn: () => getCheques('VENDIDO'),
+    refetchInterval: 60_000,
   })
 
   const sorted = cheques
@@ -36,8 +74,18 @@ export default function Cartera() {
       })
     : []
 
+  const [rangeStart, rangeEnd] = presetRange(preset, desde, hasta)
+  const filteredVendidos = vendidos
+    ? [...filterByRange(vendidos, rangeStart, rangeEnd)].sort((a, b) =>
+        (b.ultimo_evento_manual_at ?? '').localeCompare(a.ultimo_evento_manual_at ?? '')
+      )
+    : []
+  const totalGanancia = filteredVendidos.reduce((acc, c) => acc + parseFloat(c.ganancia), 0)
+
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+
+      {/* ── Cartera en stock ── */}
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Cartera</h1>
@@ -109,6 +157,126 @@ export default function Cartera() {
           </div>
         )}
       </div>
+
+      {/* ── Historial de ventas ── */}
+      <div className="mt-10">
+        <div className="mb-5">
+          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Historial de Ventas</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Cheques vendidos por período</p>
+        </div>
+
+        {/* Filtros de período */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          {PRESETS.map(p => (
+            <button
+              key={p.key}
+              onClick={() => setPreset(p.key)}
+              className={`text-sm px-3 py-1.5 rounded border font-medium transition-colors ${
+                preset === p.key
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Rango personalizado */}
+        {preset === 'custom' && (
+          <div className="flex flex-wrap gap-4 mb-4">
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Desde</label>
+              <input
+                type="date"
+                value={desde}
+                onChange={e => setDesde(e.target.value)}
+                className="text-sm border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block mb-1">Hasta</label>
+              <input
+                type="date"
+                value={hasta}
+                onChange={e => setHasta(e.target.value)}
+                className="text-sm border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Resumen del período */}
+        <div className="grid grid-cols-2 gap-3 mb-5">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
+            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Cheques vendidos</p>
+            <p className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mt-1">{filteredVendidos.length}</p>
+          </div>
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
+            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Ganancia del período</p>
+            <p className="text-lg sm:text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{fmtARS(totalGanancia)}</p>
+          </div>
+        </div>
+
+        {/* Tabla */}
+        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+          {filteredVendidos.length === 0 ? (
+            <div className="p-12 text-center text-slate-400">
+              <p className="text-4xl mb-3">📭</p>
+              <p className="font-medium">Sin ventas en el período</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[620px]">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50">
+                    <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Nº Cheque</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Monto</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400 hidden sm:table-cell">% Compra</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400 hidden sm:table-cell">% Venta</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Spread</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Ganancia</th>
+                    <th className="text-center px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Fecha venta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredVendidos.map(c => {
+                    const spread = c.porcentaje_venta !== null
+                      ? (parseFloat(c.porcentaje_compra) - parseFloat(c.porcentaje_venta)).toFixed(2)
+                      : null
+                    return (
+                      <tr key={c.nro_cheque} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
+                        <td className="px-4 py-3 font-mono font-medium text-slate-800 dark:text-slate-200 text-xs sm:text-sm">{c.nro_cheque}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-slate-900 dark:text-slate-100">{fmtARS(c.monto)}</td>
+                        <td className="px-4 py-3 text-right text-slate-500 hidden sm:table-cell">{parseFloat(c.porcentaje_compra).toFixed(2)}%</td>
+                        <td className="px-4 py-3 text-right text-slate-500 hidden sm:table-cell">
+                          {c.porcentaje_venta !== null ? `${parseFloat(c.porcentaje_venta).toFixed(2)}%` : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right font-medium text-indigo-600 dark:text-indigo-400">
+                          {spread !== null ? `${spread}%` : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold text-emerald-600 dark:text-emerald-400">{fmtARS(c.ganancia)}</td>
+                        <td className="px-4 py-3 text-center text-slate-500 text-xs">
+                          {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50">
+                    <td colSpan={5} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-right hidden sm:table-cell">Total</td>
+                    <td colSpan={5} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-right sm:hidden">Total</td>
+                    <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">{fmtARS(totalGanancia)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
     </div>
   )
 }
