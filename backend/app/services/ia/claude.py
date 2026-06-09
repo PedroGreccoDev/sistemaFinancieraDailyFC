@@ -23,6 +23,8 @@ INTENTS = {
     "RECHAZAR_CHEQUE",
     "NUEVO_PRESTAMO",
     "COBRAR_CUOTA",
+    "COBRAR_FIADO_EFECTIVO",
+    "COBRAR_FIADO_CON_CHEQUE",
     "MOVIMIENTO_EFECTIVO",
     "REGISTRAR_GASTO",
     "CONSULTA_CARTERA",
@@ -63,16 +65,13 @@ OPERACIONES DISPONIBLES
      - cliente_nombre: string o null (a quién se vendió)
 
 3. FIAR_CHEQUE
-   Cuándo: El operador usa el cheque para fiar/prestar a alguien.
-   Ej: "Se lo fié a Juan Pérez en 4 cuotas semanales de $5000"
+   Cuándo: El operador entrega un cheque a alguien como crédito abierto (sin cuotas fijas).
+   Ej: "Se lo fié a Juan al 3%", "Fié el 12345 a María Gómez al 2.5%"
+   La deuda queda abierta: el cliente pagará en efectivo o con otro cheque cuando pueda.
    data:
      - nro_cheque: string
      - cliente_nombre: string
-     - credito: number (monto del crédito, usualmente el monto del cheque)
-     - moneda: "ARS" o "USD"
-     - cuotas: integer
-     - frecuencia: "diaria" | "semanal" | "quincenal" | "mensual" | "anual"
-     - total_a_cobrar: number (suma que va a cobrar en total)
+     - porcentaje_venta: number (% de descuento pactado; el cliente deberá el monto menos ese %)
 
 4. COBRAR_CHEQUE
    Cuándo: El cheque se cobró en ventanilla al vencimiento.
@@ -98,13 +97,32 @@ OPERACIONES DISPONIBLES
      - total_a_cobrar: number
 
 7. COBRAR_CUOTA
-   Cuándo: Un deudor pagó una cuota.
+   Cuándo: Un deudor pagó una cuota de un préstamo.
    Ej: "Juan pagó", "Cobré cuota de Pedro García", "Pedro pagó la 3"
    data:
      - cliente_nombre: string
      - numero_cuota: integer o null (null = primera pendiente)
 
-8. MOVIMIENTO_EFECTIVO
+8. COBRAR_FIADO_EFECTIVO
+   Cuándo: Un cliente con fiado abierto paga parte o todo en efectivo.
+   Ej: "Juan me pagó $50000 del fiado", "María saldó el cheque en efectivo"
+   data:
+     - cliente_nombre: string
+     - monto_cobrado: number (monto que está pagando en efectivo)
+
+9. COBRAR_FIADO_CON_CHEQUE
+   Cuándo: Un cliente con fiado abierto paga entregando un nuevo cheque.
+   Ej: "Juan me trajo un cheque de $100000 al 2% para saldar el fiado"
+   El sistema calculará si el cheque cubre toda la deuda o solo una parte.
+   data:
+     - cliente_nombre: string
+     - nro_cheque_pago: string (número del cheque que entrega como pago)
+     - monto_cheque: number (valor nominal del cheque)
+     - porcentaje_compra_cheque: number (% de compra de ese cheque)
+     - fecha_emision: "YYYY-MM-DD" o null
+     - fecha_pago: "YYYY-MM-DD" o null
+
+10. MOVIMIENTO_EFECTIVO
    Cuándo: El operador compró o vendió divisas.
    Ej: "Compré 1000 dólares a 1250", "Vendí 500 USD a 1260, gané 5000"
    ⚠️ REGLA CRÍTICA: la cotización SIEMPRE la dicta el operador. JAMÁS la asumas.
@@ -116,12 +134,7 @@ OPERACIONES DISPONIBLES
      - ganancia: number (0 si no se menciona)
      - cliente_nombre: string o null
 
-9. CONSULTA_CARTERA
-   Cuándo: El operador pregunta qué cheques tiene.
-   Ej: "Qué cheques tengo?", "Estado de cartera", "Cuánto hay en cartera?"
-   data: {}
-
-10. REGISTRAR_GASTO
+11. REGISTRAR_GASTO
     Cuándo: El operador cargó un gasto operativo del negocio (nafta, comida, parking, insumos, etc.)
     Ej: "Cargué 10.000 de nafta", "Gasté 5000 en almuerzo", "Pagué 3500 de estacionamiento"
     data:
@@ -129,12 +142,17 @@ OPERACIONES DISPONIBLES
       - monto: number (en ARS salvo que especifiquen USD)
       - moneda: "ARS" o "USD" (default ARS)
 
-11. ACLARACION_REQUERIDA
+12. CONSULTA_CARTERA
+    Cuándo: El operador pregunta qué cheques tiene.
+    Ej: "Qué cheques tengo?", "Estado de cartera", "Cuánto hay en cartera?"
+    data: {}
+
+13. ACLARACION_REQUERIDA
     Cuándo: Falta información esencial para completar la operación.
     data:
       - pregunta: string (pregunta concreta y puntual al operador)
 
-12. DESCONOCIDO
+14. DESCONOCIDO
     Cuándo: El mensaje no corresponde a ninguna operación del sistema.
     data: {}
 

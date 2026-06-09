@@ -1,28 +1,28 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.db.models import (
     Cliente,
     Cheque,
     ChequeEstado,
+    Fiado,
+    FiadoEstado,
     InvalidChequeStateTransition,
     ManualOperationRequired,
-    Prestamo,
 )
 from app.schemas.cheques import ChequeCreate, ChequeFiarRequest, ChequeManualTransition
-from app.schemas.prestamos import PrestamoCreate
 from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
     NotFoundError,
     ValidationError,
 )
-from app.services.prestamos import construir_cuotas
 
 
 def create_cheque(db: Session, payload: ChequeCreate) -> Cheque:
@@ -97,7 +97,7 @@ def fiar_cheque(
     db: Session,
     nro_cheque: str,
     payload: ChequeFiarRequest,
-) -> tuple[Cheque, Prestamo]:
+) -> tuple[Cheque, Fiado]:
     cheque = db.scalar(
         select(Cheque).where(Cheque.nro_cheque == nro_cheque).with_for_update()
     )
@@ -106,55 +106,36 @@ def fiar_cheque(
     if db.get(Cliente, payload.cliente_destino_id) is None:
         raise NotFoundError("Cliente destino no encontrado.")
 
-    prestamo_payload = PrestamoCreate(
-        **payload.prestamo.model_dump(),
+    saldo_pendiente = (
+        cheque.monto * (Decimal("100") - payload.porcentaje_venta) / Decimal("100")
+    ).quantize(Decimal("0.01"))
+
+    fiado = Fiado(
+        cheque_nro=nro_cheque,
         cliente_id=payload.cliente_destino_id,
-        cheque_origen_nro=nro_cheque,
-    )
-    fecha_inicio = prestamo_payload.fecha_inicio or date.today()
-
-    prestamo = Prestamo(
-        cliente_id=prestamo_payload.cliente_id,
-        cheque_origen_nro=nro_cheque,
-        credito=prestamo_payload.credito,
-        moneda=prestamo_payload.moneda,
-        cuotas=prestamo_payload.cuotas,
-        frecuencia=prestamo_payload.frecuencia,
-        total_a_cobrar=prestamo_payload.total_a_cobrar,
-        ganancia=prestamo_payload.total_a_cobrar - prestamo_payload.credito,
-        fecha_inicio=fecha_inicio,
-    )
-    prestamo.cuotas_detalle = construir_cuotas(
-        prestamo=prestamo,
-        fecha_inicio=fecha_inicio,
-        cantidad=prestamo_payload.cuotas,
-        frecuencia=prestamo_payload.frecuencia,
-        total_a_cobrar=prestamo_payload.total_a_cobrar,
+        monto_original=cheque.monto,
+        porcentaje_venta=payload.porcentaje_venta,
+        saldo_pendiente=saldo_pendiente,
+        estado=FiadoEstado.ABIERTO,
+        fecha_fiado=date.today(),
     )
 
-    prestamo_id = prestamo.id
     try:
         cheque.transition_to(
             ChequeEstado.FIADO,
             operador_id=payload.operador_id,
             motivo=payload.motivo,
+            porcentaje_venta=payload.porcentaje_venta,
             cliente_destino_id=payload.cliente_destino_id,
         )
-        db.add(prestamo)
+        db.add(fiado)
         db.commit()
         db.refresh(cheque)
+        db.refresh(fiado)
+        return cheque, fiado
     except (InvalidChequeStateTransition, ManualOperationRequired) as exc:
         db.rollback()
         raise ValidationError(str(exc)) from exc
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("No se pudo fiar el cheque.") from exc
-
-    prestamo = db.scalar(
-        select(Prestamo)
-        .options(selectinload(Prestamo.cuotas_detalle))
-        .where(Prestamo.id == prestamo_id)
-    )
-    if prestamo is None:
-        raise DatabaseWriteError("No se pudo recuperar el prestamo creado.")
-    return cheque, prestamo

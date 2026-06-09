@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.models import ChequeEstado
-from app.schemas.prestamos import PrestamoCreateFromCheque, PrestamoRead
+from app.schemas.fiados import FiadoRead
 
 
 class ChequeCreate(BaseModel):
@@ -43,7 +43,7 @@ class ChequeFiarRequest(BaseModel):
     operador_id: str = Field(min_length=1, max_length=80)
     motivo: str = Field(min_length=1)
     cliente_destino_id: UUID
-    prestamo: PrestamoCreateFromCheque
+    porcentaje_venta: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
 
 
 class ChequeRead(BaseModel):
@@ -68,4 +68,4 @@ class ChequeRead(BaseModel):
 
 class ChequeFiarResponse(BaseModel):
     cheque: ChequeRead
-    prestamo: PrestamoRead
+    fiado: FiadoRead

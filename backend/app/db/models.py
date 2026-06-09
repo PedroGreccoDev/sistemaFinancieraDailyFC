@@ -61,6 +61,11 @@ class PasivoEstado(str, enum.Enum):
     CANCELADA = "CANCELADA"
 
 
+class FiadoEstado(str, enum.Enum):
+    ABIERTO   = "ABIERTO"
+    CANCELADO = "CANCELADO"
+
+
 # ══════════════════════════════════════════════════════════════════════
 #  EXCEPCIONES DE DOMINIO
 # ══════════════════════════════════════════════════════════════════════
@@ -118,6 +123,7 @@ class Cliente(Base):
     )
     prestamos:   Mapped[list[Prestamo]]          = relationship("Prestamo",          back_populates="cliente")
     movimientos: Mapped[list[MovimientoEfectivo]] = relationship("MovimientoEfectivo", back_populates="cliente")
+    fiados:      Mapped[list[Fiado]]              = relationship("Fiado",              back_populates="cliente")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -199,6 +205,9 @@ class Cheque(Base):
     prestamo_originado: Mapped[Prestamo | None] = relationship(
         "Prestamo", back_populates="cheque_origen", uselist=False
     )
+    fiado_originado: Mapped[Fiado | None] = relationship(
+        "Fiado", back_populates="cheque", uselist=False
+    )
 
     def transition_to(
         self,
@@ -240,8 +249,14 @@ class Cheque(Base):
                 self.monto * (porcentaje_venta - self.porcentaje_compra) / Decimal("100")
             ).quantize(Decimal("0.01"))
 
-        if target == ChequeEstado.FIADO and cliente_destino_id is not None:
-            self.cliente_destino_id = cliente_destino_id
+        if target == ChequeEstado.FIADO:
+            if porcentaje_venta is None:
+                raise ManualOperationRequired(
+                    "Se requiere porcentaje_venta para registrar el fiado del cheque."
+                )
+            self.porcentaje_venta = porcentaje_venta
+            if cliente_destino_id is not None:
+                self.cliente_destino_id = cliente_destino_id
 
         self.estado                  = target
         self.ultimo_operador_id      = operador_id
@@ -375,6 +390,52 @@ class MovimientoEfectivo(Base):
     )
 
     cliente: Mapped[Cliente | None] = relationship("Cliente", back_populates="movimientos")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: Fiado (deuda de cliente por cheque entregado en crédito)
+# ══════════════════════════════════════════════════════════════════════
+
+class Fiado(Base):
+    __tablename__ = "fiados"
+    __table_args__ = (
+        sa.CheckConstraint("monto_original > 0",   name="ck_fiados_monto_positive"),
+        sa.CheckConstraint("saldo_pendiente >= 0", name="ck_fiados_saldo_non_negative"),
+        sa.CheckConstraint(
+            "porcentaje_venta >= 0 AND porcentaje_venta <= 100",
+            name="ck_fiados_porcentaje_range",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    cheque_nro: Mapped[str] = mapped_column(
+        sa.String(64),
+        sa.ForeignKey("cheques.nro_cheque", ondelete="RESTRICT"),
+        unique=True, index=True,
+    )
+    cliente_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        sa.ForeignKey("clientes.id", ondelete="RESTRICT"),
+        index=True,
+    )
+
+    monto_original:   Mapped[Decimal]     = mapped_column(sa.Numeric(18, 2))
+    porcentaje_venta: Mapped[Decimal]     = mapped_column(sa.Numeric(7, 4))
+    saldo_pendiente:  Mapped[Decimal]     = mapped_column(sa.Numeric(18, 2))
+    estado:           Mapped[FiadoEstado] = mapped_column(
+        sa.Enum(FiadoEstado, name="fiado_estado", create_type=False),
+        default=FiadoEstado.ABIERTO, index=True,
+    )
+    fecha_fiado: Mapped[date] = mapped_column(sa.Date())
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
+
+    cheque:  Mapped[Cheque]  = relationship("Cheque",  back_populates="fiado_originado")
+    cliente: Mapped[Cliente] = relationship("Cliente", back_populates="fiados")
 
 
 # ══════════════════════════════════════════════════════════════════════

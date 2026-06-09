@@ -13,6 +13,8 @@ from app.db.models import (
     Cliente,
     Cuota,
     CuotaEstado,
+    Fiado,
+    FiadoEstado,
     Prestamo,
     PrestamoEstado,
     ChequeEstado,
@@ -24,10 +26,12 @@ from app.schemas.gastos_operativos import GastoOperativoCreate
 from app.services import gastos_operativos as svc_gastos
 from app.schemas.cheques import ChequeFiarRequest, ChequeCreate, ChequeManualTransition
 from app.schemas.clientes import ClienteCreate
+from app.schemas.fiados import FiadoCobrarConChequeRequest, FiadoCobrarEfectivoRequest
 from app.schemas.movimientos import MovimientoEfectivoCreate
-from app.schemas.prestamos import PrestamoCreate, PrestamoCreateFromCheque
+from app.schemas.prestamos import PrestamoCreate
 from app.services import cheques as svc_cheques
 from app.services import clientes as svc_clientes
+from app.services import fiados as svc_fiados
 from app.services import movimientos as svc_movimientos
 from app.services import prestamos as svc_prestamos
 from app.services.exceptions import ServiceError
@@ -69,6 +73,10 @@ def dispatch(db: Session, phone: str, result: IntentResult) -> DispatchResult:
             return _nuevo_prestamo(db, data)
         if intent == "COBRAR_CUOTA":
             return _cobrar_cuota(db, data)
+        if intent == "COBRAR_FIADO_EFECTIVO":
+            return _cobrar_fiado_efectivo(db, phone, data)
+        if intent == "COBRAR_FIADO_CON_CHEQUE":
+            return _cobrar_fiado_con_cheque(db, phone, data)
         if intent == "MOVIMIENTO_EFECTIVO":
             return _movimiento_efectivo(db, data)
         if intent == "REGISTRAR_GASTO":
@@ -167,37 +175,23 @@ def _vender_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchRes
 def _fiar_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
     nro = _req_str(data, "nro_cheque")
     cliente_nombre = _req_str(data, "cliente_nombre")
-    credito = _req_decimal(data, "credito")
-    moneda = _req_enum(data, "moneda", Moneda)
-    cuotas = _req_int(data, "cuotas")
-    frecuencia = _req_enum(data, "frecuencia", FrecuenciaCuotas)
-    total = _req_decimal(data, "total_a_cobrar")
+    pct_venta = _req_decimal(data, "porcentaje_venta")
 
     cliente = _find_or_create_cliente(db, cliente_nombre)
 
-    prestamo_payload = PrestamoCreateFromCheque(
-        credito=credito,
-        moneda=moneda,
-        cuotas=cuotas,
-        frecuencia=frecuencia,
-        total_a_cobrar=total,
-        fecha_inicio=date.today(),
-    )
     request = ChequeFiarRequest(
         operador_id=phone,
         motivo=f"Fiado a {cliente.nombre}",
         cliente_destino_id=cliente.id,
-        prestamo=prestamo_payload,
+        porcentaje_venta=pct_venta,
     )
-    cheque, prestamo = svc_cheques.fiar_cheque(db, nro, request)
+    cheque, fiado = svc_cheques.fiar_cheque(db, nro, request)
 
-    simbolo = "U$D" if moneda == Moneda.USD else "$"
     lines = [
-        f"✅ *Cheque fiado — Préstamo creado*",
+        f"✅ *Cheque fiado*",
         f"Nº {cheque.nro_cheque} → {cliente.nombre}",
-        f"Crédito: {simbolo}{_fmt_num(credito)} | Total: {simbolo}{_fmt_num(total)}",
-        f"{cuotas} cuotas {frecuencia.value}s de {simbolo}{_fmt_num(total / cuotas)}",
-        f"Ganancia esperada: {simbolo}{_fmt_num(prestamo.ganancia)}",
+        f"Monto nominal: {_ars(cheque.monto)}",
+        f"Descuento: {pct_venta}% | Saldo pendiente: {_ars(fiado.saldo_pendiente)}",
     ]
     return True, "\n".join(lines)
 
@@ -356,6 +350,93 @@ def _registrar_gasto(db: Session, data: dict[str, Any]) -> DispatchResult:
         f"Concepto: {gasto.concepto}\n"
         f"Monto: {simbolo}{_fmt_num(gasto.monto)}"
     )
+
+
+def _cobrar_fiado_efectivo(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
+    cliente_nombre = _req_str(data, "cliente_nombre")
+    monto_cobrado = _req_decimal(data, "monto_cobrado")
+
+    fiado = _buscar_fiado_abierto(db, cliente_nombre)
+    if fiado is None:
+        return False, f"❓ No encontré un fiado abierto para '{cliente_nombre}'."
+
+    payload = FiadoCobrarEfectivoRequest(
+        monto_cobrado=monto_cobrado,
+        operador_id=phone,
+    )
+    fiado_actualizado = svc_fiados.cobrar_con_efectivo(db, fiado.id, payload)
+
+    if fiado_actualizado.estado == FiadoEstado.CANCELADO:
+        return True, (
+            f"✅ *Fiado cancelado* — {cliente_nombre}\n"
+            f"Cobrado: {_ars(monto_cobrado)} | Saldo: {_ars(fiado_actualizado.saldo_pendiente)}\n"
+            f"🎉 Deuda saldada completamente."
+        )
+    return True, (
+        f"✅ *Pago parcial registrado* — {cliente_nombre}\n"
+        f"Cobrado: {_ars(monto_cobrado)}\n"
+        f"Saldo restante: {_ars(fiado_actualizado.saldo_pendiente)}"
+    )
+
+
+def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
+    cliente_nombre = _req_str(data, "cliente_nombre")
+    nro_cheque_pago = _req_str(data, "nro_cheque_pago")
+    monto_cheque = _req_decimal(data, "monto_cheque")
+    pct_compra = _req_decimal(data, "porcentaje_compra_cheque")
+    fecha_emision = _opt_date(data, "fecha_emision")
+    fecha_pago = _opt_date(data, "fecha_pago")
+
+    fiado = _buscar_fiado_abierto(db, cliente_nombre)
+    if fiado is None:
+        return False, f"❓ No encontré un fiado abierto para '{cliente_nombre}'."
+
+    payload = FiadoCobrarConChequeRequest(
+        nro_cheque_pago=nro_cheque_pago,
+        monto_cheque=monto_cheque,
+        porcentaje_compra_cheque=pct_compra,
+        fecha_emision=fecha_emision,
+        fecha_pago=fecha_pago,
+        operador_id=phone,
+    )
+    resultado = svc_fiados.cobrar_con_cheque(db, fiado.id, payload)
+
+    fiado_act = resultado.fiado
+    diferencia = resultado.diferencia
+    cheque_nuevo = resultado.cheque_ingresado
+
+    lines = [
+        f"✅ *Cheque recibido como pago de fiado* — {cliente_nombre}",
+        f"Cheque Nº {cheque_nuevo.nro_cheque} | Nominal: {_ars(monto_cheque)} | Compra: {pct_compra}%",
+        f"Valor neto: {_ars(monto_cheque * (100 - pct_compra) / 100)}",
+    ]
+
+    if fiado_act.estado == FiadoEstado.CANCELADO:
+        lines.append(f"🎉 Fiado *cancelado* — deuda saldada.")
+        if diferencia > 0:
+            lines.append(f"⚠️ Le debés al cliente: {_ars(diferencia)}")
+    else:
+        lines.append(f"Saldo restante del fiado: {_ars(fiado_act.saldo_pendiente)}")
+
+    return True, "\n".join(lines)
+
+
+def _buscar_fiado_abierto(db: Session, cliente_nombre: str) -> Fiado | None:
+    """Devuelve el fiado ABIERTO del cliente, o None si no hay exactamente uno."""
+    cliente = _buscar_cliente_exacto(db, cliente_nombre)
+    if cliente is None:
+        return None
+    fiados: list[Fiado] = list(
+        db.scalars(
+            select(Fiado).where(
+                Fiado.cliente_id == cliente.id,
+                Fiado.estado == FiadoEstado.ABIERTO,
+            )
+        ).all()
+    )
+    if len(fiados) == 1:
+        return fiados[0]
+    return None
 
 
 def _consulta_cartera(db: Session) -> DispatchResult:
