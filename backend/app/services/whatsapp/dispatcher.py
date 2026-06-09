@@ -24,6 +24,8 @@ from app.db.models import (
 )
 from app.schemas.gastos_operativos import GastoOperativoCreate
 from app.services import gastos_operativos as svc_gastos
+from app.schemas.pasivos import PasivoCreate
+from app.services import pasivos as svc_pasivos
 from app.schemas.cheques import ChequeFiarRequest, ChequeCreate, ChequeManualTransition
 from app.schemas.clientes import ClienteCreate
 from app.schemas.fiados import FiadoCobrarConChequeRequest, FiadoCobrarEfectivoRequest
@@ -77,6 +79,8 @@ def dispatch(db: Session, phone: str, result: IntentResult) -> DispatchResult:
             return _cobrar_fiado_efectivo(db, phone, data)
         if intent == "COBRAR_FIADO_CON_CHEQUE":
             return _cobrar_fiado_con_cheque(db, phone, data)
+        if intent == "REGISTRAR_DEUDA":
+            return _registrar_deuda(db, data)
         if intent == "MOVIMIENTO_EFECTIVO":
             return _movimiento_efectivo(db, data)
         if intent == "REGISTRAR_GASTO":
@@ -295,6 +299,34 @@ def _cobrar_cuota(db: Session, data: dict[str, Any]) -> DispatchResult:
         f"✅ Cuota #{cobrada.numero_cuota} de {cliente.nombre} cobrada.\n"
         f"Monto: {_ars(cobrada.monto)}{extra}"
     )
+
+
+def _registrar_deuda(db: Session, data: dict[str, Any]) -> DispatchResult:
+    acreedor = _req_str(data, "acreedor")
+    concepto = _req_str(data, "concepto")
+    monto = _req_decimal(data, "monto")
+    moneda = _req_enum(data, "moneda", Moneda) if data.get("moneda") else Moneda.ARS
+    fecha_vencimiento = _opt_date(data, "fecha_vencimiento")
+
+    payload = PasivoCreate(
+        acreedor=acreedor,
+        concepto=concepto,
+        monto=monto,
+        moneda=moneda,
+        fecha_vencimiento=fecha_vencimiento,
+    )
+    pasivo = svc_pasivos.create_pasivo(db, payload)
+
+    simbolo = "U$D" if moneda == Moneda.USD else "$"
+    lines = [
+        f"📋 *Deuda registrada*",
+        f"Acreedor: {pasivo.acreedor}",
+        f"Concepto: {pasivo.concepto}",
+        f"Monto: {simbolo}{_fmt_num(monto)}",
+    ]
+    if pasivo.fecha_vencimiento:
+        lines.append(f"Vencimiento: {_fmt_date(pasivo.fecha_vencimiento)}")
+    return True, "\n".join(lines)
 
 
 def _movimiento_efectivo(db: Session, data: dict[str, Any]) -> DispatchResult:

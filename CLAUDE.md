@@ -75,7 +75,9 @@ El cliente puede cancelar esa deuda de dos formas:
 ### 5. Pasivos _(módulo agregado 2026-06-08)_
 
 - Registro de **deudas del negocio** con clientes y proveedores (cuentas a pagar).
-- **Carga exclusivamente manual desde el panel web.** El bot de WhatsApp no interviene.
+- **Alta** via bot de WhatsApp (intent `REGISTRAR_DEUDA`) o desde el panel web (botón "Nueva deuda").
+- El bot **exige** que el operador indique el concepto; si falta, responde con `ACLARACION_REQUERIDA`.
+- **Cancelación** solo desde el panel web (el bot no puede cancelar pasivos).
 - Estados: `PENDIENTE` → `CANCELADA` (transición única, irreversible).
 - Campos: `acreedor`, `concepto`, `monto`, `moneda`, `fecha_vencimiento` (opcional).
 - El cierre de caja incluye un snapshot de pasivos pendientes por moneda, **sin filtro de periodo**.
@@ -106,7 +108,7 @@ El cliente puede cancelar esa deuda de dos formas:
 - Solo el número configurado en `WHATSAPP_OPERATOR_PHONE` puede operar.
 - Flujo: mensaje → parser → (audio: Whisper) → Claude → dispatcher → BD → respuesta WA.
 - La sesión de Claude **se limpia tras cada transacción exitosa** (Regla de Limpieza).
-- Los **pasivos** no son accesibles desde el bot; el operador debe usar el panel web.
+- Los **pasivos** se pueden registrar desde el bot via `REGISTRAR_DEUDA`; la cancelación es solo desde el panel web.
 - Los **gastos operativos** sí son registrables desde el bot via intent `REGISTRAR_GASTO`.
 - Los **fiados** son operables desde el bot: `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
 

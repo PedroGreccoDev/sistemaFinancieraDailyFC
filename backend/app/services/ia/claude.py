@@ -25,6 +25,7 @@ INTENTS = {
     "COBRAR_CUOTA",
     "COBRAR_FIADO_EFECTIVO",
     "COBRAR_FIADO_CON_CHEQUE",
+    "REGISTRAR_DEUDA",
     "MOVIMIENTO_EFECTIVO",
     "REGISTRAR_GASTO",
     "CONSULTA_CARTERA",
@@ -122,7 +123,18 @@ OPERACIONES DISPONIBLES
      - fecha_emision: "YYYY-MM-DD" o null
      - fecha_pago: "YYYY-MM-DD" o null
 
-10. MOVIMIENTO_EFECTIVO
+10. REGISTRAR_DEUDA
+   Cuándo: El operador informa que el negocio le debe dinero a alguien.
+   Ej: "Le debo 5000 a Fernando Cuello", "Anotá que le debo 200 dólares a María por los insumos"
+   Si no se menciona el concepto (razón/motivo de la deuda) → ACLARACION_REQUERIDA.
+   data:
+     - acreedor: string (a quién se le debe)
+     - concepto: string (razón o motivo de la deuda; REQUERIDO)
+     - monto: number
+     - moneda: "ARS" o "USD" (default ARS)
+     - fecha_vencimiento: "YYYY-MM-DD" o null (si se menciona una fecha límite)
+
+11. MOVIMIENTO_EFECTIVO
    Cuándo: El operador compró o vendió divisas.
    Ej: "Compré 1000 dólares a 1250", "Vendí 500 USD a 1260, gané 5000"
    ⚠️ REGLA CRÍTICA: la cotización SIEMPRE la dicta el operador. JAMÁS la asumas.
@@ -134,7 +146,7 @@ OPERACIONES DISPONIBLES
      - ganancia: number (0 si no se menciona)
      - cliente_nombre: string o null
 
-11. REGISTRAR_GASTO
+12. REGISTRAR_GASTO
     Cuándo: El operador cargó un gasto operativo del negocio (nafta, comida, parking, insumos, etc.)
     Ej: "Cargué 10.000 de nafta", "Gasté 5000 en almuerzo", "Pagué 3500 de estacionamiento"
     data:
@@ -142,17 +154,17 @@ OPERACIONES DISPONIBLES
       - monto: number (en ARS salvo que especifiquen USD)
       - moneda: "ARS" o "USD" (default ARS)
 
-12. CONSULTA_CARTERA
+13. CONSULTA_CARTERA
     Cuándo: El operador pregunta qué cheques tiene.
     Ej: "Qué cheques tengo?", "Estado de cartera", "Cuánto hay en cartera?"
     data: {}
 
-13. ACLARACION_REQUERIDA
+14. ACLARACION_REQUERIDA
     Cuándo: Falta información esencial para completar la operación.
     data:
       - pregunta: string (pregunta concreta y puntual al operador)
 
-14. DESCONOCIDO
+15. DESCONOCIDO
     Cuándo: El mensaje no corresponde a ninguna operación del sistema.
     data: {}
 
