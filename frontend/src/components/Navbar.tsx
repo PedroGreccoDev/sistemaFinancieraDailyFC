@@ -7,7 +7,6 @@ const NAV_LINKS = [
   { to: '/',             label: 'Inicio',      end: true  },
   { to: '/cartera',      label: 'Cartera',     end: false },
   { to: '/deudores',     label: 'Deudores',    end: false },
-  { to: '/fiados',       label: 'Fiados',      end: false },
   { to: '/pasivos',      label: 'Deudas',      end: false },
   { to: '/reportes',     label: 'Reportes',    end: false },
   { to: '/movimientos',  label: 'Movimientos', end: false },

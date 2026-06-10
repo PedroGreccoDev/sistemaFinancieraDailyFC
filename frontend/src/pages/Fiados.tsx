@@ -329,7 +329,7 @@ export default function Fiados() {
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Fiados</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Cheques fiados</h1>
           <p className="text-sm text-slate-500 mt-0.5">Deudas de clientes por cheques entregados en crédito</p>
         </div>
         <button onClick={() => refetch()}
