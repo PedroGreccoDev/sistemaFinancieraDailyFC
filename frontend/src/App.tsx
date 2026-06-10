@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Navbar from './components/Navbar'
+import DolarWidget from './components/DolarWidget'
 import Dashboard from './pages/Dashboard'
 import Cartera from './pages/Cartera'
 import Deudores from './pages/Deudores'
@@ -62,6 +63,8 @@ export default function App() {
             </Routes>
           </main>
         </div>
+
+        <DolarWidget />
 
         <button
           onClick={toggleDark}

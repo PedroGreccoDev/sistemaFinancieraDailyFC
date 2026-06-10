@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getMovimientos } from '../api/movimientos'
 import { getGastos } from '../api/gastos_operativos'
@@ -122,6 +122,73 @@ function enRango(fecha: string, desde: string | null, hasta: string | null): boo
   return true
 }
 
+// ── Dropdown custom ───────────────────────────────────────────────────────────
+
+function DropdownFilter<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (v: T) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [])
+
+  const current = options.find((o) => o.value === value)
+
+  return (
+    <div className="flex flex-col gap-1" ref={ref}>
+      <label className="text-xs font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wide">
+        {label}
+      </label>
+      <div className="relative">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-2 text-sm font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-colors min-w-[140px] justify-between"
+        >
+          <span>{current?.label}</span>
+          <svg
+            className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+
+        {open && (
+          <div className="absolute top-full left-0 mt-1 z-20 min-w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg py-1 overflow-hidden">
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => { onChange(opt.value); setOpen(false) }}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                  opt.value === value
+                    ? 'bg-slate-100 dark:bg-slate-700/60 text-slate-900 dark:text-slate-100 font-semibold'
+                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/40'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Componente ────────────────────────────────────────────────────────────────
 
 export default function Movimientos() {
@@ -178,12 +245,6 @@ export default function Movimientos() {
       : 'Personalizado'
 
   const secciones: Seccion[] = ['TODOS', 'DIVISAS', 'GASTOS', 'CHEQUES', 'PRESTAMOS']
-  const presets: { key: PresetFecha; label: string }[] = [
-    { key: 'HOY', label: 'Hoy' },
-    { key: 'SEMANA', label: 'Esta semana' },
-    { key: 'MES', label: 'Este mes' },
-    { key: 'PERSONALIZADO', label: labelPersonalizado },
-  ]
 
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto">
@@ -204,38 +265,26 @@ export default function Movimientos() {
         </button>
       </div>
 
-      {/* Filtro de sección */}
-      <div className="flex flex-wrap gap-1.5 mb-4">
-        {secciones.map((s) => (
-          <button
-            key={s}
-            onClick={() => setSeccion(s)}
-            className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              seccion === s
-                ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-          >
-            {s === 'TODOS' ? 'Todos' : SECCION_CONFIG[s].label}
-          </button>
-        ))}
-      </div>
+      {/* Filtros */}
+      <div className="relative flex flex-wrap items-end gap-3 mb-6">
+        <DropdownFilter
+          label="Sección"
+          value={seccion}
+          options={secciones.map((s) => ({ value: s, label: s === 'TODOS' ? 'Todos' : SECCION_CONFIG[s].label }))}
+          onChange={setSeccion}
+        />
 
-      {/* Filtro de fecha */}
-      <div className="relative flex flex-wrap gap-1.5 mb-6">
-        {presets.map(({ key, label }) => (
-          <button
-            key={key}
-            onClick={() => handlePreset(key)}
-            className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              preset === key
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+        <DropdownFilter
+          label="Período"
+          value={preset}
+          options={[
+            { value: 'HOY' as PresetFecha, label: 'Hoy' },
+            { value: 'SEMANA' as PresetFecha, label: 'Esta semana' },
+            { value: 'MES' as PresetFecha, label: 'Este mes' },
+            { value: 'PERSONALIZADO' as PresetFecha, label: labelPersonalizado },
+          ]}
+          onChange={handlePreset}
+        />
 
         {/* Calendar popover */}
         {showPicker && (
