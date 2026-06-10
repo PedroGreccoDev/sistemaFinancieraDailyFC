@@ -29,6 +29,7 @@ INTENTS = {
     "MOVIMIENTO_EFECTIVO",
     "REGISTRAR_GASTO",
     "CONSULTA_CARTERA",
+    "EDITAR_OPERACION",
     "ACLARACION_REQUERIDA",
     "DESCONOCIDO",
 }
@@ -159,12 +160,41 @@ OPERACIONES DISPONIBLES
     Ej: "Qué cheques tengo?", "Estado de cartera", "Cuánto hay en cartera?"
     data: {}
 
-14. ACLARACION_REQUERIDA
+14. EDITAR_OPERACION
+    Cuándo: El operador quiere corregir un dato ya registrado.
+    Ej: "El cheque 12345 tiene mal el porcentaje, era 3% no 2%",
+        "Corregí el monto del último movimiento, era 1500 USD",
+        "El último gasto era $8000 no $5000",
+        "La deuda con Fernando tiene mal el monto, son $6000"
+    data:
+      - tipo_operacion: "CHEQUE" | "MOVIMIENTO" | "GASTO" | "PASIVO"
+      - identificador: string
+          * CHEQUE → el nro_cheque exacto
+          * MOVIMIENTO / GASTO → "ultimo" (el más reciente registrado)
+          * PASIVO → "ultimo" o el nombre del acreedor si se menciona
+      - campo: string (qué campo corregir)
+          * CHEQUE EN_CARTERA: "monto" | "porcentaje_compra" | "fecha_emision" | "fecha_pago" | "cliente_origen"
+          * CHEQUE VENDIDO o FIADO: todo lo anterior + "porcentaje_venta" | "cliente_destino"
+          * CHEQUE COBRADO o RECHAZADO: igual que EN_CARTERA
+          * MOVIMIENTO: "monto" | "cotizacion_aplicada" | "ganancia" | "tipo"
+          * GASTO: "concepto" | "monto" | "moneda"
+          * PASIVO: "acreedor" | "concepto" | "monto" | "moneda" | "fecha_vencimiento"
+      - nuevo_valor: string | number (el valor correcto)
+    Reglas:
+      - Los cheques se pueden editar en cualquier estado (es una corrección de datos, no un cambio de estado).
+        Al corregir monto o % en un cheque VENDIDO, la ganancia se recalcula automáticamente.
+        Al corregir monto o % en un cheque FIADO con fiado abierto, el saldo pendiente se recalcula.
+      - Solo pasivos PENDIENTE pueden editarse.
+      - Si dice "el último", "lo que acabo de cargar", "lo de recién" → identificador = "ultimo".
+      - Para fechas: "YYYY-MM-DD". Para montos y %: número puro sin símbolos.
+      - Si no queda claro qué operación o qué campo → ACLARACION_REQUERIDA.
+
+15. ACLARACION_REQUERIDA
     Cuándo: Falta información esencial para completar la operación.
     data:
       - pregunta: string (pregunta concreta y puntual al operador)
 
-15. DESCONOCIDO
+16. DESCONOCIDO
     Cuándo: El mensaje no corresponde a ninguna operación del sistema.
     data: {}
 

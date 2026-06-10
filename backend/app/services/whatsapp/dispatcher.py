@@ -10,11 +10,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    Cheque,
     Cliente,
     Cuota,
     CuotaEstado,
     Fiado,
     FiadoEstado,
+    GastoOperativo,
+    MovimientoEfectivo,
+    Pasivo,
+    PasivoEstado,
     Prestamo,
     PrestamoEstado,
     ChequeEstado,
@@ -92,6 +97,8 @@ def dispatch(
             return _registrar_gasto(db, data, msg_at)
         if intent == "CONSULTA_CARTERA":
             return _consulta_cartera(db)
+        if intent == "EDITAR_OPERACION":
+            return _editar_operacion(db, data)
         # ACLARACION_REQUERIDA y DESCONOCIDO no tocan la BD
         return False, result.respuesta_usuario or "❓ No entendí. ¿Podés repetirlo?"
 
@@ -482,6 +489,286 @@ def _buscar_fiado_abierto(db: Session, cliente_nombre: str) -> Fiado | None:
     return None
 
 
+def _editar_operacion(db: Session, data: dict[str, Any]) -> DispatchResult:
+    tipo = str(data.get("tipo_operacion", "")).upper().strip()
+    identificador = str(data.get("identificador", "")).strip()
+    campo = str(data.get("campo", "")).lower().strip()
+    nuevo_valor = data.get("nuevo_valor")
+
+    if not campo:
+        return False, "⚠️ No entendí qué campo querés corregir."
+    if nuevo_valor is None:
+        return False, "⚠️ No entendí el nuevo valor."
+
+    if tipo == "CHEQUE":
+        return _editar_cheque(db, identificador, campo, nuevo_valor)
+    if tipo == "MOVIMIENTO":
+        return _editar_movimiento(db, identificador, campo, nuevo_valor)
+    if tipo == "GASTO":
+        return _editar_gasto(db, identificador, campo, nuevo_valor)
+    if tipo == "PASIVO":
+        return _editar_pasivo(db, identificador, campo, nuevo_valor)
+    return False, f"⚠️ Tipo de operación no reconocido: '{tipo}'."
+
+
+def _editar_cheque(db: Session, nro: str, campo: str, nuevo_valor: Any) -> DispatchResult:
+    if not nro:
+        return False, "⚠️ Indicá el número de cheque a corregir."
+
+    cheque = db.get(Cheque, nro)
+    if cheque is None:
+        return False, f"❓ No encontré el cheque Nº {nro}."
+
+    # Campos disponibles según el estado del cheque
+    campos_base = {"monto", "porcentaje_compra", "fecha_emision", "fecha_pago", "cliente_origen"}
+    campos_post = {"porcentaje_venta", "cliente_destino"}
+    tiene_venta = cheque.estado in (ChequeEstado.VENDIDO, ChequeEstado.FIADO)
+    campos_validos = campos_base | (campos_post if tiene_venta else set())
+
+    if campo not in campos_validos:
+        return False, (
+            f"⚠️ Campo inválido: '{campo}'. "
+            f"Para cheques {cheque.estado.value} podés corregir: {', '.join(sorted(campos_validos))}."
+        )
+
+    estado_tag = f" _{cheque.estado.value}_" if cheque.estado != ChequeEstado.EN_CARTERA else ""
+    notas: list[str] = []
+
+    if campo == "monto":
+        nuevo = _parse_decimal_val(nuevo_valor)
+        anterior = _ars(cheque.monto)
+        cheque.monto = nuevo
+        if cheque.estado == ChequeEstado.VENDIDO and cheque.porcentaje_venta is not None:
+            cheque.ganancia = (nuevo * (cheque.porcentaje_compra - cheque.porcentaje_venta) / Decimal("100")).quantize(Decimal("0.01"))
+            notas.append(f"Ganancia recalculada: {_ars(cheque.ganancia)}")
+        if cheque.estado == ChequeEstado.FIADO and cheque.fiado_originado and cheque.fiado_originado.estado == FiadoEstado.ABIERTO:
+            f = cheque.fiado_originado
+            f.monto_original = nuevo
+            f.saldo_pendiente = (nuevo * (Decimal("100") - f.porcentaje_venta) / Decimal("100")).quantize(Decimal("0.01"))
+            notas.append(f"Fiado recalculado — saldo pendiente: {_ars(f.saldo_pendiente)}")
+        db.commit()
+        resp = f"✅ *Cheque Nº {nro}*{estado_tag} — monto corregido.\n{anterior} → {_ars(nuevo)}"
+        return True, resp + ("\n" + "\n".join(notas) if notas else "")
+
+    if campo == "porcentaje_compra":
+        nuevo = _parse_decimal_val(nuevo_valor)
+        anterior = _pct(cheque.porcentaje_compra)
+        cheque.porcentaje_compra = nuevo
+        if cheque.estado == ChequeEstado.VENDIDO and cheque.porcentaje_venta is not None:
+            cheque.ganancia = (cheque.monto * (nuevo - cheque.porcentaje_venta) / Decimal("100")).quantize(Decimal("0.01"))
+            notas.append(f"Ganancia recalculada: {_ars(cheque.ganancia)}")
+        db.commit()
+        resp = f"✅ *Cheque Nº {nro}*{estado_tag} — % compra corregido.\n{anterior}% → {_pct(nuevo)}%"
+        return True, resp + ("\n" + "\n".join(notas) if notas else "")
+
+    if campo == "porcentaje_venta":
+        nuevo = _parse_decimal_val(nuevo_valor)
+        anterior = _pct(cheque.porcentaje_venta) if cheque.porcentaje_venta is not None else "—"
+        cheque.porcentaje_venta = nuevo
+        if cheque.estado == ChequeEstado.VENDIDO:
+            cheque.ganancia = (cheque.monto * (cheque.porcentaje_compra - nuevo) / Decimal("100")).quantize(Decimal("0.01"))
+            notas.append(f"Ganancia recalculada: {_ars(cheque.ganancia)}")
+        if cheque.estado == ChequeEstado.FIADO and cheque.fiado_originado and cheque.fiado_originado.estado == FiadoEstado.ABIERTO:
+            f = cheque.fiado_originado
+            f.porcentaje_venta = nuevo
+            f.saldo_pendiente = (cheque.monto * (Decimal("100") - nuevo) / Decimal("100")).quantize(Decimal("0.01"))
+            notas.append(f"Fiado recalculado — saldo pendiente: {_ars(f.saldo_pendiente)}")
+        db.commit()
+        resp = f"✅ *Cheque Nº {nro}*{estado_tag} — % venta corregido.\n{anterior}% → {_pct(nuevo)}%"
+        return True, resp + ("\n" + "\n".join(notas) if notas else "")
+
+    if campo == "fecha_emision":
+        nuevo_d = _parse_date_val(nuevo_valor)
+        anterior = _fmt_date(cheque.fecha_emision)
+        cheque.fecha_emision = nuevo_d
+        db.commit()
+        return True, f"✅ *Cheque Nº {nro}*{estado_tag} — fecha emisión corregida.\n{anterior} → {_fmt_date(nuevo_d)}"
+
+    if campo == "fecha_pago":
+        nuevo_d = _parse_date_val(nuevo_valor)
+        anterior = _fmt_date(cheque.fecha_pago)
+        cheque.fecha_pago = nuevo_d
+        db.commit()
+        return True, f"✅ *Cheque Nº {nro}*{estado_tag} — fecha de pago corregida.\n{anterior} → {_fmt_date(nuevo_d)}"
+
+    if campo == "cliente_origen":
+        cliente = _find_or_create_cliente(db, str(nuevo_valor))
+        anterior = cheque.cliente_origen.nombre if cheque.cliente_origen else "—"
+        cheque.cliente_origen_id = cliente.id
+        db.commit()
+        return True, f"✅ *Cheque Nº {nro}*{estado_tag} — origen corregido.\n{anterior} → {cliente.nombre}"
+
+    if campo == "cliente_destino":
+        cliente = _find_or_create_cliente(db, str(nuevo_valor))
+        anterior = cheque.cliente_destino.nombre if cheque.cliente_destino else "—"
+        cheque.cliente_destino_id = cliente.id
+        db.commit()
+        return True, f"✅ *Cheque Nº {nro}*{estado_tag} — destino corregido.\n{anterior} → {cliente.nombre}"
+
+    return False, "⚠️ Error inesperado al editar el cheque."
+
+
+def _editar_movimiento(db: Session, identificador: str, campo: str, nuevo_valor: Any) -> DispatchResult:
+    if identificador.lower() == "ultimo":
+        mov = db.scalars(
+            select(MovimientoEfectivo).order_by(MovimientoEfectivo.created_at.desc()).limit(1)
+        ).first()
+    else:
+        return False, "❓ Para movimientos indicá 'el último' o usá el panel web."
+
+    if mov is None:
+        return False, "❓ No encontré ningún movimiento registrado."
+
+    campos_validos = {"monto", "cotizacion_aplicada", "ganancia", "tipo"}
+    if campo not in campos_validos:
+        return False, (
+            f"⚠️ Campo inválido: '{campo}'. "
+            f"Para movimientos podés corregir: {', '.join(sorted(campos_validos))}."
+        )
+
+    if campo == "tipo":
+        try:
+            nuevo_tipo = MovimientoEfectivoTipo(str(nuevo_valor).lower())
+        except ValueError:
+            try:
+                nuevo_tipo = MovimientoEfectivoTipo(str(nuevo_valor).upper())
+            except ValueError:
+                return False, f"⚠️ Tipo inválido: '{nuevo_valor}'. Válidos: compra, venta."
+        anterior = mov.tipo.value
+        mov.tipo = nuevo_tipo
+        db.commit()
+        return True, f"✅ *Movimiento* — tipo corregido.\n{anterior} → {nuevo_tipo.value}"
+
+    nuevo = _parse_decimal_val(nuevo_valor)
+    anteriores = {
+        "monto": _fmt_num(mov.monto),
+        "cotizacion_aplicada": f"${_fmt_num(mov.cotizacion_aplicada)}",
+        "ganancia": _ars(mov.ganancia),
+    }
+    setattr(mov, campo, nuevo)
+    db.commit()
+    return True, (
+        f"✅ *Movimiento* — {campo} corregido.\n"
+        f"{anteriores[campo]} → {_fmt_num(nuevo)}"
+    )
+
+
+def _editar_gasto(db: Session, identificador: str, campo: str, nuevo_valor: Any) -> DispatchResult:
+    if identificador.lower() == "ultimo":
+        gasto = db.scalars(
+            select(GastoOperativo).order_by(GastoOperativo.created_at.desc()).limit(1)
+        ).first()
+    else:
+        return False, "❓ Para gastos indicá 'el último' o usá el panel web."
+
+    if gasto is None:
+        return False, "❓ No encontré ningún gasto registrado."
+
+    campos_validos = {"concepto", "monto", "moneda"}
+    if campo not in campos_validos:
+        return False, (
+            f"⚠️ Campo inválido: '{campo}'. "
+            f"Para gastos podés corregir: concepto, monto, moneda."
+        )
+
+    if campo == "concepto":
+        anterior = gasto.concepto
+        gasto.concepto = str(nuevo_valor).strip()
+        db.commit()
+        return True, f"✅ *Gasto* — concepto corregido.\n'{anterior}' → '{gasto.concepto}'"
+
+    if campo == "moneda":
+        try:
+            nueva_moneda = Moneda(str(nuevo_valor).upper())
+        except ValueError:
+            return False, f"⚠️ Moneda inválida: '{nuevo_valor}'. Válidas: ARS, USD."
+        anterior = gasto.moneda.value
+        gasto.moneda = nueva_moneda
+        db.commit()
+        return True, f"✅ *Gasto '{gasto.concepto}'* — moneda corregida.\n{anterior} → {nueva_moneda.value}"
+
+    nuevo = _parse_decimal_val(nuevo_valor)
+    simbolo = "$" if gasto.moneda == Moneda.ARS else "U$D"
+    anterior = f"{simbolo}{_fmt_num(gasto.monto)}"
+    gasto.monto = nuevo
+    db.commit()
+    return True, f"✅ *Gasto '{gasto.concepto}'* — monto corregido.\n{anterior} → {simbolo}{_fmt_num(nuevo)}"
+
+
+def _editar_pasivo(db: Session, identificador: str, campo: str, nuevo_valor: Any) -> DispatchResult:
+    if identificador.lower() == "ultimo":
+        pasivo = db.scalars(
+            select(Pasivo)
+            .where(Pasivo.estado == PasivoEstado.PENDIENTE)
+            .order_by(Pasivo.created_at.desc())
+            .limit(1)
+        ).first()
+    else:
+        # Buscar por nombre de acreedor
+        resultados: list[Pasivo] = list(
+            db.scalars(
+                select(Pasivo).where(
+                    Pasivo.acreedor.ilike(f"%{identificador}%"),
+                    Pasivo.estado == PasivoEstado.PENDIENTE,
+                )
+            ).all()
+        )
+        pasivo = resultados[0] if len(resultados) == 1 else None
+        if pasivo is None and resultados:
+            nombres = ", ".join(f"{p.acreedor} (${_fmt_num(p.monto)})" for p in resultados[:3])
+            return False, f"❓ Encontré varios pasivos con '{identificador}': {nombres}. Sé más específico."
+
+    if pasivo is None:
+        return False, f"❓ No encontré ningún pasivo pendiente para '{identificador}'."
+
+    campos_validos = {"acreedor", "concepto", "monto", "moneda", "fecha_vencimiento"}
+    if campo not in campos_validos:
+        return False, (
+            f"⚠️ Campo inválido: '{campo}'. "
+            f"Para pasivos podés corregir: {', '.join(sorted(campos_validos))}."
+        )
+
+    if campo in ("acreedor", "concepto"):
+        anterior = getattr(pasivo, campo)
+        setattr(pasivo, campo, str(nuevo_valor).strip())
+        db.commit()
+        return True, f"✅ *Pasivo* — {campo} corregido.\n'{anterior}' → '{nuevo_valor}'"
+
+    if campo == "monto":
+        nuevo = _parse_decimal_val(nuevo_valor)
+        simbolo = "$" if pasivo.moneda == Moneda.ARS else "U$D"
+        anterior = f"{simbolo}{_fmt_num(pasivo.monto)}"
+        pasivo.monto = nuevo
+        db.commit()
+        return True, (
+            f"✅ *Pasivo con {pasivo.acreedor}* — monto corregido.\n"
+            f"{anterior} → {simbolo}{_fmt_num(nuevo)}"
+        )
+
+    if campo == "moneda":
+        try:
+            nueva_moneda = Moneda(str(nuevo_valor).upper())
+        except ValueError:
+            return False, f"⚠️ Moneda inválida: '{nuevo_valor}'. Válidas: ARS, USD."
+        anterior = pasivo.moneda.value
+        pasivo.moneda = nueva_moneda
+        db.commit()
+        return True, (
+            f"✅ *Pasivo con {pasivo.acreedor}* — moneda corregida.\n"
+            f"{anterior} → {nueva_moneda.value}"
+        )
+
+    # campo == "fecha_vencimiento"
+    nuevo_d = _parse_date_val(nuevo_valor)
+    anterior = _fmt_date(pasivo.fecha_vencimiento)
+    pasivo.fecha_vencimiento = nuevo_d
+    db.commit()
+    return True, (
+        f"✅ *Pasivo con {pasivo.acreedor}* — vencimiento corregido.\n"
+        f"{anterior} → {_fmt_date(nuevo_d)}"
+    )
+
+
 def _consulta_cartera(db: Session) -> DispatchResult:
     cheques = svc_cheques.list_cheques(db, estado=ChequeEstado.EN_CARTERA)
 
@@ -593,6 +880,22 @@ def _opt_date(data: dict, key: str) -> date | None:
         return date.fromisoformat(str(val))
     except ValueError:
         return None
+
+
+def _parse_decimal_val(val: Any) -> Decimal:
+    try:
+        return Decimal(str(val))
+    except InvalidOperation:
+        raise ValueError(f"Valor inválido (se esperaba un número): {val!r}")
+
+
+def _parse_date_val(val: Any) -> date | None:
+    if val is None or str(val).strip().lower() in ("", "null", "none"):
+        return None
+    try:
+        return date.fromisoformat(str(val))
+    except ValueError:
+        raise ValueError(f"Fecha inválida (usar YYYY-MM-DD): {val!r}")
 
 
 # ────────────────────────────────────────────────────────────────────────────
