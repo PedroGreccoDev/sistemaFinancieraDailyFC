@@ -263,51 +263,54 @@ export default function Movimientos() {
         )}
 
         {!isLoading && filtrados.length > 0 && (
-          <ul className="divide-y divide-slate-100 dark:divide-slate-700/60">
-            {filtrados.map((item) => {
-              const cfg = SECCION_CONFIG[item.seccion]
-              const montoFmt = fmtMonto(item.monto, item.moneda)
-              return (
-                <li
-                  key={`${item.seccion}-${item.id}`}
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
-                >
-                  {/* Fecha */}
-                  <span className="text-xs text-slate-400 dark:text-slate-500 w-16 shrink-0 font-mono">
-                    {fmtDate(item.fecha)}
-                  </span>
-
-                  {/* Badge sección */}
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${cfg.badge}`}>
-                    {cfg.label}
-                  </span>
-
-                  {/* Descripción + detalle */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">
-                      {item.descripcion}
-                    </p>
-                    {item.detalle && (
-                      <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">
-                        {item.detalle}
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80">
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-400 uppercase tracking-wide whitespace-nowrap">Fecha</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-400 uppercase tracking-wide">Sección</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-400 uppercase tracking-wide">Descripción</th>
+                <th className="text-right px-4 py-2.5 text-xs font-medium text-slate-400 uppercase tracking-wide">Monto</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+              {filtrados.map((item) => {
+                const cfg = SECCION_CONFIG[item.seccion]
+                const montoFmt = fmtMonto(item.monto, item.moneda)
+                return (
+                  <tr
+                    key={`${item.seccion}-${item.id}`}
+                    className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
+                  >
+                    <td className="px-4 py-3 text-xs text-slate-400 dark:text-slate-500 font-mono whitespace-nowrap">
+                      {fmtDate(item.fecha)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cfg.badge}`}>
+                        {cfg.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-slate-800 dark:text-slate-100 truncate max-w-xs">
+                        {item.descripcion}
                       </p>
-                    )}
-                  </div>
-
-                  {/* Monto */}
-                  <span
-                    className={`text-sm font-semibold shrink-0 tabular-nums ${
+                      {item.detalle && (
+                        <p className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-xs mt-0.5">
+                          {item.detalle}
+                        </p>
+                      )}
+                    </td>
+                    <td className={`px-4 py-3 text-right font-semibold tabular-nums whitespace-nowrap ${
                       item.esGasto
                         ? 'text-red-500 dark:text-red-400'
                         : 'text-slate-800 dark:text-slate-100'
-                    }`}
-                  >
-                    {item.esGasto ? `−${montoFmt}` : montoFmt}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
+                    }`}>
+                      {item.esGasto ? `−${montoFmt}` : montoFmt}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         )}
       </div>
     </div>

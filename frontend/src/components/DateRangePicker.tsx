@@ -46,15 +46,15 @@ export default function DateRangePicker({ from, to, onChange, onClose }: Props) 
         '--rdp-accent-color': '#3b82f6',
         '--rdp-accent-background-color': 'rgba(59,130,246,0.15)',
         '--rdp-range_middle-background-color': 'rgba(59,130,246,0.12)',
-        '--rdp-range_start-color': '#fff',
-        '--rdp-range_end-color': '#fff',
+        '--rdp-range_middle-color': '#3b82f6',
+        '--rdp-range_start-color': '#ffffff',
+        '--rdp-range_end-color': '#ffffff',
         '--rdp-today-color': '#3b82f6',
-        '--rdp-day-height': '36px',
-        '--rdp-day-width': '36px',
-        '--rdp-day_button-height': '34px',
-        '--rdp-day_button-width': '34px',
-        '--rdp-nav-height': '2.2rem',
-        '--rdp-months-gap': '2rem',
+        '--rdp-day-height': '30px',
+        '--rdp-day-width': '30px',
+        '--rdp-day_button-height': '28px',
+        '--rdp-day_button-width': '28px',
+        '--rdp-nav-height': '2rem',
       } as React.CSSProperties}
     >
       <DayPicker
@@ -63,7 +63,6 @@ export default function DateRangePicker({ from, to, onChange, onClose }: Props) 
         onSelect={(r: DateRange | undefined) =>
           onChange(dateToISO(r?.from), dateToISO(r?.to))
         }
-        numberOfMonths={2}
         locale={es}
         showOutsideDays
       />
