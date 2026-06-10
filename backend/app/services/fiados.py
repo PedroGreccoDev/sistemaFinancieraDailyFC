@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -70,6 +70,7 @@ def cobrar_con_cheque(
     db: Session,
     fiado_id: uuid.UUID,
     payload: FiadoCobrarConChequeRequest,
+    created_at: datetime | None = None,
 ) -> FiadoCobrarConChequeResponse:
     fiado = db.scalar(select(Fiado).where(Fiado.id == fiado_id).with_for_update())
     if fiado is None:
@@ -96,6 +97,8 @@ def cobrar_con_cheque(
         ganancia=Decimal("0.00"),
         cliente_origen_id=fiado.cliente_id,
     )
+    if created_at is not None:
+        cheque_nuevo.created_at = created_at
 
     if diferencia >= Decimal("0.00"):
         fiado.saldo_pendiente = Decimal("0.00")

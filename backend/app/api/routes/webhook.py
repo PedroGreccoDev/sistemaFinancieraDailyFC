@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -116,7 +117,7 @@ async def _procesar_mensaje(
             logger.info("Operación confirmada por %s (intent=%s)", phone, pending.intent)
             wa_session.clear_pending_intent(phone)
             wa_session.add_user_message(phone, text_content)
-            await _ejecutar_y_responder(phone=phone, intent_result=pending)
+            await _ejecutar_y_responder(phone=phone, intent_result=pending, msg_at=msg.timestamp)
             return
         if clasificacion == "reject":
             logger.info("Operación cancelada por %s", phone)
@@ -151,17 +152,18 @@ async def _procesar_mensaje(
         await wa_client.send_text(phone, intent_result.respuesta_usuario)
         return
 
-    await _ejecutar_y_responder(phone=phone, intent_result=intent_result)
+    await _ejecutar_y_responder(phone=phone, intent_result=intent_result, msg_at=msg.timestamp)
 
 
 async def _ejecutar_y_responder(
     phone: str,
     intent_result: ia_claude.IntentResult,
+    msg_at: datetime | None = None,
 ) -> None:
     """Ejecuta el dispatch en BD y envía la respuesta al operador."""
     db = SessionLocal()
     try:
-        limpiar_sesion, respuesta = wa_dispatcher.dispatch(db, phone, intent_result)
+        limpiar_sesion, respuesta = wa_dispatcher.dispatch(db, phone, intent_result, msg_at=msg_at)
     finally:
         db.close()
 

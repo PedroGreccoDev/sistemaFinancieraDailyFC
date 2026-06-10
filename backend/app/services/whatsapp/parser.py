@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ class IncomingMessage:
     media_mime_type: str = ""           # MIME type del media
     media_url: str = ""                 # URL del media en el file server de WAHA
     message_id: str = ""
+    timestamp: datetime | None = None   # Hora del mensaje según WAHA (UTC)
 
 
 def parse_webhook(body: dict[str, Any]) -> IncomingMessage | None:
@@ -57,6 +59,11 @@ def parse_webhook(body: dict[str, Any]) -> IncomingMessage | None:
     message_id: str = payload.get("id", "")
     body_text: str = (payload.get("body") or "").strip()
 
+    _t = payload.get("t")
+    msg_ts: datetime | None = (
+        datetime.fromtimestamp(_t, tz=timezone.utc) if isinstance(_t, (int, float)) else None
+    )
+
     # ── Media (imagen / audio) ────────────────────────────────────────────────
     # WAHA marca hasMedia y adjunta media.{url,mimetype}; el archivo se baja aparte.
     if payload.get("hasMedia"):
@@ -75,6 +82,7 @@ def parse_webhook(body: dict[str, Any]) -> IncomingMessage | None:
                 media_mime_type=mime_type,
                 media_url=media_url,
                 message_id=message_id,
+                timestamp=msg_ts,
             )
 
         if mime_type.startswith("image"):
@@ -85,6 +93,7 @@ def parse_webhook(body: dict[str, Any]) -> IncomingMessage | None:
                 media_mime_type=mime_type,
                 media_url=media_url,
                 message_id=message_id,
+                timestamp=msg_ts,
             )
 
         logger.debug("Tipo de media no manejado: %s", mime_type)
@@ -97,6 +106,7 @@ def parse_webhook(body: dict[str, Any]) -> IncomingMessage | None:
             message_type="text",
             text=body_text,
             message_id=message_id,
+            timestamp=msg_ts,
         )
 
     return None

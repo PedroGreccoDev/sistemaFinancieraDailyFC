@@ -13,7 +13,8 @@ def create_movimiento(
     db: Session,
     payload: MovimientoEfectivoCreate,
 ) -> MovimientoEfectivo:
-    movimiento = MovimientoEfectivo(**payload.model_dump())
+    data = {k: v for k, v in payload.model_dump().items() if v is not None or k not in ("fecha_operacion",)}
+    movimiento = MovimientoEfectivo(**data)
     try:
         db.add(movimiento)
         db.commit()

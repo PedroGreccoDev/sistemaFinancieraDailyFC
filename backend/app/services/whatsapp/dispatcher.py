@@ -50,7 +50,12 @@ DispatchResult = tuple[bool, str]
 # Entrypoint público
 # ────────────────────────────────────────────────────────────────────────────
 
-def dispatch(db: Session, phone: str, result: IntentResult) -> DispatchResult:
+def dispatch(
+    db: Session,
+    phone: str,
+    result: IntentResult,
+    msg_at: datetime | None = None,
+) -> DispatchResult:
     """Ejecuta la operación correspondiente al intent y devuelve la respuesta.
 
     Returns:
@@ -62,29 +67,29 @@ def dispatch(db: Session, phone: str, result: IntentResult) -> DispatchResult:
 
     try:
         if intent == "REGISTRAR_CHEQUE":
-            return _registrar_cheque(db, phone, data)
+            return _registrar_cheque(db, phone, data, msg_at)
         if intent == "VENDER_CHEQUE":
-            return _vender_cheque(db, phone, data)
+            return _vender_cheque(db, phone, data, msg_at)
         if intent == "FIAR_CHEQUE":
-            return _fiar_cheque(db, phone, data)
+            return _fiar_cheque(db, phone, data, msg_at)
         if intent == "COBRAR_CHEQUE":
-            return _cobrar_cheque(db, phone, data)
+            return _cobrar_cheque(db, phone, data, msg_at)
         if intent == "RECHAZAR_CHEQUE":
-            return _rechazar_cheque(db, phone, data)
+            return _rechazar_cheque(db, phone, data, msg_at)
         if intent == "NUEVO_PRESTAMO":
-            return _nuevo_prestamo(db, data)
+            return _nuevo_prestamo(db, data, msg_at)
         if intent == "COBRAR_CUOTA":
-            return _cobrar_cuota(db, data)
+            return _cobrar_cuota(db, data, msg_at)
         if intent == "COBRAR_FIADO_EFECTIVO":
             return _cobrar_fiado_efectivo(db, phone, data)
         if intent == "COBRAR_FIADO_CON_CHEQUE":
-            return _cobrar_fiado_con_cheque(db, phone, data)
+            return _cobrar_fiado_con_cheque(db, phone, data, msg_at)
         if intent == "REGISTRAR_DEUDA":
-            return _registrar_deuda(db, data)
+            return _registrar_deuda(db, data, msg_at)
         if intent == "MOVIMIENTO_EFECTIVO":
-            return _movimiento_efectivo(db, data)
+            return _movimiento_efectivo(db, data, msg_at)
         if intent == "REGISTRAR_GASTO":
-            return _registrar_gasto(db, data)
+            return _registrar_gasto(db, data, msg_at)
         if intent == "CONSULTA_CARTERA":
             return _consulta_cartera(db)
         # ACLARACION_REQUERIDA y DESCONOCIDO no tocan la BD
@@ -103,7 +108,7 @@ def dispatch(db: Session, phone: str, result: IntentResult) -> DispatchResult:
 # Handlers por intent
 # ────────────────────────────────────────────────────────────────────────────
 
-def _registrar_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
+def _registrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     nro = _req_str(data, "nro_cheque")
     monto = _req_decimal(data, "monto")
     pct_compra = _req_decimal(data, "porcentaje_compra")
@@ -123,13 +128,13 @@ def _registrar_cheque(db: Session, phone: str, data: dict[str, Any]) -> Dispatch
         porcentaje_compra=pct_compra,
         cliente_origen_id=cliente_id,
     )
-    cheque = svc_cheques.create_cheque(db, payload)
+    cheque = svc_cheques.create_cheque(db, payload, created_at=msg_at)
 
     lines = [
         f"✅ *Cheque registrado en cartera*",
         f"Nº {cheque.nro_cheque}",
         f"Monto: {_ars(cheque.monto)}",
-        f"Compra: {cheque.porcentaje_compra}%",
+        f"Compra: {_pct(cheque.porcentaje_compra)}%",
     ]
     if cheque.fecha_pago:
         lines.append(f"Pago: {_fmt_date(cheque.fecha_pago)}")
@@ -142,7 +147,7 @@ def _registrar_cheque(db: Session, phone: str, data: dict[str, Any]) -> Dispatch
     return True, "\n".join(lines)
 
 
-def _vender_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
+def _vender_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     nro = _req_str(data, "nro_cheque")
     pct_venta = _req_decimal(data, "porcentaje_venta")
 
@@ -158,25 +163,25 @@ def _vender_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchRes
         porcentaje_venta=pct_venta,
         cliente_destino_id=cliente_destino_id,
     )
-    cheque = svc_cheques.transition_cheque(db, nro, payload)
+    cheque = svc_cheques.transition_cheque(db, nro, payload, event_at=msg_at)
 
     lines = [
         f"✅ *Cheque vendido*",
         f"Nº {cheque.nro_cheque}",
-        f"Venta: {cheque.porcentaje_venta}% | Compra: {cheque.porcentaje_compra}%",
+        f"Venta: {_pct(cheque.porcentaje_venta)}% | Compra: {_pct(cheque.porcentaje_compra)}%",
         f"Ganancia: {_ars(cheque.ganancia)}",
     ]
     # Venta por debajo del % de compra ⇒ pérdida. Se registra igual, solo avisamos.
     if cheque.ganancia is not None and cheque.ganancia < 0:
         lines.append("")
         lines.append(
-            f"⚠️ *Venta a pérdida*: vendiste al {cheque.porcentaje_venta}%, "
-            f"por debajo del {cheque.porcentaje_compra}% de compra."
+            f"⚠️ *Venta a pérdida*: vendiste al {_pct(cheque.porcentaje_venta)}%, "
+            f"por debajo del {_pct(cheque.porcentaje_compra)}% de compra."
         )
     return True, "\n".join(lines)
 
 
-def _fiar_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
+def _fiar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     nro = _req_str(data, "nro_cheque")
     cliente_nombre = _req_str(data, "cliente_nombre")
     pct_venta = _req_decimal(data, "porcentaje_venta")
@@ -189,40 +194,44 @@ def _fiar_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchResul
         cliente_destino_id=cliente.id,
         porcentaje_venta=pct_venta,
     )
-    cheque, fiado = svc_cheques.fiar_cheque(db, nro, request)
+    cheque, fiado = svc_cheques.fiar_cheque(
+        db, nro, request,
+        fecha_fiado=msg_at.date() if msg_at else None,
+        event_at=msg_at,
+    )
 
     lines = [
         f"✅ *Cheque fiado*",
         f"Nº {cheque.nro_cheque} → {cliente.nombre}",
         f"Monto nominal: {_ars(cheque.monto)}",
-        f"Descuento: {pct_venta}% | Saldo pendiente: {_ars(fiado.saldo_pendiente)}",
+        f"Descuento: {_pct(pct_venta)}% | Saldo pendiente: {_ars(fiado.saldo_pendiente)}",
     ]
     return True, "\n".join(lines)
 
 
-def _cobrar_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
+def _cobrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     nro = _req_str(data, "nro_cheque")
     payload = ChequeManualTransition(
         target_state=ChequeEstado.COBRADO,
         operador_id=phone,
         motivo="Cobrado en ventanilla",
     )
-    cheque = svc_cheques.transition_cheque(db, nro, payload)
+    cheque = svc_cheques.transition_cheque(db, nro, payload, event_at=msg_at)
     return True, f"✅ Cheque Nº {cheque.nro_cheque} marcado como *COBRADO*."
 
 
-def _rechazar_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
+def _rechazar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     nro = _req_str(data, "nro_cheque")
     payload = ChequeManualTransition(
         target_state=ChequeEstado.RECHAZADO,
         operador_id=phone,
         motivo="Rechazado — informado por operador",
     )
-    cheque = svc_cheques.transition_cheque(db, nro, payload)
+    cheque = svc_cheques.transition_cheque(db, nro, payload, event_at=msg_at)
     return True, f"⛔ Cheque Nº {cheque.nro_cheque} marcado como *RECHAZADO*. Quedó en seguimiento."
 
 
-def _nuevo_prestamo(db: Session, data: dict[str, Any]) -> DispatchResult:
+def _nuevo_prestamo(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     cliente_nombre = _req_str(data, "cliente_nombre")
     credito = _req_decimal(data, "credito")
     moneda = _req_enum(data, "moneda", Moneda)
@@ -239,7 +248,7 @@ def _nuevo_prestamo(db: Session, data: dict[str, Any]) -> DispatchResult:
         cuotas=cuotas,
         frecuencia=frecuencia,
         total_a_cobrar=total,
-        fecha_inicio=date.today(),
+        fecha_inicio=msg_at.date() if msg_at else date.today(),
     )
     prestamo = svc_prestamos.create_prestamo(db, payload)
 
@@ -254,7 +263,7 @@ def _nuevo_prestamo(db: Session, data: dict[str, Any]) -> DispatchResult:
     return True, "\n".join(lines)
 
 
-def _cobrar_cuota(db: Session, data: dict[str, Any]) -> DispatchResult:
+def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     cliente_nombre = _req_str(data, "cliente_nombre")
     numero_cuota: int | None = data.get("numero_cuota")
 
@@ -289,7 +298,7 @@ def _cobrar_cuota(db: Session, data: dict[str, Any]) -> DispatchResult:
         # Cobrar la primera (más próxima a vencer)
         cuota = pendientes[0]
 
-    cobrada = svc_prestamos.cobrar_cuota(db, cuota.prestamo_id, cuota.id, fecha_cobro=date.today())
+    cobrada = svc_prestamos.cobrar_cuota(db, cuota.prestamo_id, cuota.id, fecha_cobro=msg_at.date() if msg_at else date.today())
 
     # Si todas las cuotas están cobradas, informarlo
     restantes = len(pendientes) - 1
@@ -301,7 +310,7 @@ def _cobrar_cuota(db: Session, data: dict[str, Any]) -> DispatchResult:
     )
 
 
-def _registrar_deuda(db: Session, data: dict[str, Any]) -> DispatchResult:
+def _registrar_deuda(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     acreedor = _req_str(data, "acreedor")
     concepto = _req_str(data, "concepto")
     monto = _req_decimal(data, "monto")
@@ -315,7 +324,7 @@ def _registrar_deuda(db: Session, data: dict[str, Any]) -> DispatchResult:
         moneda=moneda,
         fecha_vencimiento=fecha_vencimiento,
     )
-    pasivo = svc_pasivos.create_pasivo(db, payload)
+    pasivo = svc_pasivos.create_pasivo(db, payload, created_at=msg_at)
 
     simbolo = "U$D" if moneda == Moneda.USD else "$"
     lines = [
@@ -329,7 +338,7 @@ def _registrar_deuda(db: Session, data: dict[str, Any]) -> DispatchResult:
     return True, "\n".join(lines)
 
 
-def _movimiento_efectivo(db: Session, data: dict[str, Any]) -> DispatchResult:
+def _movimiento_efectivo(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     tipo = _req_enum(data, "tipo", MovimientoEfectivoTipo)
     moneda = _req_enum(data, "moneda", Moneda)
     monto = _req_decimal(data, "monto")
@@ -349,6 +358,7 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any]) -> DispatchResult:
         monto=monto,
         cotizacion_aplicada=cotizacion,
         ganancia=ganancia,
+        fecha_operacion=msg_at,
         observaciones=observaciones,
     )
     mov = svc_movimientos.create_movimiento(db, payload)
@@ -364,7 +374,7 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any]) -> DispatchResult:
     return True, "\n".join(lines)
 
 
-def _registrar_gasto(db: Session, data: dict[str, Any]) -> DispatchResult:
+def _registrar_gasto(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     concepto = _req_str(data, "concepto")
     monto = _req_decimal(data, "monto")
     moneda = _req_enum(data, "moneda", Moneda) if data.get("moneda") else Moneda.ARS
@@ -373,6 +383,7 @@ def _registrar_gasto(db: Session, data: dict[str, Any]) -> DispatchResult:
         concepto=concepto,
         monto=monto,
         moneda=moneda,
+        fecha_operacion=msg_at.date() if msg_at else None,
     )
     gasto = svc_gastos.create_gasto(db, payload)
 
@@ -411,7 +422,7 @@ def _cobrar_fiado_efectivo(db: Session, phone: str, data: dict[str, Any]) -> Dis
     )
 
 
-def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
+def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     cliente_nombre = _req_str(data, "cliente_nombre")
     nro_cheque_pago = _req_str(data, "nro_cheque_pago")
     monto_cheque = _req_decimal(data, "monto_cheque")
@@ -431,7 +442,7 @@ def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any]) -> D
         fecha_pago=fecha_pago,
         operador_id=phone,
     )
-    resultado = svc_fiados.cobrar_con_cheque(db, fiado.id, payload)
+    resultado = svc_fiados.cobrar_con_cheque(db, fiado.id, payload, created_at=msg_at)
 
     fiado_act = resultado.fiado
     diferencia = resultado.diferencia
@@ -439,7 +450,7 @@ def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any]) -> D
 
     lines = [
         f"✅ *Cheque recibido como pago de fiado* — {cliente_nombre}",
-        f"Cheque Nº {cheque_nuevo.nro_cheque} | Nominal: {_ars(monto_cheque)} | Compra: {pct_compra}%",
+        f"Cheque Nº {cheque_nuevo.nro_cheque} | Nominal: {_ars(monto_cheque)} | Compra: {_pct(pct_compra)}%",
         f"Valor neto: {_ars(monto_cheque * (100 - pct_compra) / 100)}",
     ]
 
@@ -482,7 +493,7 @@ def _consulta_cartera(db: Session) -> DispatchResult:
 
     for c in sorted(cheques, key=lambda x: x.fecha_pago or date.max):
         pago = _fmt_date(c.fecha_pago) if c.fecha_pago else "sin fecha"
-        lines.append(f"📄 Nº {c.nro_cheque} | {_ars(c.monto)} | Pago: {pago} | Compra: {c.porcentaje_compra}%")
+        lines.append(f"📄 Nº {c.nro_cheque} | {_ars(c.monto)} | Pago: {pago} | Compra: {_pct(c.porcentaje_compra)}%")
 
     return False, "\n".join(lines)  # No limpia sesión (es consulta, no transacción)
 
@@ -601,6 +612,11 @@ def _fmt_num(n: Decimal | float | int) -> str:
 
 def _ars(n: Decimal) -> str:
     return f"${_fmt_num(n)}"
+
+
+def _pct(n: Decimal) -> str:
+    """Formatea un porcentaje sin ceros decimales innecesarios (ej. 3.0000 → '3', 3.5 → '3.5')."""
+    return f"{float(n):g}"
 
 
 def _fmt_date(d: date | None) -> str:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,7 +11,11 @@ from app.schemas.pasivos import PasivoCancelarRequest, PasivoCreate
 from app.services.exceptions import NotFoundError, ConflictError
 
 
-def create_pasivo(db: Session, payload: PasivoCreate) -> Pasivo:
+def create_pasivo(
+    db: Session,
+    payload: PasivoCreate,
+    created_at: datetime | None = None,
+) -> Pasivo:
     pasivo = Pasivo(
         acreedor=payload.acreedor.strip(),
         concepto=payload.concepto.strip(),
@@ -21,6 +25,8 @@ def create_pasivo(db: Session, payload: PasivoCreate) -> Pasivo:
         fecha_vencimiento=payload.fecha_vencimiento,
         observaciones=payload.observaciones,
     )
+    if created_at is not None:
+        pasivo.created_at = created_at
     db.add(pasivo)
     db.commit()
     db.refresh(pasivo)

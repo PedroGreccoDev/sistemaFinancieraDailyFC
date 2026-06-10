@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -25,11 +25,17 @@ from app.services.exceptions import (
 )
 
 
-def create_cheque(db: Session, payload: ChequeCreate) -> Cheque:
+def create_cheque(
+    db: Session,
+    payload: ChequeCreate,
+    created_at: datetime | None = None,
+) -> Cheque:
     cheque = Cheque(
         **payload.model_dump(),
         estado=ChequeEstado.EN_CARTERA,
     )
+    if created_at is not None:
+        cheque.created_at = created_at
     try:
         db.add(cheque)
         db.commit()
@@ -61,6 +67,7 @@ def transition_cheque(
     db: Session,
     nro_cheque: str,
     payload: ChequeManualTransition,
+    event_at: datetime | None = None,
 ) -> Cheque:
     if payload.target_state == ChequeEstado.FIADO:
         raise ValidationError(
@@ -81,6 +88,7 @@ def transition_cheque(
             motivo=payload.motivo,
             porcentaje_venta=payload.porcentaje_venta,
             cliente_destino_id=payload.cliente_destino_id,
+            event_at=event_at,
         )
         db.commit()
         db.refresh(cheque)
@@ -97,6 +105,8 @@ def fiar_cheque(
     db: Session,
     nro_cheque: str,
     payload: ChequeFiarRequest,
+    fecha_fiado: date | None = None,
+    event_at: datetime | None = None,
 ) -> tuple[Cheque, Fiado]:
     cheque = db.scalar(
         select(Cheque).where(Cheque.nro_cheque == nro_cheque).with_for_update()
@@ -117,7 +127,7 @@ def fiar_cheque(
         porcentaje_venta=payload.porcentaje_venta,
         saldo_pendiente=saldo_pendiente,
         estado=FiadoEstado.ABIERTO,
-        fecha_fiado=date.today(),
+        fecha_fiado=fecha_fiado or date.today(),
     )
 
     try:
@@ -127,6 +137,7 @@ def fiar_cheque(
             motivo=payload.motivo,
             porcentaje_venta=payload.porcentaje_venta,
             cliente_destino_id=payload.cliente_destino_id,
+            event_at=event_at,
         )
         db.add(fiado)
         db.commit()

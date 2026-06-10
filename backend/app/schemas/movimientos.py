@@ -16,6 +16,7 @@ class MovimientoEfectivoCreate(BaseModel):
     monto: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     cotizacion_aplicada: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
     ganancia: Decimal = Field(default=Decimal("0.00"), max_digits=18, decimal_places=2)
+    fecha_operacion: datetime | None = None
     observaciones: str | None = None
 
 

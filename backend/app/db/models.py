@@ -217,6 +217,7 @@ class Cheque(Base):
         motivo: str,
         porcentaje_venta: Decimal | None = None,
         cliente_destino_id: uuid.UUID | None = None,
+        event_at: datetime | None = None,
     ) -> None:
         if not (operador_id and operador_id.strip()):
             raise ManualOperationRequired(
@@ -261,7 +262,7 @@ class Cheque(Base):
         self.estado                  = target
         self.ultimo_operador_id      = operador_id
         self.ultimo_motivo_manual    = motivo
-        self.ultimo_evento_manual_at = datetime.now(tz=UTC)
+        self.ultimo_evento_manual_at = event_at or datetime.now(tz=UTC)
 
 
 # ══════════════════════════════════════════════════════════════════════
