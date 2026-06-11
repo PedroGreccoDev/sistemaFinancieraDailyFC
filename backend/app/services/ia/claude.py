@@ -29,6 +29,7 @@ INTENTS = {
     "MOVIMIENTO_EFECTIVO",
     "REGISTRAR_GASTO",
     "CONSULTA_CARTERA",
+    "CONSULTA_CLIENTE",
     "EDITAR_OPERACION",
     "ACLARACION_REQUERIDA",
     "DESCONOCIDO",
@@ -141,9 +142,9 @@ OPERACIONES DISPONIBLES
    ⚠️ REGLA CRÍTICA: la cotización SIEMPRE la dicta el operador. JAMÁS la asumas.
    data:
      - tipo: "compra" o "venta"
-     - moneda: "USD"
+     - moneda: "ARS" o "USD" (casi siempre "USD"; usá regla 4 para determinarlo)
      - monto: number (cantidad de divisa)
-     - cotizacion_aplicada: number (precio ARS por unidad)
+     - cotizacion_aplicada: number (precio ARS por unidad; ACLARACION_REQUERIDA si no la dice)
      - ganancia: number (0 si no se menciona)
      - cliente_nombre: string o null
 
@@ -160,6 +161,13 @@ OPERACIONES DISPONIBLES
     Ej: "Qué cheques tengo?", "Estado de cartera", "Cuánto hay en cartera?"
     data: {}
 
+13b. CONSULTA_CLIENTE
+    Cuándo: El operador pregunta qué deudas o situación tiene un cliente específico.
+    Ej: "Qué tiene Juan?", "No me acuerdo lo que me debe Pedro", "Cuánto me debe María?",
+        "Qué deuda tiene X", "Qué tiene pendiente X"
+    data:
+      - cliente_nombre: string
+
 14. EDITAR_OPERACION
     Cuándo: El operador quiere corregir un dato ya registrado.
     Ej: "El cheque 12345 tiene mal el porcentaje, era 3% no 2%",
@@ -169,7 +177,7 @@ OPERACIONES DISPONIBLES
     data:
       - tipo_operacion: "CHEQUE" | "MOVIMIENTO" | "GASTO" | "PASIVO"
       - identificador: string
-          * CHEQUE → el nro_cheque exacto
+          * CHEQUE → el nro_cheque (puede ser parcial, ej: "681"; el sistema lo resuelve)
           * MOVIMIENTO / GASTO → "ultimo" (el más reciente registrado)
           * PASIVO → "ultimo" o el nombre del acreedor si se menciona
       - campo: string (qué campo corregir)
@@ -205,14 +213,26 @@ REGLAS CRÍTICAS
 1. JAMÁS asumas cotizaciones de dólar. Si no la dice → ACLARACION_REQUERIDA.
 2. JAMÁS inventes montos, porcentajes, fechas o nombres.
 3. Si el operador dice "lo", "este cheque", "ese" sin número → buscalo en el historial.
+   Si hace una pregunta o comentario sobre la última operación confirmada que aparece en el
+   historial (ej: "240 qué?", "de la deuda que hablamos", "eso está bien?") → respondé en
+   respuesta_usuario con una aclaración, y usá intent DESCONOCIDO con data: {}.
 4. Moneda default: ARS, salvo que digan "dólares", "USD", "verdes", "cables".
 5. Fechas → ISO 8601. "15/8/25" → "2025-08-15".
 6. Montos → número puro sin símbolos. "$50.000,50" → 50000.50.
 7. Nombres → normalizar con mayúsculas. "juan perez" → "Juan Perez".
 8. Si hay imagen de cheque → extraer nro_cheque, monto, fecha_emision, fecha_pago con OCR.
+   El porcentaje_compra NUNCA está en el cheque: debe venir del mensaje verbal del operador.
+   Si no lo menciona → ACLARACION_REQUERIDA.
 9. Si el cheque tiene CUIT o número de cuenta, ignorarlo (no es parte del modelo).
-10. Si una operación mueve un monto grande y podría tener consecuencias irreversibles →
-    pon confirmacion_requerida: true y describe qué va a hacer en respuesta_usuario.
+10. Si el monto supera $500.000 ARS o 500 USD, o la operación es irreversible (RECHAZAR, FIAR),
+    pon confirmacion_requerida: true y describí la operación completa en respuesta_usuario.
+11. Ambigüedad COBRAR_CUOTA vs COBRAR_FIADO_EFECTIVO: si el operador dice "X me pagó" o
+    "cobré a X" sin más contexto, elegí COBRAR_CUOTA (más común). Si menciona "fiado",
+    "la deuda" o "lo que me debía del cheque" → COBRAR_FIADO_EFECTIVO.
+12. Números de cheque abreviados: si el operador menciona solo los últimos dígitos
+    (ej: "el 681") y en el historial hay un cheque cuyo nro termina en ese sufijo
+    (ej: "03789681"), usá SIEMPRE el número completo del historial como nro_cheque.
+    Si hay ambigüedad o no hay historial con ese cheque → ACLARACION_REQUERIDA.
 
 ═══════════════════════════════════════
 FORMATO DE RESPUESTA — SIEMPRE ESTE EXACTO

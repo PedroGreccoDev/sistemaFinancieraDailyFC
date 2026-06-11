@@ -125,9 +125,14 @@ async def _procesar_mensaje(
             wa_session.clear_session(phone)
             await wa_client.send_text(phone, "✅ Operación cancelada.")
             return
-        # Respuesta ambigua: descarta el pending y procesa como mensaje nuevo
+        # Respuesta ambigua: cancela el pending y avisa al operador antes de procesar el mensaje
         logger.info("Respuesta ambigua de %s — descartando pending intent", phone)
         wa_session.clear_pending_intent(phone)
+        await wa_client.send_text(
+            phone,
+            "⚠️ No entendí tu respuesta. La operación anterior fue cancelada. Registrala de nuevo si querés.",
+        )
+        return
 
     # ── 3d. Historial de sesión ──────────────────────────────────────────────
     history = wa_session.get_history(phone)
@@ -169,5 +174,9 @@ async def _ejecutar_y_responder(
 
     if limpiar_sesion:
         wa_session.clear_session(phone)
+        # Tras limpiar, dejar la confirmación como único contexto residual.
+        # Así el operador puede preguntar sobre lo que acaba de pasar ("240 qué?",
+        # "de la deuda que hablamos") sin arrastrar historial de operaciones anteriores.
+        wa_session.add_assistant_message(phone, respuesta)
 
     await wa_client.send_text(phone, respuesta)

@@ -50,6 +50,14 @@ logger = logging.getLogger(__name__)
 # (limpiar_sesion, texto_respuesta_whatsapp)
 DispatchResult = tuple[bool, str]
 
+_FRECUENCIA_PLURAL: dict[FrecuenciaCuotas, str] = {
+    FrecuenciaCuotas.DIARIA:    "diarias",
+    FrecuenciaCuotas.SEMANAL:   "semanales",
+    FrecuenciaCuotas.QUINCENAL: "quincenales",
+    FrecuenciaCuotas.MENSUAL:   "mensuales",
+    FrecuenciaCuotas.ANUAL:     "anuales",
+}
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # Entrypoint público
@@ -97,6 +105,8 @@ def dispatch(
             return _registrar_gasto(db, data, msg_at)
         if intent == "CONSULTA_CARTERA":
             return _consulta_cartera(db)
+        if intent == "CONSULTA_CLIENTE":
+            return _consulta_cliente(db, data)
         if intent == "EDITAR_OPERACION":
             return _editar_operacion(db, data)
         # ACLARACION_REQUERIDA y DESCONOCIDO no tocan la BD
@@ -155,7 +165,7 @@ def _registrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dat
 
 
 def _vender_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
-    nro = _req_str(data, "nro_cheque")
+    nro = _resolve_nro_cheque(db, _req_str(data, "nro_cheque"))
     pct_venta = _req_decimal(data, "porcentaje_venta")
 
     cliente_destino_id: uuid.UUID | None = None
@@ -189,7 +199,7 @@ def _vender_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dateti
 
 
 def _fiar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
-    nro = _req_str(data, "nro_cheque")
+    nro = _resolve_nro_cheque(db, _req_str(data, "nro_cheque"))
     cliente_nombre = _req_str(data, "cliente_nombre")
     pct_venta = _req_decimal(data, "porcentaje_venta")
 
@@ -217,7 +227,7 @@ def _fiar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime
 
 
 def _cobrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
-    nro = _req_str(data, "nro_cheque")
+    nro = _resolve_nro_cheque(db, _req_str(data, "nro_cheque"))
     payload = ChequeManualTransition(
         target_state=ChequeEstado.COBRADO,
         operador_id=phone,
@@ -228,14 +238,14 @@ def _cobrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dateti
 
 
 def _rechazar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
-    nro = _req_str(data, "nro_cheque")
+    nro = _resolve_nro_cheque(db, _req_str(data, "nro_cheque"))
     payload = ChequeManualTransition(
         target_state=ChequeEstado.RECHAZADO,
         operador_id=phone,
         motivo="Rechazado — informado por operador",
     )
     cheque = svc_cheques.transition_cheque(db, nro, payload, event_at=msg_at)
-    return True, f"⛔ Cheque Nº {cheque.nro_cheque} marcado como *RECHAZADO*. Quedó en seguimiento."
+    return True, f"⛔ Cheque Nº {cheque.nro_cheque} marcado como *RECHAZADO*. Gestioná el recupero externamente."
 
 
 def _nuevo_prestamo(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
@@ -264,7 +274,7 @@ def _nuevo_prestamo(db: Session, data: dict[str, Any], msg_at: datetime | None =
         f"✅ *Préstamo registrado*",
         f"Cliente: {cliente.nombre}",
         f"Crédito: {simbolo}{_fmt_num(credito)} | Total: {simbolo}{_fmt_num(total)}",
-        f"{cuotas} cuotas {frecuencia.value}s",
+        f"{cuotas} cuotas {_FRECUENCIA_PLURAL[frecuencia]}",
         f"Ganancia: {simbolo}{_fmt_num(prestamo.ganancia)}",
     ]
     return True, "\n".join(lines)
@@ -274,9 +284,7 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
     cliente_nombre = _req_str(data, "cliente_nombre")
     numero_cuota: int | None = data.get("numero_cuota")
 
-    cliente = _buscar_cliente_exacto(db, cliente_nombre)
-    if cliente is None:
-        return False, f"❓ No encontré ningún cliente llamado '{cliente_nombre}'. ¿Cómo se llama exactamente?"
+    cliente = _buscar_cliente_o_error(db, cliente_nombre)
 
     # Buscar cuotas pendientes del cliente
     stmt = (
@@ -419,7 +427,7 @@ def _cobrar_fiado_efectivo(db: Session, phone: str, data: dict[str, Any]) -> Dis
     if fiado_actualizado.estado == FiadoEstado.CANCELADO:
         return True, (
             f"✅ *Fiado cancelado* — {cliente_nombre}\n"
-            f"Cobrado: {_ars(monto_cobrado)} | Saldo: {_ars(fiado_actualizado.saldo_pendiente)}\n"
+            f"Cobrado: {_ars(monto_cobrado)}\n"
             f"🎉 Deuda saldada completamente."
         )
     return True, (
@@ -464,7 +472,7 @@ def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_
     if fiado_act.estado == FiadoEstado.CANCELADO:
         lines.append(f"🎉 Fiado *cancelado* — deuda saldada.")
         if diferencia > 0:
-            lines.append(f"⚠️ Le debés al cliente: {_ars(diferencia)}")
+            lines.append(f"⚠️ El negocio queda debiendo al cliente: {_ars(diferencia)}")
     else:
         lines.append(f"Saldo restante del fiado: {_ars(fiado_act.saldo_pendiente)}")
 
@@ -472,10 +480,13 @@ def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_
 
 
 def _buscar_fiado_abierto(db: Session, cliente_nombre: str) -> Fiado | None:
-    """Devuelve el fiado ABIERTO del cliente, o None si no hay exactamente uno."""
-    cliente = _buscar_cliente_exacto(db, cliente_nombre)
-    if cliente is None:
-        return None
+    """Devuelve el fiado ABIERTO del cliente.
+
+    Returns None si el cliente existe pero no tiene fiados abiertos.
+    Raises ValueError si el cliente no existe, hay ambigüedad de nombre,
+    o hay múltiples fiados abiertos.
+    """
+    cliente = _buscar_cliente_o_error(db, cliente_nombre)
     fiados: list[Fiado] = list(
         db.scalars(
             select(Fiado).where(
@@ -486,6 +497,11 @@ def _buscar_fiado_abierto(db: Session, cliente_nombre: str) -> Fiado | None:
     )
     if len(fiados) == 1:
         return fiados[0]
+    if len(fiados) > 1:
+        raise ValueError(
+            f"{cliente.nombre} tiene {len(fiados)} fiados abiertos. "
+            "Contactá al administrador para resolverlo desde el panel."
+        )
     return None
 
 
@@ -512,8 +528,10 @@ def _editar_operacion(db: Session, data: dict[str, Any]) -> DispatchResult:
 
 
 def _editar_cheque(db: Session, nro: str, campo: str, nuevo_valor: Any) -> DispatchResult:
-    if not nro:
-        return False, "⚠️ Indicá el número de cheque a corregir."
+    try:
+        nro = _resolve_nro_cheque(db, nro)
+    except ValueError as exc:
+        return False, f"⚠️ {exc}"
 
     cheque = db.get(Cheque, nro)
     if cheque is None:
@@ -785,6 +803,70 @@ def _consulta_cartera(db: Session) -> DispatchResult:
     return False, "\n".join(lines)  # No limpia sesión (es consulta, no transacción)
 
 
+def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
+    """Muestra el resumen de deudas activas de un cliente: préstamos y fiados."""
+    cliente_nombre = _req_str(data, "cliente_nombre")
+    cliente = _buscar_cliente_o_error(db, cliente_nombre)
+
+    lines = [f"👤 *{cliente.nombre}*"]
+    hay_algo = False
+
+    # Préstamos activos con cuotas pendientes
+    prestamos: list[Prestamo] = list(
+        db.scalars(
+            select(Prestamo).where(
+                Prestamo.cliente_id == cliente.id,
+                Prestamo.estado == PrestamoEstado.ACTIVO,
+            )
+        ).all()
+    )
+    if prestamos:
+        hay_algo = True
+        lines.append("")
+        lines.append("💳 *Préstamos activos:*")
+        for p in prestamos:
+            cuotas_pendientes: list[Cuota] = list(
+                db.scalars(
+                    select(Cuota).where(
+                        Cuota.prestamo_id == p.id,
+                        Cuota.estado == CuotaEstado.PENDIENTE,
+                    ).order_by(Cuota.numero_cuota.asc())
+                ).all()
+            )
+            simbolo = "U$D" if p.moneda == Moneda.USD else "$"
+            proxima = cuotas_pendientes[0] if cuotas_pendientes else None
+            prox_txt = (
+                f"próx. cuota #{proxima.numero_cuota}: {simbolo}{_fmt_num(proxima.monto)}"
+                if proxima else "sin cuotas pendientes"
+            )
+            lines.append(
+                f"  • {simbolo}{_fmt_num(p.total_a_cobrar)} en {p.cuotas} cuotas "
+                f"{_FRECUENCIA_PLURAL[p.frecuencia]} — {prox_txt} "
+                f"({len(cuotas_pendientes)} restante(s))"
+            )
+
+    # Fiados abiertos
+    fiados: list[Fiado] = list(
+        db.scalars(
+            select(Fiado).where(
+                Fiado.cliente_id == cliente.id,
+                Fiado.estado == FiadoEstado.ABIERTO,
+            )
+        ).all()
+    )
+    if fiados:
+        hay_algo = True
+        lines.append("")
+        lines.append("📋 *Fiados abiertos:*")
+        for f in fiados:
+            lines.append(f"  • Saldo pendiente: {_ars(f.saldo_pendiente)}")
+
+    if not hay_algo:
+        lines.append("\nNo tiene deudas activas registradas.")
+
+    return False, "\n".join(lines)
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # Helpers de clientes
 # ────────────────────────────────────────────────────────────────────────────
@@ -800,7 +882,7 @@ def _find_or_create_cliente(db: Session, nombre: str) -> Cliente:
 
 
 def _buscar_cliente_exacto(db: Session, nombre: str) -> Cliente | None:
-    """Búsqueda case-insensitive. Si hay múltiples coincidencias, devuelve None."""
+    """Búsqueda case-insensitive. Devuelve None si no existe o si hay ambigüedad sin match exacto."""
     nombre = nombre.strip()
     resultados: list[Cliente] = list(
         db.scalars(
@@ -809,9 +891,31 @@ def _buscar_cliente_exacto(db: Session, nombre: str) -> Cliente | None:
     )
     if len(resultados) == 1:
         return resultados[0]
-    # Exacto primero
+    # Si hay varios, intentar match exacto primero
     exacto = next((c for c in resultados if c.nombre.lower() == nombre.lower()), None)
     return exacto
+
+
+def _buscar_cliente_o_error(db: Session, nombre: str) -> Cliente:
+    """Como _buscar_cliente_exacto pero lanza ValueError con mensaje diferenciado.
+
+    Diferencia entre "no existe" y "nombre ambiguo" para dar feedback útil al operador.
+    """
+    nombre = nombre.strip()
+    resultados: list[Cliente] = list(
+        db.scalars(
+            select(Cliente).where(Cliente.nombre.ilike(f"%{nombre}%"))
+        ).all()
+    )
+    if not resultados:
+        raise ValueError(f"No encontré ningún cliente llamado '{nombre}'. ¿Cómo se llama exactamente?")
+    if len(resultados) == 1:
+        return resultados[0]
+    exacto = next((c for c in resultados if c.nombre.lower() == nombre.lower()), None)
+    if exacto:
+        return exacto
+    nombres = ", ".join(c.nombre for c in resultados[:4])
+    raise ValueError(f"Nombre ambiguo '{nombre}' — coincide con varios: {nombres}. Indicá el nombre completo.")
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -896,6 +1000,27 @@ def _parse_date_val(val: Any) -> date | None:
         return date.fromisoformat(str(val))
     except ValueError:
         raise ValueError(f"Fecha inválida (usar YYYY-MM-DD): {val!r}")
+
+
+def _resolve_nro_cheque(db: Session, nro: str) -> str:
+    """Resuelve un número de cheque abreviado al número completo en la BD.
+
+    El operador suele referirse a los cheques por sus últimos dígitos (ej: "681"
+    en lugar de "03789681"). Intenta match exacto primero; si falla, busca por
+    sufijo. Si hay ambigüedad, lanza ValueError para que el operador aclare.
+    """
+    if not nro:
+        raise ValueError("Indicá el número de cheque.")
+    if db.get(Cheque, nro) is not None:
+        return nro
+    matches = list(db.scalars(select(Cheque.nro_cheque).where(Cheque.nro_cheque.endswith(nro))))
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise ValueError(f"No encontré ningún cheque terminado en '{nro}'.")
+    raise ValueError(
+        f"Número ambiguo: {len(matches)} cheques terminan en '{nro}'. Indicá el número completo."
+    )
 
 
 # ────────────────────────────────────────────────────────────────────────────
