@@ -1,23 +1,18 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getReporteGanancias } from '../api/reportes'
-import { fmtARS, fmtUSD, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
+import { fmtARS, fmtUSD, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
+import DropdownFilter from '../components/DropdownFilter'
+import DateRangePicker from '../components/DateRangePicker'
 
 type Preset = 'hoy' | 'semana' | 'mes' | 'custom'
 
-const presets: { key: Preset; label: string }[] = [
-  { key: 'hoy', label: 'Hoy' },
-  { key: 'semana', label: 'Esta semana' },
-  { key: 'mes', label: 'Este mes' },
-  { key: 'custom', label: 'Personalizado' },
-]
-
-function getRangeForPreset(preset: Preset, customDesde: string, customHasta: string) {
+function getRangeForPreset(preset: Preset, customDesde: string | null, customHasta: string | null) {
   const hoy = todayISO()
   if (preset === 'hoy') return { desde: hoy, hasta: hoy }
   if (preset === 'semana') return { desde: weekStartISO(), hasta: hoy }
   if (preset === 'mes') return { desde: monthStartISO(), hasta: hoy }
-  return { desde: customDesde, hasta: customHasta }
+  return { desde: customDesde ?? hoy, hasta: customHasta ?? hoy }
 }
 
 function MetricCard({
@@ -49,8 +44,22 @@ function MetricCard({
 
 export default function Reportes() {
   const [preset, setPreset] = useState<Preset>('mes')
-  const [customDesde, setCustomDesde] = useState(monthStartISO())
-  const [customHasta, setCustomHasta] = useState(todayISO())
+  const [customDesde, setCustomDesde] = useState<string | null>(null)
+  const [customHasta, setCustomHasta] = useState<string | null>(null)
+  const [showPicker, setShowPicker] = useState(false)
+
+  function handlePreset(p: Preset) {
+    setPreset(p)
+    if (p !== 'custom') setShowPicker(false)
+    else setShowPicker(true)
+  }
+
+  const labelPersonalizado =
+    customDesde && customHasta
+      ? `${fmtDate(customDesde)} — ${fmtDate(customHasta)}`
+      : customDesde
+      ? `Desde ${fmtDate(customDesde)}`
+      : 'Personalizado'
 
   const { desde, hasta } = getRangeForPreset(preset, customDesde, customHasta)
 
@@ -68,50 +77,26 @@ export default function Reportes() {
       </div>
 
       {/* Filtros */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4 mb-6">
-        <div className="flex flex-wrap gap-2 mb-4">
-          {presets.map((p) => (
-            <button
-              key={p.key}
-              onClick={() => setPreset(p.key)}
-              className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                preset === p.key
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+      <div className="relative flex flex-wrap items-end gap-3 mb-6">
+        <DropdownFilter
+          label="Período"
+          value={preset}
+          options={[
+            { value: 'hoy' as Preset, label: 'Hoy' },
+            { value: 'semana' as Preset, label: 'Esta semana' },
+            { value: 'mes' as Preset, label: 'Este mes' },
+            { value: 'custom' as Preset, label: labelPersonalizado },
+          ]}
+          onChange={handlePreset}
+        />
 
-        {preset === 'custom' && (
-          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-center">
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Desde</label>
-              <input
-                type="date"
-                value={customDesde}
-                onChange={(e) => setCustomDesde(e.target.value)}
-                className="border border-slate-200 dark:border-slate-600 rounded px-3 py-1.5 text-sm text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-slate-500 mb-1">Hasta</label>
-              <input
-                type="date"
-                value={customHasta}
-                onChange={(e) => setCustomHasta(e.target.value)}
-                className="border border-slate-200 dark:border-slate-600 rounded px-3 py-1.5 text-sm text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-          </div>
-        )}
-
-        {!isLoading && desde && (
-          <p className="text-xs text-slate-400 mt-3">
-            Período: {desde.split('-').reverse().join('/')} → {hasta.split('-').reverse().join('/')}
-          </p>
+        {showPicker && (
+          <DateRangePicker
+            from={customDesde}
+            to={customHasta}
+            onChange={(f, t) => { setCustomDesde(f); setCustomHasta(t) }}
+            onClose={() => setShowPicker(false)}
+          />
         )}
       </div>
 

@@ -4,6 +4,7 @@ import { getPasivos, createPasivo, cancelarPasivoEfectivo, cancelarPasivoConCheq
 import { getChequeCartera } from '../api/cheques'
 import { fmtARS, fmtUSD, fmtDate } from '../lib/fmt'
 import type { Cheque, Moneda, Pasivo, PasivoEstado } from '../types'
+import DropdownFilter from '../components/DropdownFilter'
 
 type Filtro = 'todos' | PasivoEstado
 
@@ -476,20 +477,17 @@ export default function Pasivos() {
       )}
 
       {/* Filtros */}
-      <div className="flex gap-2 mb-4">
-        {(['PENDIENTE', 'todos', 'CANCELADA'] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFiltro(f as Filtro)}
-            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors capitalize ${
-              filtro === f
-                ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900'
-                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-            }`}
-          >
-            {f === 'PENDIENTE' ? 'Pendientes' : f === 'todos' ? 'Todos' : 'Cancelados'}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <DropdownFilter
+          label="Estado"
+          value={filtro}
+          options={[
+            { value: 'todos' as Filtro, label: 'Todos' },
+            { value: 'PENDIENTE' as Filtro, label: 'Pendientes' },
+            { value: 'CANCELADA' as Filtro, label: 'Cancelados' },
+          ]}
+          onChange={(v) => setFiltro(v as Filtro)}
+        />
       </div>
 
       {/* Lista */}

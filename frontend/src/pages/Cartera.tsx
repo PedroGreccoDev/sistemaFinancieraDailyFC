@@ -3,24 +3,18 @@ import { useQuery } from '@tanstack/react-query'
 import { getChequeCartera, getCheques } from '../api/cheques'
 import { fmtARS, fmtDate, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
 import type { Cheque } from '../types'
+import DropdownFilter from '../components/DropdownFilter'
+import DateRangePicker from '../components/DateRangePicker'
 
 type FilterPreset = 'hoy' | 'semana' | 'mes' | 'anio' | 'custom'
 
-const PRESETS: { key: FilterPreset; label: string }[] = [
-  { key: 'hoy',    label: 'Hoy' },
-  { key: 'semana', label: 'Esta semana' },
-  { key: 'mes',    label: 'Este mes' },
-  { key: 'anio',   label: 'Este año' },
-  { key: 'custom', label: 'Personalizado' },
-]
-
-function presetRange(preset: FilterPreset, desde: string, hasta: string): [string, string] {
+function presetRange(preset: FilterPreset, desde: string | null, hasta: string | null): [string, string] {
   const hoy = todayISO()
   if (preset === 'hoy')    return [hoy, hoy]
   if (preset === 'semana') return [weekStartISO(), hoy]
   if (preset === 'mes')    return [monthStartISO(), hoy]
   if (preset === 'anio')   return [yearStartISO(), hoy]
-  return [desde, hasta]
+  return [desde ?? hoy, hasta ?? hoy]
 }
 
 function filterByRange(cheques: Cheque[], start: string, end: string): Cheque[] {
@@ -50,8 +44,22 @@ function totalCartera(cheques: Cheque[]): number {
 
 export default function Cartera() {
   const [preset, setPreset] = useState<FilterPreset>('mes')
-  const [desde, setDesde] = useState(monthStartISO())
-  const [hasta, setHasta] = useState(todayISO())
+  const [customDesde, setCustomDesde] = useState<string | null>(null)
+  const [customHasta, setCustomHasta] = useState<string | null>(null)
+  const [showPicker, setShowPicker] = useState(false)
+
+  function handlePreset(p: FilterPreset) {
+    setPreset(p)
+    if (p !== 'custom') setShowPicker(false)
+    else setShowPicker(true)
+  }
+
+  const labelPersonalizado =
+    customDesde && customHasta
+      ? `${fmtDate(customDesde)} — ${fmtDate(customHasta)}`
+      : customDesde
+      ? `Desde ${fmtDate(customDesde)}`
+      : 'Personalizado'
 
   const { data: cheques, isLoading, error, refetch } = useQuery({
     queryKey: ['cartera'],
@@ -74,7 +82,7 @@ export default function Cartera() {
       })
     : []
 
-  const [rangeStart, rangeEnd] = presetRange(preset, desde, hasta)
+  const [rangeStart, rangeEnd] = presetRange(preset, customDesde, customHasta)
   const filteredVendidos = vendidos
     ? [...filterByRange(vendidos, rangeStart, rangeEnd)].sort((a, b) =>
         (b.ultimo_evento_manual_at ?? '').localeCompare(a.ultimo_evento_manual_at ?? '')
@@ -166,45 +174,29 @@ export default function Cartera() {
         </div>
 
         {/* Filtros de período */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          {PRESETS.map(p => (
-            <button
-              key={p.key}
-              onClick={() => setPreset(p.key)}
-              className={`text-sm px-3 py-1.5 rounded border font-medium transition-colors ${
-                preset === p.key
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+        <div className="relative flex flex-wrap items-end gap-3 mb-4">
+          <DropdownFilter
+            label="Período"
+            value={preset}
+            options={[
+              { value: 'hoy' as FilterPreset, label: 'Hoy' },
+              { value: 'semana' as FilterPreset, label: 'Esta semana' },
+              { value: 'mes' as FilterPreset, label: 'Este mes' },
+              { value: 'anio' as FilterPreset, label: 'Este año' },
+              { value: 'custom' as FilterPreset, label: labelPersonalizado },
+            ]}
+            onChange={handlePreset}
+          />
 
-        {/* Rango personalizado */}
-        {preset === 'custom' && (
-          <div className="flex flex-wrap gap-4 mb-4">
-            <div>
-              <label className="text-xs text-slate-500 block mb-1">Desde</label>
-              <input
-                type="date"
-                value={desde}
-                onChange={e => setDesde(e.target.value)}
-                className="text-sm border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500 block mb-1">Hasta</label>
-              <input
-                type="date"
-                value={hasta}
-                onChange={e => setHasta(e.target.value)}
-                className="text-sm border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-          </div>
-        )}
+          {showPicker && (
+            <DateRangePicker
+              from={customDesde}
+              to={customHasta}
+              onChange={(f, t) => { setCustomDesde(f); setCustomHasta(t) }}
+              onClose={() => setShowPicker(false)}
+            />
+          )}
+        </div>
 
         {/* Resumen del período */}
         <div className="grid grid-cols-2 gap-3 mb-5">

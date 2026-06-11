@@ -5,6 +5,7 @@ import { getChequeCartera, fiarCheque } from '../api/cheques'
 import { getClientes, createCliente } from '../api/clientes'
 import { fmtARS, fmtDate } from '../lib/fmt'
 import type { Fiado, FiadoEstado, CobrarConChequeResult, Cliente } from '../types'
+import DropdownFilter from '../components/DropdownFilter'
 
 type Filtro = 'ABIERTO' | 'todos' | 'CANCELADO'
 
@@ -584,17 +585,17 @@ export default function Fiados() {
       )}
 
       {/* Filtros */}
-      <div className="flex gap-2 mb-4">
-        {(['ABIERTO', 'todos', 'CANCELADO'] as const).map((f) => (
-          <button key={f} onClick={() => setFiltro(f)}
-            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-              filtro === f
-                ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900'
-                : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-            }`}>
-            {f === 'ABIERTO' ? 'Abiertos' : f === 'todos' ? 'Todos' : 'Cancelados'}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <DropdownFilter
+          label="Estado"
+          value={filtro}
+          options={[
+            { value: 'todos' as Filtro, label: 'Todos' },
+            { value: 'ABIERTO' as Filtro, label: 'Abiertos' },
+            { value: 'CANCELADO' as Filtro, label: 'Cancelados' },
+          ]}
+          onChange={setFiltro}
+        />
       </div>
 
       {/* Lista */}
