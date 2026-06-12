@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getFiados, cobrarEfectivo, cobrarConCheque } from '../api/fiados'
+import { getChequeCartera, fiarCheque } from '../api/cheques'
 import { getClientes } from '../api/clientes'
 import { fmtARS, fmtDate } from '../lib/fmt'
 import type { Fiado, FiadoEstado, CobrarConChequeResult } from '../types'
@@ -283,10 +284,146 @@ function ModalResultado({ result, onClose }: { result: CobrarConChequeResult; on
   )
 }
 
+// ── Modal nuevo cheque fiado ──────────────────────────────────────────
+
+function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [chequeNro, setChequeNro] = useState('')
+  const [clienteId, setClienteId] = useState('')
+  const [pct, setPct] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const { data: cartera } = useQuery({ queryKey: ['cartera'], queryFn: getChequeCartera })
+  const { data: clientes } = useQuery({ queryKey: ['clientes'], queryFn: getClientes, staleTime: 60_000 })
+
+  const chequeSeleccionado = cartera?.find((c) => c.nro_cheque === chequeNro)
+  const pctNum = parseFloat(pct) || 0
+  const montoNominal = chequeSeleccionado ? parseFloat(chequeSeleccionado.monto) : 0
+  const saldoInicial = montoNominal * (100 - pctNum) / 100
+  const showPreview = !!chequeSeleccionado && pct !== ''
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      await fiarCheque(chequeNro, {
+        cliente_destino_id: clienteId,
+        porcentaje_venta: pctNum,
+        motivo: motivo.trim(),
+        operador_id: 'panel-web',
+      })
+      onSuccess()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
+      <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl">
+        <div className="p-5 border-b border-slate-200 dark:border-slate-700">
+          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Nuevo cheque fiado</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Seleccioná el cheque y el cliente</p>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div>
+            <label className={labelCls()}>Cheque</label>
+            <select
+              value={chequeNro}
+              onChange={(e) => setChequeNro(e.target.value)}
+              required
+              className={inputCls()}
+            >
+              <option value="">Seleccionar cheque…</option>
+              {cartera?.map((c) => (
+                <option key={c.nro_cheque} value={c.nro_cheque}>
+                  {c.nro_cheque} · {fmtARS(parseFloat(c.monto))}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className={labelCls()}>Cliente</label>
+            <select
+              value={clienteId}
+              onChange={(e) => setClienteId(e.target.value)}
+              required
+              className={inputCls()}
+            >
+              <option value="">Seleccionar cliente…</option>
+              {clientes?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className={labelCls()}>% de venta</label>
+            <input
+              type="number" step="0.0001" min="0" max="100"
+              value={pct}
+              onChange={(e) => setPct(e.target.value)}
+              placeholder="0,00"
+              required
+              className={inputCls()}
+            />
+          </div>
+
+          <div>
+            <label className={labelCls()}>Motivo</label>
+            <input
+              type="text"
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Motivo del fiado"
+              required
+              className={inputCls()}
+            />
+          </div>
+
+          {showPreview && (
+            <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg px-4 py-3 text-sm space-y-1">
+              <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                <span>Monto nominal</span>
+                <span className="font-semibold">{fmtARS(montoNominal)}</span>
+              </div>
+              <div className="flex justify-between font-semibold text-amber-600 dark:text-amber-400">
+                <span>Saldo inicial a cobrar</span>
+                <span>{fmtARS(saldoInicial)}</span>
+              </div>
+            </div>
+          )}
+
+          {error && <p className="text-sm text-red-500">{error}</p>}
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+              Cancelar
+            </button>
+            <button type="submit" disabled={loading}
+              className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+              {loading ? 'Guardando…' : 'Confirmar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── Página principal ──────────────────────────────────────────────────
 
 export default function Fiados() {
   const [filtro, setFiltro] = useState<Filtro>('ABIERTO')
+  const [creandoFiado, setCreandoFiado] = useState(false)
   const [cobrandoEfectivo, setCobrandoEfectivo] = useState<Fiado | null>(null)
   const [cobrandoCheque, setCobrandoCheque] = useState<Fiado | null>(null)
   const [resultado, setResultado] = useState<CobrarConChequeResult | null>(null)
@@ -308,6 +445,12 @@ export default function Fiados() {
   const abiertos = fiados?.filter((f) => f.estado === 'ABIERTO') ?? []
   const totalSaldo = abiertos.reduce((s, f) => s + parseFloat(f.saldo_pendiente), 0)
   const clientesDistintos = new Set(abiertos.map((f) => f.cliente_id)).size
+
+  function handleNuevoFiadoSuccess() {
+    setCreandoFiado(false)
+    queryClient.invalidateQueries({ queryKey: ['fiados'] })
+    queryClient.invalidateQueries({ queryKey: ['cartera'] })
+  }
 
   function handleEfectivoSuccess() {
     setCobrandoEfectivo(null)
@@ -332,10 +475,16 @@ export default function Fiados() {
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Cheques fiados</h1>
           <p className="text-sm text-slate-500 mt-0.5">Deudas de clientes por cheques entregados en crédito</p>
         </div>
-        <button onClick={() => refetch()}
-          className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 border border-slate-200 dark:border-slate-700 rounded px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-          Actualizar
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => refetch()}
+            className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 border border-slate-200 dark:border-slate-700 rounded px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+            Actualizar
+          </button>
+          <button onClick={() => setCreandoFiado(true)}
+            className="text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded px-3 py-1.5 transition-colors">
+            Nuevo
+          </button>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -443,6 +592,12 @@ export default function Fiados() {
         )}
       </div>
 
+      {creandoFiado && (
+        <ModalNuevoFiado
+          onClose={() => setCreandoFiado(false)}
+          onSuccess={handleNuevoFiadoSuccess}
+        />
+      )}
       {cobrandoEfectivo && (
         <ModalEfectivo
           fiado={cobrandoEfectivo}

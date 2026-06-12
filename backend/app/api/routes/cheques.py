@@ -57,6 +57,6 @@ def fiar_cheque(
     payload: ChequeFiarRequest,
     db: DbSession,
 ) -> ChequeFiarResponse:
-    cheque, prestamo = service.fiar_cheque(db, nro_cheque, payload)
-    return ChequeFiarResponse(cheque=cheque, prestamo=prestamo)
+    cheque, fiado = service.fiar_cheque(db, nro_cheque, payload)
+    return ChequeFiarResponse(cheque=cheque, fiado=fiado)
 
