@@ -9,32 +9,30 @@ import type { MovimientoEfectivo, GastoOperativo, Cheque, Prestamo } from '../ty
 import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
 
-// ── Tipos ────────────────────────────────────────────────────────────────────
-
 type Seccion = 'TODOS' | 'DIVISAS' | 'GASTOS' | 'CHEQUES' | 'PRESTAMOS'
 type PresetFecha = 'HOY' | 'SEMANA' | 'MES' | 'PERSONALIZADO'
+
+const FM = "'Manrope', sans-serif"
+const FN = "'Bebas Neue', sans-serif"
+const CARD = { background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }
 
 interface MovimientoUnificado {
   id: string
   seccion: Exclude<Seccion, 'TODOS'>
-  fecha: string          // YYYY-MM-DD (para ordenar y filtrar)
+  fecha: string
   descripcion: string
   detalle: string
   monto: string
   moneda: 'ARS' | 'USD'
-  esGasto: boolean       // para colorear el monto en rojo
+  esGasto: boolean
 }
 
-// ── Configuración visual por sección ─────────────────────────────────────────
-
-const SECCION_CONFIG: Record<Exclude<Seccion, 'TODOS'>, { label: string; badge: string }> = {
-  DIVISAS:   { label: 'Divisas',   badge: 'bg-blue-500/15 text-blue-500 dark:text-blue-400' },
-  GASTOS:    { label: 'Gastos',    badge: 'bg-orange-500/15 text-orange-500 dark:text-orange-400' },
-  CHEQUES:   { label: 'Cheques',   badge: 'bg-purple-500/15 text-purple-500 dark:text-purple-400' },
-  PRESTAMOS: { label: 'Préstamos', badge: 'bg-green-500/15 text-green-500 dark:text-green-400' },
+const SECCION_CONFIG: Record<Exclude<Seccion, 'TODOS'>, { label: string; color: string; bg: string }> = {
+  DIVISAS:   { label: 'Divisas',   color: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
+  GASTOS:    { label: 'Gastos',    color: '#fb923c', bg: 'rgba(251,146,60,0.12)' },
+  CHEQUES:   { label: 'Cheques',   color: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
+  PRESTAMOS: { label: 'Préstamos', color: '#4ade80', bg: 'rgba(74,222,128,0.12)' },
 }
-
-// ── Normalización ─────────────────────────────────────────────────────────────
 
 function normalizar(
   divisas: MovimientoEfectivo[],
@@ -48,64 +46,44 @@ function normalizar(
     const ganancia = parseFloat(m.ganancia)
     const cotiz = parseFloat(m.cotizacion_aplicada).toLocaleString('es-AR', { minimumFractionDigits: 2 })
     items.push({
-      id: m.id,
-      seccion: 'DIVISAS',
-      fecha: m.fecha_operacion.slice(0, 10),
+      id: m.id, seccion: 'DIVISAS', fecha: m.fecha_operacion.slice(0, 10),
       descripcion: m.tipo === 'COMPRA' ? 'Compra USD' : 'Venta USD',
       detalle: `${fmtUSD(m.monto)} · cotiz. $${cotiz}`,
-      monto: m.ganancia,
-      moneda: 'ARS',
-      esGasto: ganancia < 0,
+      monto: m.ganancia, moneda: 'ARS', esGasto: ganancia < 0,
     })
   }
 
   for (const g of gastos) {
     items.push({
-      id: g.id,
-      seccion: 'GASTOS',
-      fecha: g.fecha_operacion,
-      descripcion: g.concepto,
-      detalle: g.observaciones ?? '',
-      monto: g.monto,
-      moneda: g.moneda,
-      esGasto: true,
+      id: g.id, seccion: 'GASTOS', fecha: g.fecha_operacion,
+      descripcion: g.concepto, detalle: g.observaciones ?? '',
+      monto: g.monto, moneda: g.moneda, esGasto: true,
     })
   }
 
   for (const c of cheques) {
     items.push({
-      id: c.nro_cheque,
-      seccion: 'CHEQUES',
-      fecha: c.created_at.slice(0, 10),
+      id: c.nro_cheque, seccion: 'CHEQUES', fecha: c.created_at.slice(0, 10),
       descripcion: `Nº ${c.nro_cheque}`,
       detalle: `${c.estado.replace('_', ' ')} · compra ${parseFloat(c.porcentaje_compra.toString()).toLocaleString('es-AR', { maximumFractionDigits: 2 })}%`,
-      monto: c.monto,
-      moneda: 'ARS',
-      esGasto: false,
+      monto: c.monto, moneda: 'ARS', esGasto: false,
     })
   }
 
   for (const p of prestamos) {
     const freq: Record<string, string> = {
-      DIARIA: 'diarias', SEMANAL: 'semanales', QUINCENAL: 'quincenales',
-      MENSUAL: 'mensuales', ANUAL: 'anuales',
+      DIARIA: 'diarias', SEMANAL: 'semanales', QUINCENAL: 'quincenales', MENSUAL: 'mensuales', ANUAL: 'anuales',
     }
     items.push({
-      id: p.id,
-      seccion: 'PRESTAMOS',
-      fecha: p.fecha_inicio,
-      descripcion: `Préstamo`,
+      id: p.id, seccion: 'PRESTAMOS', fecha: p.fecha_inicio,
+      descripcion: 'Préstamo',
       detalle: `${p.cuotas} cuotas ${freq[p.frecuencia] ?? p.frecuencia.toLowerCase()} · ${p.estado}`,
-      monto: p.credito,
-      moneda: p.moneda,
-      esGasto: false,
+      monto: p.credito, moneda: p.moneda, esGasto: false,
     })
   }
 
   return items.sort((a, b) => b.fecha.localeCompare(a.fecha))
 }
-
-// ── Filtro de fecha ───────────────────────────────────────────────────────────
 
 function getRangoDeFecha(preset: PresetFecha, customDesde: string | null, customHasta: string | null) {
   const hoy = todayISO()
@@ -123,8 +101,6 @@ function enRango(fecha: string, desde: string | null, hasta: string | null): boo
   return true
 }
 
-// ── Componente ────────────────────────────────────────────────────────────────
-
 export default function Movimientos() {
   const [seccion, setSeccion] = useState<Seccion>('TODOS')
   const [preset, setPreset] = useState<PresetFecha>('MES')
@@ -134,22 +110,16 @@ export default function Movimientos() {
 
   const { data: divisas = [], isLoading: loadingDiv, refetch: refetchDiv } =
     useQuery({ queryKey: ['movimientos'], queryFn: getMovimientos, refetchInterval: 30_000 })
-
   const { data: gastos = [], isLoading: loadingGas, refetch: refetchGas } =
     useQuery({ queryKey: ['gastos'], queryFn: getGastos, refetchInterval: 30_000 })
-
   const { data: cheques = [], isLoading: loadingChe, refetch: refetchChe } =
     useQuery({ queryKey: ['cheques-todos'], queryFn: () => getCheques(), refetchInterval: 30_000 })
-
   const { data: prestamos = [], isLoading: loadingPre, refetch: refetchPre } =
     useQuery({ queryKey: ['prestamos-todos'], queryFn: () => getPrestamos(), refetchInterval: 30_000 })
 
   const isLoading = loadingDiv || loadingGas || loadingChe || loadingPre
 
-  const todos = useMemo(
-    () => normalizar(divisas, gastos, cheques, prestamos),
-    [divisas, gastos, cheques, prestamos],
-  )
+  const todos = useMemo(() => normalizar(divisas, gastos, cheques, prestamos), [divisas, gastos, cheques, prestamos])
 
   const { desde, hasta } = getRangoDeFecha(preset, customDesde, customHasta)
 
@@ -160,9 +130,7 @@ export default function Movimientos() {
     })
   }, [todos, seccion, desde, hasta])
 
-  function handleRefetch() {
-    refetchDiv(); refetchGas(); refetchChe(); refetchPre()
-  }
+  function handleRefetch() { refetchDiv(); refetchGas(); refetchChe(); refetchPre() }
 
   function handlePreset(p: PresetFecha) {
     setPreset(p)
@@ -170,44 +138,36 @@ export default function Movimientos() {
     else setShowPicker(true)
   }
 
-  // Etiqueta del botón personalizado
   const labelPersonalizado =
-    customDesde && customHasta
-      ? `${fmtDate(customDesde)} — ${fmtDate(customHasta)}`
-      : customDesde
-      ? `Desde ${fmtDate(customDesde)}`
-      : 'Personalizado'
+    customDesde && customHasta ? `${fmtDate(customDesde)} — ${fmtDate(customHasta)}`
+    : customDesde ? `Desde ${fmtDate(customDesde)}` : 'Personalizado'
 
   const secciones: Seccion[] = ['TODOS', 'DIVISAS', 'GASTOS', 'CHEQUES', 'PRESTAMOS']
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+    <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Movimientos</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Movimientos</h1>
+          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>
             {filtrados.length} registro{filtrados.length !== 1 ? 's' : ''}
             {desde || hasta ? ` · ${desde ? fmtDate(desde) : '…'} → ${hasta ? fmtDate(hasta) : '…'}` : ''}
           </p>
         </div>
-        <button
-          onClick={handleRefetch}
-          className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 border border-slate-200 dark:border-slate-700 rounded px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-        >
+        <button onClick={handleRefetch} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>
           Actualizar
         </button>
       </div>
 
       {/* Filtros */}
-      <div className="relative flex flex-wrap items-end gap-3 mb-6">
+      <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}>
         <DropdownFilter
           label="Sección"
           value={seccion}
           options={secciones.map((s) => ({ value: s, label: s === 'TODOS' ? 'Todos' : SECCION_CONFIG[s].label }))}
           onChange={setSeccion}
         />
-
         <DropdownFilter
           label="Período"
           value={preset}
@@ -219,81 +179,68 @@ export default function Movimientos() {
           ]}
           onChange={handlePreset}
         />
-
-        {/* Calendar popover */}
         {showPicker && (
           <DateRangePicker
-            from={customDesde}
-            to={customHasta}
+            from={customDesde} to={customHasta}
             onChange={(f, t) => { setCustomDesde(f); setCustomHasta(t) }}
             onClose={() => setShowPicker(false)}
           />
         )}
       </div>
 
-      {/* Lista unificada */}
-      <div className="bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+      {/* Tabla */}
+      <div style={{ ...CARD, overflow: 'hidden' }}>
         {isLoading && (
-          <div className="p-12 text-center text-slate-400">Cargando movimientos…</div>
+          <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>Cargando movimientos…</div>
         )}
-
         {!isLoading && filtrados.length === 0 && (
-          <div className="p-12 text-center text-slate-400">
-            <p className="text-3xl mb-3">📭</p>
-            <p className="font-medium text-slate-500">Sin movimientos en el período</p>
-            <p className="text-xs mt-1">Probá cambiando el filtro de fecha o sección</p>
+          <div style={{ padding: '3rem', textAlign: 'center' }}>
+            <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📭</p>
+            <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Sin movimientos en el período</p>
+            <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.4)', marginTop: '0.25rem' }}>Probá cambiando el filtro de fecha o sección</p>
           </div>
         )}
-
         {!isLoading && filtrados.length > 0 && (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80">
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-400 uppercase tracking-wide whitespace-nowrap">Fecha</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-400 uppercase tracking-wide">Sección</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-400 uppercase tracking-wide">Descripción</th>
-                <th className="text-right px-4 py-2.5 text-xs font-medium text-slate-400 uppercase tracking-wide">Monto</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-              {filtrados.map((item) => {
-                const cfg = SECCION_CONFIG[item.seccion]
-                const montoFmt = fmtMonto(item.monto, item.moneda)
-                return (
-                  <tr
-                    key={`${item.seccion}-${item.id}`}
-                    className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
-                  >
-                    <td className="px-4 py-3 text-xs text-slate-400 dark:text-slate-500 font-mono whitespace-nowrap">
-                      {fmtDate(item.fecha)}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cfg.badge}`}>
-                        {cfg.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-slate-800 dark:text-slate-100 truncate max-w-xs">
-                        {item.descripcion}
-                      </p>
-                      {item.detalle && (
-                        <p className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-xs mt-0.5">
-                          {item.detalle}
-                        </p>
-                      )}
-                    </td>
-                    <td className={`px-4 py-3 text-right font-semibold tabular-nums whitespace-nowrap ${
-                      item.esGasto
-                        ? 'text-red-500 dark:text-red-400'
-                        : 'text-slate-800 dark:text-slate-100'
-                    }`}>
-                      {item.esGasto ? `−${montoFmt}` : montoFmt}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '480px' }}>
+              <thead>
+                <tr>
+                  {['Fecha', 'Sección', 'Descripción', 'Monto'].map((h, i) => (
+                    <th key={h} style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: i === 3 ? 'right' : 'left', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtrados.map((item) => {
+                  const cfg = SECCION_CONFIG[item.seccion]
+                  const montoFmt = fmtMonto(item.monto, item.moneda)
+                  return (
+                    <tr key={`${item.seccion}-${item.id}`}
+                      onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                      onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
+                      <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.72rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', color: 'rgba(100,116,139,0.6)', whiteSpace: 'nowrap' }}>
+                        {fmtDate(item.fecha)}
+                      </td>
+                      <td style={{ padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '2px 8px' }}>
+                          {cfg.label}
+                        </span>
+                      </td>
+                      <td style={{ padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                        <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '260px' }}>{item.descripcion}</p>
+                        {item.detalle && (
+                          <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.55)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '260px', marginTop: '1px' }}>{item.detalle}</p>
+                        )}
+                      </td>
+                      <td style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 700, padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: item.esGasto ? '#f87171' : '#e2e8f0', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                        {item.esGasto ? `−${montoFmt}` : montoFmt}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

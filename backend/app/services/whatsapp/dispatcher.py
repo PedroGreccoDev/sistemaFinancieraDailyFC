@@ -315,6 +315,9 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
         # Cobrar la primera (más próxima a vencer)
         cuota = pendientes[0]
 
+    prestamo_obj = db.get(Prestamo, cuota.prestamo_id)
+    simbolo = "U$D" if prestamo_obj and prestamo_obj.moneda == Moneda.USD else "$"
+
     cobrada = svc_prestamos.cobrar_cuota(db, cuota.prestamo_id, cuota.id, fecha_cobro=msg_at.date() if msg_at else date.today())
 
     # Si todas las cuotas están cobradas, informarlo
@@ -323,7 +326,7 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
 
     return True, (
         f"✅ Cuota #{cobrada.numero_cuota} de {cliente.nombre} cobrada.\n"
-        f"Monto: {_ars(cobrada.monto)}{extra}"
+        f"Monto: {simbolo}{_fmt_num(cobrada.monto)}{extra}"
     )
 
 
@@ -861,7 +864,7 @@ def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
         lines.append("")
         lines.append("📋 *Fiados abiertos:*")
         for f in fiados:
-            lines.append(f"  • Saldo pendiente: {_ars(f.saldo_pendiente)}")
+            lines.append(f"  • Cheque Nº {f.cheque_nro} | Saldo: {_ars(f.saldo_pendiente)}")
 
     if not hay_algo:
         lines.append("\nNo tiene deudas activas registradas.")

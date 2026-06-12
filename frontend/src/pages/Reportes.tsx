@@ -7,6 +7,10 @@ import DateRangePicker from '../components/DateRangePicker'
 
 type Preset = 'hoy' | 'semana' | 'mes' | 'custom'
 
+const FN = "'Bebas Neue', sans-serif"
+const FM = "'Manrope', sans-serif"
+const CARD = { background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }
+
 function getRangeForPreset(preset: Preset, customDesde: string | null, customHasta: string | null) {
   const hoy = todayISO()
   if (preset === 'hoy') return { desde: hoy, hasta: hoy }
@@ -15,29 +19,15 @@ function getRangeForPreset(preset: Preset, customDesde: string | null, customHas
   return { desde: customDesde ?? hoy, hasta: customHasta ?? hoy }
 }
 
-function MetricCard({
-  label,
-  value,
-  sub,
-  color = 'default',
-}: {
-  label: string
-  value: string
-  sub?: string
-  color?: 'default' | 'green' | 'red' | 'indigo'
+function MetricCard({ label, value, sub, color = 'default' }: {
+  label: string; value: string; sub?: string; color?: 'default' | 'green' | 'red' | 'indigo'
 }) {
-  const valueClass = {
-    default: 'text-slate-900 dark:text-slate-100',
-    green: 'text-green-600 dark:text-green-400',
-    red: 'text-red-500 dark:text-red-400',
-    indigo: 'text-indigo-600 dark:text-indigo-400',
-  }[color]
-
+  const numColor = { default: '#e2e8f0', green: '#4ade80', red: '#f87171', indigo: '#818cf8' }[color]
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-5">
-      <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">{label}</p>
-      <p className={`text-2xl font-bold mt-1 ${valueClass}`}>{value}</p>
-      {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
+    <div style={{ ...CARD, padding: '1rem 1.2rem' }}>
+      <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
+      <p style={{ fontFamily: FN, fontSize: '1.75rem', color: numColor, letterSpacing: '0.03em', lineHeight: 1, marginBottom: sub ? '0.25rem' : 0 }}>{value}</p>
+      {sub && <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.55)' }}>{sub}</p>}
     </div>
   )
 }
@@ -55,11 +45,8 @@ export default function Reportes() {
   }
 
   const labelPersonalizado =
-    customDesde && customHasta
-      ? `${fmtDate(customDesde)} — ${fmtDate(customHasta)}`
-      : customDesde
-      ? `Desde ${fmtDate(customDesde)}`
-      : 'Personalizado'
+    customDesde && customHasta ? `${fmtDate(customDesde)} — ${fmtDate(customHasta)}`
+    : customDesde ? `Desde ${fmtDate(customDesde)}` : 'Personalizado'
 
   const { desde, hasta } = getRangeForPreset(preset, customDesde, customHasta)
 
@@ -70,14 +57,15 @@ export default function Reportes() {
   })
 
   return (
-    <div className="p-4 sm:p-6 max-w-4xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Reportes</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Arqueo de caja y ganancias consolidadas</p>
+    <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
+      {/* Header */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Reportes</h1>
+        <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Arqueo de caja y ganancias consolidadas</p>
       </div>
 
       {/* Filtros */}
-      <div className="relative flex flex-wrap items-end gap-3 mb-6">
+      <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '1.5rem' }}>
         <DropdownFilter
           label="Período"
           value={preset}
@@ -89,79 +77,53 @@ export default function Reportes() {
           ]}
           onChange={handlePreset}
         />
-
         {showPicker && (
           <DateRangePicker
-            from={customDesde}
-            to={customHasta}
+            from={customDesde} to={customHasta}
             onChange={(f, t) => { setCustomDesde(f); setCustomHasta(t) }}
             onClose={() => setShowPicker(false)}
           />
         )}
       </div>
 
-      {isLoading && (
-        <div className="text-center text-slate-400 py-12">Calculando ganancias…</div>
-      )}
-      {error && (
-        <div className="text-center text-red-500 py-12">Error al cargar el reporte.</div>
-      )}
+      {isLoading && <div style={{ textAlign: 'center', color: 'rgba(100,116,139,0.6)', padding: '3rem', fontFamily: FM, fontSize: '0.82rem' }}>Calculando ganancias…</div>}
+      {error && <div style={{ textAlign: 'center', color: '#f87171', padding: '3rem', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar el reporte.</div>}
+
       {data && (
         <>
-          {/* Ganancias por módulo */}
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">Ganancias del período</h2>
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-4">
-            <MetricCard
-              label="Cheques (spread)"
-              value={fmtARS(data.ganancia_cheques)}
-              sub="Compra-venta de cheques"
-              color="green"
-            />
-            <MetricCard
-              label="Préstamos (intereses)"
-              value={fmtARS(data.ganancia_prestamos)}
-              sub="Diferencia crédito / total"
-              color="green"
-            />
-            <MetricCard
-              label="Divisas (efectivo)"
-              value={fmtARS(data.ganancia_movimientos_efectivo)}
-              sub="Compra-venta de dólares"
-              color="green"
-            />
-            <MetricCard
-              label="Gastos operativos"
-              value={fmtARS(data.gastos_operativos)}
-              sub="Nafta, insumos, etc."
-              color="red"
-            />
+          {/* Sección label */}
+          <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Ganancias del período</p>
+
+          <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1rem' }}>
+            <MetricCard label="Cheques (spread)" value={fmtARS(data.ganancia_cheques)} sub="Compra-venta de cheques" color="green" />
+            <MetricCard label="Préstamos (intereses)" value={fmtARS(data.ganancia_prestamos)} sub="Diferencia crédito / total" color="green" />
+            <MetricCard label="Divisas (efectivo)" value={fmtARS(data.ganancia_movimientos_efectivo)} sub="Compra-venta de dólares" color="green" />
+            <MetricCard label="Gastos operativos" value={fmtARS(data.gastos_operativos)} sub="Nafta, insumos, etc." color="red" />
           </div>
 
-          {/* Totales */}
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6">
-            <div className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-5">
-              <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Total ganancias brutas</p>
-              <p className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mt-1">
-                {fmtARS(data.total_ganancias)}
-              </p>
-              <p className="text-xs text-slate-400 mt-1">Sin descontar gastos</p>
+          {/* Totales destacados */}
+          <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.5rem' }}>
+            <div style={{ ...CARD, padding: '1.1rem 1.2rem' }}>
+              <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>Total bruto</p>
+              <p style={{ fontFamily: FN, fontSize: '2.2rem', color: '#e2e8f0', letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{fmtARS(data.total_ganancias)}</p>
+              <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>Sin descontar gastos</p>
             </div>
-            <div className="bg-indigo-600 text-white rounded-lg p-5">
-              <p className="text-xs text-indigo-200 uppercase tracking-wide font-medium">Neto del período</p>
-              <p className="text-2xl sm:text-3xl font-bold mt-1">{fmtARS(data.neto)}</p>
-              <p className="text-xs text-indigo-300 mt-1">Ganancias − gastos</p>
+            <div style={{ background: 'linear-gradient(145deg, #3730a3, #4338ca)', border: '1px solid rgba(99,102,241,0.4)', boxShadow: '0 4px 24px rgba(99,102,241,0.2)', padding: '1.1rem 1.2rem' }}>
+              <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.7)', marginBottom: '0.3rem' }}>Neto del período</p>
+              <p style={{ fontFamily: FN, fontSize: '2.2rem', color: '#fff', letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{fmtARS(data.neto)}</p>
+              <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(199,210,254,0.55)' }}>Ganancias − gastos</p>
             </div>
           </div>
 
           {/* Tabla desglose */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden mb-6">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[320px]">
+          <div style={{ ...CARD, overflow: 'hidden', marginBottom: '1.5rem' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '320px' }}>
                 <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700">
-                    <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Módulo</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Importe</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">% del bruto</th>
+                  <tr>
+                    <th style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>Módulo</th>
+                    <th style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'right', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>Importe</th>
+                    <th style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'right', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>% del bruto</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -175,42 +137,42 @@ export default function Reportes() {
                       ? ((parseFloat(row.value) / parseFloat(data.total_ganancias)) * 100).toFixed(1)
                       : '0.0'
                     return (
-                      <tr key={row.label} className="border-b border-slate-100 dark:border-slate-700/50">
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{row.label}</td>
-                        <td className={`px-4 py-3 text-right font-semibold ${row.egreso ? 'text-red-500 dark:text-red-400' : 'text-slate-900 dark:text-slate-100'}`}>
+                      <tr key={row.label}
+                        onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                        onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
+                        <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }}>{row.label}</td>
+                        <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', fontWeight: 600, color: row.egreso ? '#f87171' : '#4ade80' }}>
                           {row.egreso ? '−' : ''}{fmtARS(row.value)}
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-500">{row.egreso ? '−' : ''}{pct}%</td>
+                        <td style={{ fontFamily: FM, fontSize: '0.78rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: 'rgba(100,116,139,0.6)' }}>
+                          {row.egreso ? '−' : ''}{pct}%
+                        </td>
                       </tr>
                     )
                   })}
-                  <tr className="bg-slate-50 dark:bg-slate-700/50 font-semibold">
-                    <td className="px-4 py-3 text-slate-900 dark:text-slate-100">Neto</td>
-                    <td className="px-4 py-3 text-right text-indigo-700 dark:text-indigo-400">{fmtARS(data.neto)}</td>
-                    <td className="px-4 py-3 text-right text-slate-500">—</td>
+                  <tr style={{ background: 'rgba(255,255,255,0.025)' }}>
+                    <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', fontWeight: 700, color: '#e2e8f0' }}>Neto</td>
+                    <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', textAlign: 'right', fontWeight: 700, color: '#818cf8' }}>{fmtARS(data.neto)}</td>
+                    <td style={{ fontFamily: FM, fontSize: '0.78rem', padding: '0.65rem 1rem', textAlign: 'right', color: 'rgba(100,116,139,0.5)' }}>—</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
 
-          {/* Saldo Pasivos */}
-          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">Pasivos pendientes (snapshot actual)</h2>
-          <div className="grid grid-cols-2 gap-3 sm:gap-4">
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-5">
-              <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Deudas pendientes ARS</p>
-              <p className="text-2xl font-bold text-red-500 dark:text-red-400 mt-1">
-                {fmtARS(data.saldo_pasivos.pendiente_ars)}
-              </p>
-              <p className="text-xs text-slate-400 mt-1">Lo que el negocio debe (en $)</p>
-            </div>
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-5">
-              <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Deudas pendientes USD</p>
-              <p className="text-2xl font-bold text-red-500 dark:text-red-400 mt-1">
-                {fmtUSD(data.saldo_pasivos.pendiente_usd)}
-              </p>
-              <p className="text-xs text-slate-400 mt-1">Lo que el negocio debe (en U$D)</p>
-            </div>
+          {/* Pasivos snapshot */}
+          <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Pasivos pendientes (snapshot actual)</p>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: 'Deudas pendientes ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars), sub: 'Lo que el negocio debe (en $)' },
+              { label: 'Deudas pendientes USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd), sub: 'Lo que el negocio debe (en U$D)' },
+            ].map(({ label, value, sub }) => (
+              <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
+                <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
+                <p style={{ fontFamily: FN, fontSize: '1.75rem', color: '#f87171', letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{value}</p>
+                <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
+              </div>
+            ))}
           </div>
         </>
       )}

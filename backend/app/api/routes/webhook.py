@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
@@ -36,11 +36,11 @@ def _clasificar_respuesta(text: str) -> str | None:
 
 
 @router.post("/whatsapp")
-async def recibir_mensaje(request: Request) -> JSONResponse:
+async def recibir_mensaje(request: Request, background_tasks: BackgroundTasks) -> JSONResponse:
     """Endpoint que recibe los webhooks de WAHA.
 
-    Siempre responde 200 rápidamente para que WAHA no reintente.
-    El procesamiento ocurre en el mismo hilo pero es tolerante a errores.
+    Responde 200 inmediatamente y procesa en background para que WAHA no reintente
+    si Claude demora más del timeout del webhook.
     """
     settings = get_settings()
 
@@ -60,7 +60,16 @@ async def recibir_mensaje(request: Request) -> JSONResponse:
         logger.warning("Mensaje de número no autorizado: %s", msg.phone)
         return JSONResponse(content={"ok": True})
 
-    # ── 3. Procesar el mensaje ───────────────────────────────────────────────
+    # ── 3. Encolar procesamiento y responder 200 de inmediato ────────────────
+    background_tasks.add_task(_procesar_mensaje_safe, msg, settings)
+    return JSONResponse(content={"ok": True})
+
+
+async def _procesar_mensaje_safe(
+    msg: wa_parser.IncomingMessage,
+    settings: Any,
+) -> None:
+    """Wrapper con manejo de errores para ejecutar como BackgroundTask."""
     try:
         await _procesar_mensaje(msg, settings)
     except Exception as exc:
@@ -69,8 +78,6 @@ async def recibir_mensaje(request: Request) -> JSONResponse:
             msg.phone,
             "⚠️ Ocurrió un error inesperado. Por favor intentá de nuevo.",
         )
-
-    return JSONResponse(content={"ok": True})
 
 
 async def _procesar_mensaje(

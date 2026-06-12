@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 
+const FONT = "'Manrope', sans-serif"
+
 export default function DropdownFilter<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
+  label, value, options, onChange,
 }: {
   label: string
   value: T
@@ -25,35 +24,30 @@ export default function DropdownFilter<T extends string>({
   const current = options.find((o) => o.value === value)
 
   return (
-    <div className="flex flex-col gap-1" ref={ref}>
-      <label className="text-xs font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wide">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }} ref={ref}>
+      <label style={{ fontFamily: FONT, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase' as const, color: 'rgba(100,116,139,0.7)' }}>
         {label}
       </label>
-      <div className="relative">
+      <div style={{ position: 'relative' }}>
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-2 text-sm font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-colors min-w-[140px] justify-between"
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: FONT, fontSize: '0.78rem', fontWeight: 600, background: 'linear-gradient(145deg, #0c0c10, #13131a)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0', padding: '0.45rem 0.85rem', minWidth: '150px', justifyContent: 'space-between', cursor: 'pointer' }}
         >
           <span>{current?.label}</span>
-          <svg
-            className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-          >
+          <svg style={{ width: '12px', height: '12px', color: 'rgba(148,163,184,0.5)', transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <polyline points="6 9 12 15 18 9" />
           </svg>
         </button>
 
         {open && (
-          <div className="absolute top-full left-0 mt-1 z-20 min-w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg py-1 overflow-hidden">
+          <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 30, minWidth: '100%', background: '#0f0f16', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)', overflow: 'hidden' }}>
             {options.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => { onChange(opt.value); setOpen(false) }}
-                className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                  opt.value === value
-                    ? 'bg-slate-100 dark:bg-slate-700/60 text-slate-900 dark:text-slate-100 font-semibold'
-                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/40'
-                }`}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '0.5rem 0.85rem', fontFamily: FONT, fontSize: '0.78rem', fontWeight: opt.value === value ? 700 : 500, color: opt.value === value ? '#f8fafc' : 'rgba(148,163,184,0.75)', background: opt.value === value ? 'rgba(99,102,241,0.12)' : 'transparent', borderLeft: opt.value === value ? '2px solid #6366f1' : '2px solid transparent', cursor: 'pointer' }}
+                onMouseEnter={(e) => { if (opt.value !== value) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)' }}
+                onMouseLeave={(e) => { if (opt.value !== value) (e.currentTarget as HTMLButtonElement).style.background = opt.value === value ? 'rgba(99,102,241,0.12)' : 'transparent' }}
               >
                 {opt.label}
               </button>

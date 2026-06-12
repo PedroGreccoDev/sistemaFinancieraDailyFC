@@ -12,6 +12,17 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# Cliente singleton — se inicializa una sola vez para reutilizar el connection pool
+_anthropic_client: AsyncAnthropic | None = None
+
+
+def _get_client() -> AsyncAnthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = AsyncAnthropic(api_key=get_settings().anthropic_api_key)
+    return _anthropic_client
+
+
 # ---------------------------------------------------------------------------
 # Intenciones reconocidas
 # ---------------------------------------------------------------------------
@@ -234,8 +245,9 @@ REGLAS CRÍTICAS
    El porcentaje_compra NUNCA está en el cheque: debe venir del mensaje verbal del operador.
    Si no lo menciona → ACLARACION_REQUERIDA.
 9. Si el cheque tiene CUIT o número de cuenta, ignorarlo (no es parte del modelo).
-10. Si el monto supera $500.000 ARS o 500 USD, o la operación es irreversible (RECHAZAR, FIAR),
+10. Si el monto supera $500.000 ARS o 500 USD, o la operación es RECHAZAR_CHEQUE,
     pon confirmacion_requerida: true y describí la operación completa en respuesta_usuario.
+    FIAR_CHEQUE solo requiere confirmación si el monto nominal del cheque supera $500.000 ARS.
 11. Ambigüedad COBRAR_CUOTA vs COBRAR_FIADO_EFECTIVO: si el operador dice "X me pagó" o
     "cobré a X" sin más contexto, elegí COBRAR_CUOTA (más común). Si menciona "fiado",
     "la deuda" o "lo que me debía del cheque" → COBRAR_FIADO_EFECTIVO.
@@ -344,8 +356,7 @@ async def extraer_intencion(
     Returns:
         IntentResult con intent, data estructurada y respuesta para el operador.
     """
-    settings = get_settings()
-    client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    client = _get_client()
 
     # Construir el contenido del mensaje actual
     if image_bytes:

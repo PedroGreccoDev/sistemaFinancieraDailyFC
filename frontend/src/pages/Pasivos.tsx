@@ -8,28 +8,26 @@ import DropdownFilter from '../components/DropdownFilter'
 
 type Filtro = 'todos' | PasivoEstado
 
+const FM = "'Manrope', sans-serif"
+const FN = "'Bebas Neue', sans-serif"
+const CARD = { background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }
+const MODAL_BG = '#0d0d14'
+const INPUT_STYLE: React.CSSProperties = { width: '100%', background: '#080810', border: '1px solid rgba(255,255,255,0.12)', color: '#e2e8f0', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
+const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
+const TH: React.CSSProperties = { fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'nowrap' }
+const TD: React.CSSProperties = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }
+
 function EstadoBadge({ estado }: { estado: PasivoEstado }) {
-  return estado === 'PENDIENTE' ? (
-    <span className="inline-flex items-center text-xs font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 rounded-full px-2 py-0.5">
-      Pendiente
-    </span>
-  ) : (
-    <span className="inline-flex items-center text-xs font-semibold bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 rounded-full px-2 py-0.5">
-      Cancelada
+  const isPending = estado === 'PENDIENTE'
+  return (
+    <span style={{ fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, color: isPending ? '#fbbf24' : '#4ade80', background: isPending ? 'rgba(251,191,36,0.12)' : 'rgba(74,222,128,0.12)', border: `1px solid ${isPending ? 'rgba(251,191,36,0.3)' : 'rgba(74,222,128,0.3)'}`, padding: '2px 8px' }}>
+      {isPending ? 'Pendiente' : 'Cancelada'}
     </span>
   )
 }
 
 function fmtMoneda(monto: string | number, moneda: Moneda): string {
   return moneda === 'USD' ? fmtUSD(monto) : fmtARS(monto)
-}
-
-function inputCls() {
-  return 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500'
-}
-
-function labelCls() {
-  return 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1'
 }
 
 // ── Modal nueva deuda ─────────────────────────────────────────────────
@@ -49,79 +47,32 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
     setError(null)
     setLoading(true)
     try {
-      await createPasivo({
-        acreedor: acreedor.trim(),
-        concepto: concepto.trim(),
-        monto: parseFloat(monto),
-        moneda,
-        fecha_vencimiento: fechaVenc || null,
-        observaciones: observaciones.trim() || null,
-      })
+      await createPasivo({ acreedor: acreedor.trim(), concepto: concepto.trim(), monto: parseFloat(monto), moneda, fecha_vencimiento: fechaVenc || null, observaciones: observaciones.trim() || null })
       onSuccess()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
+    } catch (err) { setError((err as Error).message) }
+    finally { setLoading(false) }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl max-h-[92vh] overflow-y-auto">
-        <div className="p-5 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
-          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Nueva deuda</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Registrar una deuda del negocio</p>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid rgba(255,255,255,0.08)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1 }}>Nueva deuda</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Registrar una deuda del negocio</p>
         </div>
-        <form onSubmit={handleSubmit} className="p-5 space-y-3">
-          <div>
-            <label className={labelCls()}>A quién le debo</label>
-            <input
-              type="text" value={acreedor} onChange={(e) => setAcreedor(e.target.value)}
-              required className={inputCls()}
-            />
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div><label style={LABEL_STYLE}>A quién le debo</label><input type="text" value={acreedor} onChange={(e) => setAcreedor(e.target.value)} required style={INPUT_STYLE} /></div>
+          <div><label style={LABEL_STYLE}>Concepto / razón</label><input type="text" value={concepto} onChange={(e) => setConcepto(e.target.value)} required style={INPUT_STYLE} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div><label style={LABEL_STYLE}>Monto</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required style={INPUT_STYLE} /></div>
+            <div><label style={LABEL_STYLE}>Moneda</label><select value={moneda} onChange={(e) => setMoneda(e.target.value as Moneda)} style={{ ...INPUT_STYLE, cursor: 'pointer' }}><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
           </div>
-          <div>
-            <label className={labelCls()}>Concepto / razón</label>
-            <input
-              type="text" value={concepto} onChange={(e) => setConcepto(e.target.value)}
-              required className={inputCls()}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls()}>Monto</label>
-              <input
-                type="number" step="0.01" min="0.01"
-                value={monto} onChange={(e) => setMonto(e.target.value)}
-                required className={inputCls()}
-              />
-            </div>
-            <div>
-              <label className={labelCls()}>Moneda</label>
-              <select value={moneda} onChange={(e) => setMoneda(e.target.value as Moneda)} className={inputCls()}>
-                <option value="ARS">ARS</option>
-                <option value="USD">USD</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className={labelCls()}>Fecha de vencimiento <span className="text-slate-400 font-normal">(opcional)</span></label>
-            <input type="date" value={fechaVenc} onChange={(e) => setFechaVenc(e.target.value)} className={inputCls()} />
-          </div>
-          <div>
-            <label className={labelCls()}>Observaciones <span className="text-slate-400 font-normal">(opcional)</span></label>
-            <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} className={`${inputCls()} resize-none`} />
-          </div>
-          {error && <p className="text-sm text-red-500">{error}</p>}
-          <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose}
-              className="flex-1 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-              Cancelar
-            </button>
-            <button type="submit" disabled={loading}
-              className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-              {loading ? 'Guardando…' : 'Registrar'}
-            </button>
+          <div><label style={LABEL_STYLE}>Vencimiento <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><input type="date" value={fechaVenc} onChange={(e) => setFechaVenc(e.target.value)} style={INPUT_STYLE} /></div>
+          <div><label style={LABEL_STYLE}>Observaciones <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+          <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
+            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Cancelar</button>
+            <button type="submit" disabled={loading} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>{loading ? 'Guardando…' : 'Registrar'}</button>
           </div>
         </form>
       </div>
@@ -131,20 +82,11 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
 
 // ── Modal cancelar con efectivo ───────────────────────────────────────
 
-function ModalCancelarEfectivo({
-  pasivo,
-  onClose,
-  onSuccess,
-}: {
-  pasivo: Pasivo
-  onClose: () => void
-  onSuccess: () => void
-}) {
+function ModalCancelarEfectivo({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onClose: () => void; onSuccess: () => void }) {
   const saldo = parseFloat(pasivo.saldo_pendiente)
   const [montoCobrado, setMontoCobrado] = useState(pasivo.saldo_pendiente)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
   const montoNum = parseFloat(montoCobrado) || 0
   const cancelaTotal = montoNum === saldo && saldo > 0
 
@@ -152,68 +94,44 @@ function ModalCancelarEfectivo({
     e.preventDefault()
     setError(null)
     setLoading(true)
-    try {
-      await cancelarPasivoEfectivo(pasivo.id, { monto_cobrado: montoNum })
-      onSuccess()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
+    try { await cancelarPasivoEfectivo(pasivo.id, { monto_cobrado: montoNum }); onSuccess() }
+    catch (err) { setError((err as Error).message) }
+    finally { setLoading(false) }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl">
-        <div className="p-5 border-b border-slate-200 dark:border-slate-700">
-          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Pagar con efectivo</h2>
-          <p className="text-sm text-slate-500 mt-0.5">{pasivo.acreedor}</p>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid rgba(255,255,255,0.08)', width: '100%', maxWidth: '380px' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1 }}>Pagar con efectivo</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{pasivo.acreedor}</p>
         </div>
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {/* Resumen */}
-          <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 space-y-1 text-sm">
-            <div className="flex justify-between">
-              <span className="text-slate-500 dark:text-slate-400">Deuda original</span>
-              <span className="font-medium">{fmtMoneda(pasivo.monto, pasivo.moneda)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500 dark:text-slate-400">Saldo pendiente</span>
-              <span className="font-bold text-red-600 dark:text-red-400">{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</span>
-            </div>
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            {[
+              { label: 'Deuda original', value: fmtMoneda(pasivo.monto, pasivo.moneda), color: '#e2e8f0' },
+              { label: 'Saldo pendiente', value: fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda), color: '#f87171' },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
+                <span style={{ color: 'rgba(100,116,139,0.65)' }}>{label}</span>
+                <span style={{ fontWeight: 700, color }}>{value}</span>
+              </div>
+            ))}
           </div>
-
-          {/* Monto a pagar */}
           <div>
-            <label className={labelCls()}>Monto a pagar</label>
-            <input
-              type="number" step="0.01" min="0.01" max={saldo}
-              value={montoCobrado}
-              onChange={(e) => setMontoCobrado(e.target.value)}
-              required className={inputCls()}
-            />
+            <label style={LABEL_STYLE}>Monto a pagar</label>
+            <input type="number" step="0.01" min="0.01" max={saldo} value={montoCobrado} onChange={(e) => setMontoCobrado(e.target.value)} required style={INPUT_STYLE} />
             {montoNum > 0 && montoNum <= saldo && (
-              <p className={`text-xs mt-1 ${cancelaTotal ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                {cancelaTotal
-                  ? 'Cancela la deuda completamente'
-                  : `Saldo restante: ${fmtMoneda(saldo - montoNum, pasivo.moneda)}`}
+              <p style={{ fontFamily: FM, fontSize: '0.7rem', marginTop: '0.3rem', color: cancelaTotal ? '#4ade80' : '#fbbf24' }}>
+                {cancelaTotal ? 'Cancela la deuda completamente' : `Saldo restante: ${fmtMoneda(saldo - montoNum, pasivo.moneda)}`}
               </p>
             )}
-            {montoNum > saldo && (
-              <p className="text-xs mt-1 text-red-500">Supera el saldo pendiente</p>
-            )}
+            {montoNum > saldo && <p style={{ fontFamily: FM, fontSize: '0.7rem', marginTop: '0.3rem', color: '#f87171' }}>Supera el saldo pendiente</p>}
           </div>
-
-          {error && <p className="text-sm text-red-500">{error}</p>}
-
-          <div className="flex gap-3">
-            <button type="button" onClick={onClose}
-              className="flex-1 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-              Volver
-            </button>
-            <button type="submit" disabled={loading || montoNum <= 0 || montoNum > saldo}
-              className="flex-1 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors">
-              {loading ? 'Registrando…' : 'Confirmar pago'}
-            </button>
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Volver</button>
+            <button type="submit" disabled={loading || montoNum <= 0 || montoNum > saldo} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#16a34a', border: 'none', color: '#fff', cursor: 'pointer', opacity: (loading || montoNum <= 0 || montoNum > saldo) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar pago'}</button>
           </div>
         </form>
       </div>
@@ -223,15 +141,7 @@ function ModalCancelarEfectivo({
 
 // ── Modal cancelar con cheque ─────────────────────────────────────────
 
-function ModalCancelarCheque({
-  pasivo,
-  onClose,
-  onSuccess,
-}: {
-  pasivo: Pasivo
-  onClose: () => void
-  onSuccess: () => void
-}) {
+function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onClose: () => void; onSuccess: () => void }) {
   const saldo = parseFloat(pasivo.saldo_pendiente)
   const [chequeSeleccionado, setChequeSeleccionado] = useState<Cheque | null>(null)
   const [porcentajeVenta, setPorcentajeVenta] = useState('')
@@ -240,10 +150,7 @@ function ModalCancelarCheque({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const { data: cheques, isLoading: loadingCheques } = useQuery({
-    queryKey: ['cheques', 'cartera'],
-    queryFn: getChequeCartera,
-  })
+  const { data: cheques, isLoading: loadingCheques } = useQuery({ queryKey: ['cheques', 'cartera'], queryFn: getChequeCartera })
 
   function handleSelectCheque(nro: string) {
     const found = cheques?.find((c) => c.nro_cheque === nro) ?? null
@@ -261,143 +168,72 @@ function ModalCancelarCheque({
     if (!chequeSeleccionado) return
     setError(null)
     setLoading(true)
-    try {
-      await cancelarPasivoConCheque(pasivo.id, {
-        nro_cheque: chequeSeleccionado.nro_cheque,
-        porcentaje_venta: pctNum,
-        operador_id: operadorId.trim(),
-        motivo: motivo.trim(),
-      })
-      onSuccess()
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
+    try { await cancelarPasivoConCheque(pasivo.id, { nro_cheque: chequeSeleccionado.nro_cheque, porcentaje_venta: pctNum, operador_id: operadorId.trim(), motivo: motivo.trim() }); onSuccess() }
+    catch (err) { setError((err as Error).message) }
+    finally { setLoading(false) }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl max-h-[92vh] overflow-y-auto">
-        <div className="p-5 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
-          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Pagar con cheque</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Entregar un cheque de cartera al acreedor</p>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid rgba(255,255,255,0.08)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1 }}>Pagar con cheque</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Entregar un cheque de cartera al acreedor</p>
         </div>
-        <form onSubmit={handleSubmit} className="p-5 space-y-3">
-
-          {/* Resumen de la deuda */}
-          <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 space-y-1 text-sm">
-            <div className="flex justify-between">
-              <span className="text-slate-500 dark:text-slate-400">Acreedor</span>
-              <span className="font-medium text-slate-900 dark:text-slate-100">{pasivo.acreedor}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500 dark:text-slate-400">Saldo pendiente</span>
-              <span className="font-bold text-red-600 dark:text-red-400">{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</span>
-            </div>
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            {[
+              { label: 'Acreedor', value: pasivo.acreedor, color: '#e2e8f0' },
+              { label: 'Saldo pendiente', value: fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda), color: '#f87171' },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
+                <span style={{ color: 'rgba(100,116,139,0.65)' }}>{label}</span>
+                <span style={{ fontWeight: 700, color }}>{value}</span>
+              </div>
+            ))}
           </div>
 
-          {/* Selector de cheque */}
           <div>
-            <label className={labelCls()}>Cheque a entregar</label>
-            {loadingCheques ? (
-              <p className="text-sm text-slate-400">Cargando cheques…</p>
-            ) : !cheques || cheques.length === 0 ? (
-              <p className="text-sm text-amber-600 dark:text-amber-400">No hay cheques en cartera.</p>
-            ) : (
-              <select
-                value={chequeSeleccionado?.nro_cheque ?? ''}
-                onChange={(e) => handleSelectCheque(e.target.value)}
-                required className={inputCls()}
-              >
-                <option value="">— Seleccioná un cheque —</option>
-                {cheques.map((c) => (
-                  <option key={c.nro_cheque} value={c.nro_cheque}>
-                    #{c.nro_cheque} — {fmtARS(c.monto)}
-                    {c.fecha_pago ? ` — vence ${fmtDate(c.fecha_pago)}` : ''}
-                  </option>
-                ))}
-              </select>
-            )}
+            <label style={LABEL_STYLE}>Cheque a entregar</label>
+            {loadingCheques ? <p style={{ fontFamily: FM, fontSize: '0.78rem', color: 'rgba(100,116,139,0.5)' }}>Cargando cheques…</p>
+              : !cheques || cheques.length === 0 ? <p style={{ fontFamily: FM, fontSize: '0.78rem', color: '#fbbf24' }}>No hay cheques en cartera.</p>
+              : <select value={chequeSeleccionado?.nro_cheque ?? ''} onChange={(e) => handleSelectCheque(e.target.value)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+                  <option value="">— Seleccioná un cheque —</option>
+                  {cheques.map((c) => <option key={c.nro_cheque} value={c.nro_cheque}>#{c.nro_cheque} — {fmtARS(c.monto)}{c.fecha_pago ? ` — vence ${fmtDate(c.fecha_pago)}` : ''}</option>)}
+                </select>}
           </div>
 
-          {/* % venta */}
           <div>
-            <label className={labelCls()}>% venta aplicado</label>
-            <input
-              type="number" step="0.0001" min="0" max="100"
-              value={porcentajeVenta}
-              onChange={(e) => setPorcentajeVenta(e.target.value)}
-              required className={inputCls()}
-            />
-            {chequeSeleccionado && (
-              <p className="text-xs text-slate-400 mt-1">
-                % compra original: {chequeSeleccionado.porcentaje_compra}%
-              </p>
-            )}
+            <label style={LABEL_STYLE}>% venta aplicado</label>
+            <input type="number" step="0.0001" min="0" max="100" value={porcentajeVenta} onChange={(e) => setPorcentajeVenta(e.target.value)} required style={INPUT_STYLE} />
+            {chequeSeleccionado && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.5)', marginTop: '0.25rem' }}>% compra original: {chequeSeleccionado.porcentaje_compra}%</p>}
           </div>
 
-          {/* Preview */}
           {chequeSeleccionado && valorNeto !== null && diferencia !== null && (
-            <div className={`rounded-lg border p-3 text-sm space-y-1 ${
-              diferencia >= 0
-                ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20'
-                : 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20'
-            }`}>
-              <div className="flex justify-between">
-                <span className="text-slate-500 dark:text-slate-400">Nominal cheque</span>
-                <span className="font-medium">{fmtARS(chequeSeleccionado.monto)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 dark:text-slate-400">Valor neto ({pctNum}%)</span>
-                <span className="font-semibold">{fmtARS(valorNeto)}</span>
-              </div>
-              <div className="flex justify-between border-t border-slate-200 dark:border-slate-600 pt-1 mt-1">
-                <span className="font-medium">
-                  {diferencia >= 0 ? 'Cancela la deuda completamente' : 'Saldo restante'}
-                </span>
-                <span className={`font-bold ${diferencia >= 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                  {diferencia >= 0
-                    ? diferencia > 0 ? `+${fmtARS(diferencia)}` : '✓'
-                    : fmtARS(-diferencia)}
-                </span>
+            <div style={{ background: diferencia >= 0 ? 'rgba(74,222,128,0.06)' : 'rgba(251,191,36,0.06)', border: `1px solid ${diferencia >= 0 ? 'rgba(74,222,128,0.2)' : 'rgba(251,191,36,0.2)'}`, padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+              {[
+                { label: 'Nominal cheque', value: fmtARS(chequeSeleccionado.monto) },
+                { label: `Valor neto (${pctNum}%)`, value: fmtARS(valorNeto) },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
+                  <span style={{ color: 'rgba(100,116,139,0.65)' }}>{label}</span>
+                  <span style={{ fontWeight: 600, color: '#e2e8f0' }}>{value}</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.3rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                <span style={{ fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#fbbf24' }}>{diferencia >= 0 ? 'Cancela la deuda completamente' : 'Saldo restante'}</span>
+                <span style={{ fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#fbbf24' }}>{diferencia >= 0 ? (diferencia > 0 ? `+${fmtARS(diferencia)}` : '✓') : fmtARS(-diferencia)}</span>
               </div>
             </div>
           )}
 
-          {/* Operador */}
-          <div>
-            <label className={labelCls()}>Operador</label>
-            <input
-              type="text" value={operadorId} onChange={(e) => setOperadorId(e.target.value)}
-              required placeholder="Nombre del operador"
-              className={inputCls()}
-            />
-          </div>
+          <div><label style={LABEL_STYLE}>Operador</label><input type="text" value={operadorId} onChange={(e) => setOperadorId(e.target.value)} required placeholder="Nombre del operador" style={INPUT_STYLE} /></div>
+          <div><label style={LABEL_STYLE}>Motivo</label><input type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)} required style={INPUT_STYLE} /></div>
 
-          {/* Motivo */}
-          <div>
-            <label className={labelCls()}>Motivo</label>
-            <input
-              type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)}
-              required className={inputCls()}
-            />
-          </div>
-
-          {error && <p className="text-sm text-red-500">{error}</p>}
-
-          <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose}
-              className="flex-1 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-              Volver
-            </button>
-            <button
-              type="submit"
-              disabled={loading || !chequeSeleccionado || !cheques || cheques.length === 0}
-              className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-            >
-              {loading ? 'Registrando…' : 'Confirmar'}
-            </button>
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+          <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
+            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Volver</button>
+            <button type="submit" disabled={loading || !chequeSeleccionado || !cheques || cheques.length === 0} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', cursor: 'pointer', opacity: (loading || !chequeSeleccionado) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar'}</button>
           </div>
         </form>
       </div>
@@ -426,58 +262,43 @@ export default function Pasivos() {
   const totalUSD = pendientes.filter((p) => p.moneda === 'USD').reduce((acc, p) => acc + parseFloat(p.saldo_pendiente), 0)
 
   function handleSuccess() {
-    setPasivoEfectivo(null)
-    setPasivoCheque(null)
-    setMostrarNueva(false)
+    setPasivoEfectivo(null); setPasivoCheque(null); setMostrarNueva(false)
     queryClient.invalidateQueries({ queryKey: ['pasivos'] })
     queryClient.invalidateQueries({ queryKey: ['cheques'] })
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-5">
+    <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Deudas</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Deudas del negocio con clientes y proveedores</p>
+          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Deudas</h1>
+          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Deudas del negocio con clientes y proveedores</p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setMostrarNueva(true)}
-            className="text-sm font-medium bg-indigo-600 text-white rounded px-3 py-1.5 hover:bg-indigo-700 transition-colors"
-          >
-            + Nueva deuda
-          </button>
-          <button
-            onClick={() => refetch()}
-            className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 border border-slate-200 dark:border-slate-700 rounded px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-          >
-            Actualizar
-          </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={() => setMostrarNueva(true)} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>+ Nueva deuda</button>
+          <button onClick={() => refetch()} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>Actualizar</button>
         </div>
       </div>
 
-      {/* KPIs — muestra saldo pendiente total, no monto original */}
+      {/* KPIs */}
       {filtro !== 'CANCELADA' && (
-        <div className="grid grid-cols-2 gap-3 mb-5">
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4">
-            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-1">Saldo pendiente ARS</p>
-            <p className="text-xl sm:text-2xl font-bold text-red-500 dark:text-red-400 leading-none">
-              {fmtARS(totalARS)}
-            </p>
-            <p className="text-xs text-slate-400 mt-1">{pendientes.filter((p) => p.moneda === 'ARS').length} deuda(s)</p>
-          </div>
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4">
-            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-1">Saldo pendiente USD</p>
-            <p className="text-xl sm:text-2xl font-bold text-red-500 dark:text-red-400 leading-none">
-              {fmtUSD(totalUSD)}
-            </p>
-            <p className="text-xs text-slate-400 mt-1">{pendientes.filter((p) => p.moneda === 'USD').length} deuda(s)</p>
-          </div>
+        <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.25rem' }}>
+          {[
+            { label: 'Saldo pendiente ARS', value: fmtARS(totalARS), sub: `${pendientes.filter((p) => p.moneda === 'ARS').length} deuda(s)` },
+            { label: 'Saldo pendiente USD', value: fmtUSD(totalUSD), sub: `${pendientes.filter((p) => p.moneda === 'USD').length} deuda(s)` },
+          ].map(({ label, value, sub }) => (
+            <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
+              <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
+              <p style={{ fontFamily: FN, fontSize: '1.75rem', color: '#f87171', letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{value}</p>
+              <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
+            </div>
+          ))}
         </div>
       )}
 
       {/* Filtros */}
-      <div className="flex flex-wrap items-end gap-3 mb-4">
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}>
         <DropdownFilter
           label="Estado"
           value={filtro}
@@ -491,68 +312,45 @@ export default function Pasivos() {
       </div>
 
       {/* Lista */}
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-        {isLoading && <div className="p-12 text-center text-slate-400">Cargando deudas…</div>}
-        {error && <div className="p-12 text-center text-red-500">Error al cargar las deudas.</div>}
+      <div style={{ ...CARD, overflow: 'hidden' }}>
+        {isLoading && <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>Cargando deudas…</div>}
+        {error && <div style={{ padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar las deudas.</div>}
         {pasivos && pasivos.length === 0 && (
-          <div className="p-12 text-center text-slate-400">
-            <p className="text-4xl mb-3">✅</p>
-            <p className="font-medium">Sin deudas registradas</p>
+          <div style={{ padding: '3rem', textAlign: 'center' }}>
+            <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✅</p>
+            <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Sin deudas registradas</p>
           </div>
         )}
         {pasivos && pasivos.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[640px]">
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '640px' }}>
               <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50">
-                  <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Acreedor</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Concepto</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Original</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Saldo</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Vencimiento</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Estado</th>
-                  <th className="px-4 py-3" />
+                <tr>
+                  <th style={TH}>Acreedor</th>
+                  <th style={TH}>Concepto</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>Original</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>Saldo</th>
+                  <th style={TH}>Vencimiento</th>
+                  <th style={TH}>Estado</th>
+                  <th style={{ ...TH, padding: '0.625rem 1rem' }} />
                 </tr>
               </thead>
               <tbody>
                 {pasivos.map((pasivo) => (
-                  <tr
-                    key={pasivo.id}
-                    className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
-                  >
-                    <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
-                      {pasivo.acreedor}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-400 max-w-[160px] truncate">
-                      {pasivo.concepto}
-                    </td>
-                    <td className="px-4 py-3 text-right text-slate-500 dark:text-slate-400">
-                      {fmtMoneda(pasivo.monto, pasivo.moneda)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-red-600 dark:text-red-400">
-                      {fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400 text-xs whitespace-nowrap">
-                      {pasivo.fecha_vencimiento ? fmtDate(pasivo.fecha_vencimiento) : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <EstadoBadge estado={pasivo.estado} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
+                  <tr key={pasivo.id}
+                    onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                    onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
+                    <td style={{ ...TD, fontWeight: 600 }}>{pasivo.acreedor}</td>
+                    <td style={{ ...TD, color: 'rgba(148,163,184,0.7)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pasivo.concepto}</td>
+                    <td style={{ ...TD, textAlign: 'right', color: 'rgba(100,116,139,0.6)' }}>{fmtMoneda(pasivo.monto, pasivo.moneda)}</td>
+                    <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#f87171' }}>{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</td>
+                    <td style={{ ...TD, color: 'rgba(100,116,139,0.6)', fontSize: '0.72rem', whiteSpace: 'nowrap' }}>{pasivo.fecha_vencimiento ? fmtDate(pasivo.fecha_vencimiento) : '—'}</td>
+                    <td style={TD}><EstadoBadge estado={pasivo.estado} /></td>
+                    <td style={{ ...TD, textAlign: 'right' }}>
                       {pasivo.estado === 'PENDIENTE' && (
-                        <div className="flex gap-2 justify-end">
-                          <button
-                            onClick={() => setPasivoEfectivo(pasivo)}
-                            className="text-xs text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200 font-medium transition-colors border border-green-200 dark:border-green-800 rounded px-2 py-0.5"
-                          >
-                            Efectivo
-                          </button>
-                          <button
-                            onClick={() => setPasivoCheque(pasivo)}
-                            className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-200 font-medium transition-colors border border-indigo-200 dark:border-indigo-800 rounded px-2 py-0.5"
-                          >
-                            Con cheque
-                          </button>
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                          <button onClick={() => setPasivoEfectivo(pasivo)} style={{ fontFamily: FM, fontSize: '0.68rem', fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)', padding: '2px 8px', cursor: 'pointer' }}>Efectivo</button>
+                          <button onClick={() => setPasivoCheque(pasivo)} style={{ fontFamily: FM, fontSize: '0.68rem', fontWeight: 700, color: '#818cf8', background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)', padding: '2px 8px', cursor: 'pointer' }}>Con cheque</button>
                         </div>
                       )}
                     </td>
@@ -564,15 +362,9 @@ export default function Pasivos() {
         )}
       </div>
 
-      {mostrarNueva && (
-        <ModalNuevaDeuda onClose={() => setMostrarNueva(false)} onSuccess={handleSuccess} />
-      )}
-      {pasivoEfectivo && (
-        <ModalCancelarEfectivo pasivo={pasivoEfectivo} onClose={() => setPasivoEfectivo(null)} onSuccess={handleSuccess} />
-      )}
-      {pasivoCheque && (
-        <ModalCancelarCheque pasivo={pasivoCheque} onClose={() => setPasivoCheque(null)} onSuccess={handleSuccess} />
-      )}
+      {mostrarNueva && <ModalNuevaDeuda onClose={() => setMostrarNueva(false)} onSuccess={handleSuccess} />}
+      {pasivoEfectivo && <ModalCancelarEfectivo pasivo={pasivoEfectivo} onClose={() => setPasivoEfectivo(null)} onSuccess={handleSuccess} />}
+      {pasivoCheque && <ModalCancelarCheque pasivo={pasivoCheque} onClose={() => setPasivoCheque(null)} onSuccess={handleSuccess} />}
     </div>
   )
 }

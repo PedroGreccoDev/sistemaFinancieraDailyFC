@@ -47,9 +47,9 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <div className="min-h-dvh bg-slate-50 dark:bg-slate-900 flex flex-col transition-colors duration-200 pb-safe">
+        <div className="min-h-dvh flex flex-col md:flex-row" style={{ background: "#080810" }}>
           <Navbar />
-          <main className="flex-1">
+          <main className="flex-1 min-w-0 overflow-y-auto">
             <Routes>
               <Route path="/"          element={<Dashboard />} />
               <Route path="/cartera"      element={<Cartera />} />

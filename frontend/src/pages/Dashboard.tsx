@@ -6,8 +6,9 @@ import { getClientes } from '../api/clientes'
 import { getReporteGanancias } from '../api/reportes'
 import { fmtARS, fmtMonto, fmtDate, daysUntil, monthStartISO, todayISO } from '../lib/fmt'
 import type { Cheque, Prestamo } from '../types'
+import { FinanceDashboardCard } from '../components/FinanceDashboardCard'
 
-// ── helpers ──────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────
 
 function cuotasVencidas(prestamos: Prestamo[]) {
   return prestamos
@@ -30,243 +31,386 @@ function chequesPorVencer(cheques: Cheque[], dias: number) {
     .sort((a, b) => (a.fecha_pago ?? '').localeCompare(b.fecha_pago ?? ''))
 }
 
+// ── design tokens ─────────────────────────────────────────────────────
+
+const CARD_BG = "linear-gradient(145deg, #0c0c10 0%, #13131a 100%)"
+const CARD_BORDER = "1px solid rgba(255,255,255,0.06)"
+const CARD_SHADOW = "0 4px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04)"
+const DIVIDER = "1px solid rgba(255,255,255,0.05)"
+const TEXT_PRIMARY = "#e2e8f0"
+const TEXT_MUTED = "rgba(148,163,184,0.6)"
+const TEXT_FAINT = "rgba(100,116,139,0.7)"
+const FONT_UI = "'Manrope', sans-serif"
+const FONT_NUM = "'Bebas Neue', sans-serif"
+
 // ── sub-componentes ───────────────────────────────────────────────────
 
-function KpiCard({
-  label, value, sub, accent,
-}: { label: string; value: string; sub?: string; accent?: 'red' | 'green' | 'indigo' }) {
-  const valueClass =
-    accent === 'red'    ? 'text-red-500 dark:text-red-400' :
-    accent === 'green'  ? 'text-green-600 dark:text-green-400' :
-    accent === 'indigo' ? 'text-indigo-600 dark:text-indigo-400' :
-    'text-slate-900 dark:text-slate-100'
-
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 sm:p-5">
-      <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-1">{label}</p>
-      <p className={`text-xl sm:text-2xl lg:text-3xl font-bold leading-none ${valueClass}`}>{value}</p>
-      {sub && <p className="text-xs text-slate-400 mt-1.5">{sub}</p>}
+    <p style={{
+      fontFamily: FONT_UI,
+      fontSize: "0.65rem",
+      fontWeight: 700,
+      letterSpacing: "0.18em",
+      textTransform: "uppercase" as const,
+      color: "rgba(100,116,139,0.8)",
+      marginBottom: "0.75rem",
+    }}>
+      {children}
+    </p>
+  )
+}
+
+interface AlertCardProps {
+  dot: string
+  label: string
+  count?: number
+  children: React.ReactNode
+}
+
+function AlertCard({ dot, label, count, children }: AlertCardProps) {
+  return (
+    <div style={{
+      background: CARD_BG,
+      border: CARD_BORDER,
+      boxShadow: CARD_SHADOW,
+      overflow: "hidden",
+      marginBottom: "0.875rem",
+    }}>
+      <div style={{
+        padding: "0.75rem 1.1rem",
+        borderBottom: DIVIDER,
+        display: "flex",
+        alignItems: "center",
+        gap: "0.5rem",
+      }}>
+        <span style={{
+          width: "6px",
+          height: "6px",
+          borderRadius: "50%",
+          background: dot,
+          boxShadow: `0 0 6px ${dot}`,
+          flexShrink: 0,
+        }} />
+        <span style={{
+          fontFamily: FONT_UI,
+          fontSize: "0.8rem",
+          fontWeight: 600,
+          letterSpacing: "0.01em",
+          color: TEXT_PRIMARY,
+        }}>
+          {label}
+        </span>
+        {count !== undefined && count > 0 && (
+          <span style={{
+            marginLeft: "auto",
+            fontFamily: FONT_NUM,
+            fontSize: "0.9rem",
+            letterSpacing: "0.05em",
+            color: dot,
+            background: `${dot}18`,
+            border: `1px solid ${dot}35`,
+            padding: "0 0.5rem",
+            lineHeight: "1.5rem",
+          }}>
+            {count}
+          </span>
+        )}
+      </div>
+      {children}
     </div>
   )
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function RowItem({
+  primary, secondary, value, valueColor,
+}: { primary: string; secondary: string; value: string; valueColor?: string }) {
   return (
-    <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
-      {children}
-    </h2>
+    <div style={{
+      padding: "0.7rem 1.1rem",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: "0.75rem",
+      borderBottom: DIVIDER,
+    }}>
+      <div style={{ minWidth: 0 }}>
+        <p style={{
+          fontFamily: FONT_UI,
+          fontSize: "0.84rem",
+          fontWeight: 600,
+          color: TEXT_PRIMARY,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap" as const,
+        }}>
+          {primary}
+        </p>
+        <p style={{
+          fontFamily: FONT_UI,
+          fontSize: "0.72rem",
+          fontWeight: 500,
+          color: TEXT_MUTED,
+          marginTop: "2px",
+        }}>
+          {secondary}
+        </p>
+      </div>
+      <span style={{
+        fontFamily: FONT_NUM,
+        fontSize: "1.2rem",
+        letterSpacing: "0.03em",
+        color: valueColor ?? TEXT_PRIMARY,
+        flexShrink: 0,
+      }}>
+        {value}
+      </span>
+    </div>
   )
 }
 
-function EmptyState({ text }: { text: string }) {
-  return <p className="text-sm text-slate-400 py-3">{text}</p>
+function EmptyRow({ text }: { text: string }) {
+  return (
+    <div style={{
+      padding: "0.875rem 1rem",
+      fontFamily: FONT_UI,
+      fontSize: "0.72rem",
+      fontWeight: 500,
+      color: TEXT_FAINT,
+    }}>
+      {text}
+    </div>
+  )
 }
 
 // ── página ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { data: cheques }   = useQuery({ queryKey: ['cartera'],       queryFn: getChequeCartera,              refetchInterval: 30_000 })
-  const { data: prestamos } = useQuery({ queryKey: ['prestamos'],     queryFn: () => getPrestamos(),          refetchInterval: 30_000 })
-  const { data: clientes }  = useQuery({ queryKey: ['clientes'],      queryFn: getClientes,                   staleTime: 60_000 })
-  const { data: fiados }    = useQuery({ queryKey: ['fiados', 'ABIERTO'], queryFn: () => getFiados('ABIERTO'), refetchInterval: 30_000 })
+  const { data: cheques }   = useQuery({ queryKey: ['cartera'],             queryFn: getChequeCartera,              refetchInterval: 30_000 })
+  const { data: prestamos } = useQuery({ queryKey: ['prestamos'],           queryFn: () => getPrestamos(),          refetchInterval: 30_000 })
+  const { data: clientes }  = useQuery({ queryKey: ['clientes'],            queryFn: getClientes,                   staleTime: 60_000 })
+  const { data: fiados }    = useQuery({ queryKey: ['fiados', 'ABIERTO'],   queryFn: () => getFiados('ABIERTO'),    refetchInterval: 30_000 })
   const { data: reporte }   = useQuery({
     queryKey: ['reporte', monthStartISO(), todayISO()],
     queryFn: () => getReporteGanancias(monthStartISO(), todayISO()),
   })
 
-  const clienteMap = new Map(clientes?.map((c) => [c.id, c.nombre]) ?? [])
-
-  const totalCartera    = (cheques  ?? []).reduce((s, c) => s + parseFloat(c.monto), 0)
+  const clienteMap       = new Map(clientes?.map((c) => [c.id, c.nombre]) ?? [])
+  const totalCartera     = (cheques  ?? []).reduce((s, c) => s + parseFloat(c.monto), 0)
   const prestamosActivos = (prestamos ?? []).filter((p) => p.estado === 'ACTIVO')
-  const capitalEnCalle  = prestamosActivos.reduce((s, p) => s + parseFloat(p.credito), 0)
-  const vencidas        = cuotasVencidas(prestamos ?? [])
-  const proximos        = chequesPorVencer(cheques ?? [], 7)
+  const capitalEnCalle   = prestamosActivos.reduce((s, p) => s + parseFloat(p.credito), 0)
+  const vencidas         = cuotasVencidas(prestamos ?? [])
+  const proximos         = chequesPorVencer(cheques ?? [], 7)
 
-  // actividad reciente: últimos 5 registros de cheques + préstamos mezclados
   const actividad = [
-    ...(cheques  ?? []).map((c) => ({ tipo: 'cheque'  as const, id: c.nro_cheque, label: `Cheque ${c.nro_cheque}`, sub: fmtARS(c.monto), date: c.created_at })),
-    ...(prestamos ?? []).map((p) => ({ tipo: 'prestamo' as const, id: p.id, label: `Préstamo — ${clienteMap.get(p.cliente_id) ?? '…'}`, sub: fmtMonto(p.credito, p.moneda), date: p.created_at })),
+    ...(cheques  ?? []).map((c) => ({ tipo: 'cheque'   as const, id: c.nro_cheque,  label: `Cheque ${c.nro_cheque}`,                           sub: fmtARS(c.monto),              date: c.created_at })),
+    ...(prestamos ?? []).map((p) => ({ tipo: 'prestamo' as const, id: p.id,          label: `Préstamo — ${clienteMap.get(p.cliente_id) ?? '…'}`, sub: fmtMonto(p.credito, p.moneda), date: p.created_at })),
   ]
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5)
 
+  const fecha = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
+
   return (
-    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Resumen</h1>
-        <p className="text-sm text-slate-500 mt-0.5">{new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+    <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FONT_UI }}>
+
+      {/* Header */}
+      <div style={{ marginBottom: "1.5rem" }}>
+        <h1 style={{
+          fontFamily: FONT_NUM,
+          fontSize: "2.2rem",
+          letterSpacing: "0.06em",
+          color: "#e2e8f0",
+          lineHeight: 1,
+          marginBottom: "0.25rem",
+        }}>
+          RESUMEN
+        </h1>
+        <p style={{
+          fontFamily: FONT_UI,
+          fontSize: "0.78rem",
+          fontWeight: 500,
+          color: "rgba(100,116,139,0.9)",
+          textTransform: "capitalize" as const,
+        }}>
+          {fecha}
+        </p>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
-        <KpiCard
-          label="Cheques en cartera"
-          value={String(cheques?.length ?? '—')}
-          sub={cheques ? fmtARS(totalCartera) : undefined}
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" style={{ marginBottom: "1.75rem" }}>
+        <FinanceDashboardCard
+          title="Cheques en cartera"
+          value={cheques?.length ?? 0}
+          subtitle={cheques ? fmtARS(totalCartera) : undefined}
+          accentColor="#f59e0b"
         />
-        <KpiCard
-          label="Capital en calle"
-          value={prestamos ? fmtARS(capitalEnCalle) : '—'}
-          sub={`${prestamosActivos.length} préstamo${prestamosActivos.length !== 1 ? 's' : ''} activo${prestamosActivos.length !== 1 ? 's' : ''}`}
-          accent="indigo"
+        <FinanceDashboardCard
+          title="Capital en calle"
+          value={capitalEnCalle}
+          prefix="$"
+          subtitle={`${prestamosActivos.length} préstamo${prestamosActivos.length !== 1 ? 's' : ''} activo${prestamosActivos.length !== 1 ? 's' : ''}`}
+          accentColor="#6366f1"
+          formatValue={(v) => v.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
         />
-        <KpiCard
-          label="Cuotas vencidas"
-          value={prestamos ? String(vencidas.length) : '—'}
-          sub={vencidas.length > 0 ? 'Requieren atención' : 'Todo al día'}
-          accent={vencidas.length > 0 ? 'red' : undefined}
+        <FinanceDashboardCard
+          title="Cuotas vencidas"
+          value={vencidas.length}
+          subtitle={vencidas.length > 0 ? 'Requieren atención' : 'Todo al día'}
+          accentColor={vencidas.length > 0 ? '#ef4444' : '#22c55e'}
         />
-        <KpiCard
-          label="Ganancia del mes"
-          value={reporte ? fmtARS(reporte.neto) : '—'}
-          sub="Todos los módulos"
-          accent="green"
+        <FinanceDashboardCard
+          title="Ganancia del mes"
+          value={Number(reporte?.neto ?? 0)}
+          prefix="$"
+          subtitle="Todos los módulos"
+          accentColor="#10b981"
+          formatValue={(v) => v.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
         />
       </div>
 
+      {/* Lower grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
         {/* Alertas */}
         <div>
-          <SectionTitle>Alertas urgentes</SectionTitle>
+          <SectionLabel>Alertas urgentes</SectionLabel>
 
           {/* Cuotas vencidas */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl mb-4 overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Cuotas vencidas</span>
-              {vencidas.length > 0 && (
-                <span className="ml-auto text-xs font-semibold bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-full px-2 py-0.5">
-                  {vencidas.length}
-                </span>
-              )}
-            </div>
-            <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
-              {vencidas.length === 0 && !prestamos && <div className="px-4 py-3 text-sm text-slate-400">Cargando…</div>}
-              {vencidas.length === 0 && prestamos  && <div className="px-4 py-3"><EmptyState text="Sin cuotas vencidas" /></div>}
-              {vencidas.slice(0, 4).map((c) => (
-                <div key={c.id} className="px-4 py-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
-                      {clienteMap.get(c.cliente_id) ?? '…'}
-                    </p>
-                    <p className="text-xs text-red-500 dark:text-red-400">
-                      Venció {fmtDate(c.fecha_vencimiento)} · hace {Math.abs(daysUntil(c.fecha_vencimiento))}d
-                    </p>
-                  </div>
-                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 shrink-0">
-                    {fmtMonto(c.monto, c.moneda)}
-                  </span>
-                </div>
-              ))}
-              {vencidas.length > 4 && (
-                <div className="px-4 py-2 text-xs text-slate-400 text-center">
-                  +{vencidas.length - 4} más en Deudores
-                </div>
-              )}
-            </div>
-          </div>
+          <AlertCard dot="#ef4444" label="Cuotas vencidas" count={vencidas.length}>
+            {vencidas.length === 0 && !prestamos && <EmptyRow text="Cargando…" />}
+            {vencidas.length === 0 && prestamos  && <EmptyRow text="Sin cuotas vencidas" />}
+            {vencidas.slice(0, 4).map((c) => (
+              <RowItem
+                key={c.id}
+                primary={clienteMap.get(c.cliente_id) ?? '…'}
+                secondary={`Venció ${fmtDate(c.fecha_vencimiento)} · hace ${Math.abs(daysUntil(c.fecha_vencimiento))}d`}
+                value={fmtMonto(c.monto, c.moneda)}
+                valueColor="#f87171"
+              />
+            ))}
+            {vencidas.length > 4 && (
+              <div style={{ padding: "0.4rem 1rem", fontFamily: FONT_UI, fontSize: "0.65rem", fontWeight: 500, color: TEXT_FAINT, textAlign: "center" as const }}>
+                +{vencidas.length - 4} más en Deudores
+              </div>
+            )}
+          </AlertCard>
 
           {/* Fiados abiertos */}
           {((fiados && fiados.length > 0) || !fiados) && (
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl mb-4 overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Fiados abiertos</span>
-                {fiados && fiados.length > 0 && (
-                  <span className="ml-auto text-xs font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-full px-2 py-0.5">
-                    {fiados.length}
-                  </span>
-                )}
-              </div>
-              <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                {!fiados && <div className="px-4 py-3 text-sm text-slate-400">Cargando…</div>}
-                {fiados?.slice(0, 4).map((f) => (
-                  <div key={f.id} className="px-4 py-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
-                        {clienteMap.get(f.cliente_id) ?? '…'}
-                      </p>
-                      <p className="text-xs text-slate-400 font-mono">{f.cheque_nro}</p>
-                    </div>
-                    <span className="text-sm font-semibold text-amber-600 dark:text-amber-400 shrink-0">
-                      {fmtARS(f.saldo_pendiente)}
-                    </span>
-                  </div>
-                ))}
-                {fiados && fiados.length > 4 && (
-                  <div className="px-4 py-2 text-xs text-slate-400 text-center">
-                    +{fiados.length - 4} más en Fiados
-                  </div>
-                )}
-              </div>
-            </div>
+            <AlertCard dot="#f59e0b" label="Fiados abiertos" count={fiados?.length}>
+              {!fiados && <EmptyRow text="Cargando…" />}
+              {fiados?.slice(0, 4).map((f) => (
+                <RowItem
+                  key={f.id}
+                  primary={clienteMap.get(f.cliente_id) ?? '…'}
+                  secondary={f.cheque_nro}
+                  value={fmtARS(f.saldo_pendiente)}
+                  valueColor="#fbbf24"
+                />
+              ))}
+              {fiados && fiados.length > 4 && (
+                <div style={{ padding: "0.4rem 1rem", fontFamily: FONT_UI, fontSize: "0.65rem", fontWeight: 500, color: TEXT_FAINT, textAlign: "center" as const }}>
+                  +{fiados.length - 4} más en Fiados
+                </div>
+              )}
+            </AlertCard>
           )}
 
           {/* Cheques próximos a vencer */}
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-yellow-400 shrink-0" />
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Cheques vencen en 7 días</span>
-              {proximos.length > 0 && (
-                <span className="ml-auto text-xs font-semibold bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 rounded-full px-2 py-0.5">
-                  {proximos.length}
-                </span>
-              )}
-            </div>
-            <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
-              {proximos.length === 0 && !cheques  && <div className="px-4 py-3 text-sm text-slate-400">Cargando…</div>}
-              {proximos.length === 0 && cheques   && <div className="px-4 py-3"><EmptyState text="Sin cheques por vencer" /></div>}
-              {proximos.slice(0, 4).map((c) => {
-                const dias = daysUntil(c.fecha_pago!)
-                return (
-                  <div key={c.nro_cheque} className="px-4 py-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-mono font-medium text-slate-800 dark:text-slate-200 truncate">{c.nro_cheque}</p>
-                      <p className="text-xs text-yellow-600 dark:text-yellow-400">
-                        {dias === 0 ? 'Vence hoy' : `Vence en ${dias}d`} · {fmtDate(c.fecha_pago)}
-                      </p>
-                    </div>
-                    <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 shrink-0">
-                      {fmtARS(c.monto)}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+          <AlertCard dot="#facc15" label="Cheques vencen en 7 días" count={proximos.length}>
+            {proximos.length === 0 && !cheques  && <EmptyRow text="Cargando…" />}
+            {proximos.length === 0 && cheques   && <EmptyRow text="Sin cheques por vencer" />}
+            {proximos.slice(0, 4).map((c) => {
+              const dias = daysUntil(c.fecha_pago!)
+              return (
+                <RowItem
+                  key={c.nro_cheque}
+                  primary={c.nro_cheque}
+                  secondary={dias === 0 ? 'Vence hoy' : `Vence en ${dias}d · ${fmtDate(c.fecha_pago)}`}
+                  value={fmtARS(c.monto)}
+                  valueColor="#fde047"
+                />
+              )
+            })}
+          </AlertCard>
         </div>
 
         {/* Actividad reciente */}
         <div>
-          <SectionTitle>Actividad reciente</SectionTitle>
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+          <SectionLabel>Actividad reciente</SectionLabel>
+          <div style={{
+            background: CARD_BG,
+            border: CARD_BORDER,
+            boxShadow: CARD_SHADOW,
+            overflow: "hidden",
+          }}>
             {actividad.length === 0 && (
-              <div className="px-4 py-6 text-center text-slate-400 text-sm">
-                {!cheques && !prestamos ? 'Cargando…' : 'Sin actividad registrada'}
-              </div>
+              <EmptyRow text={!cheques && !prestamos ? 'Cargando…' : 'Sin actividad registrada'} />
             )}
-            <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
-              {actividad.map((item) => (
-                <div key={item.id} className="px-4 py-3 flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
-                    item.tipo === 'cheque'
-                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400'
-                      : 'bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-400'
-                  }`}>
+            {actividad.map((item) => (
+              <div key={item.id} style={{
+                padding: "0.625rem 1rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.75rem",
+                borderBottom: DIVIDER,
+              }}>
+                <div style={{
+                  width: "2rem",
+                  height: "2rem",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  background: item.tipo === 'cheque' ? "rgba(99,102,241,0.12)" : "rgba(168,85,247,0.12)",
+                  border: `1px solid ${item.tipo === 'cheque' ? "rgba(99,102,241,0.3)" : "rgba(168,85,247,0.3)"}`,
+                }}>
+                  <span style={{
+                    fontFamily: FONT_NUM,
+                    fontSize: "0.8rem",
+                    letterSpacing: "0.04em",
+                    color: item.tipo === 'cheque' ? "#818cf8" : "#c084fc",
+                  }}>
                     {item.tipo === 'cheque' ? 'CH' : 'PR'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{item.label}</p>
-                    <p className="text-xs text-slate-400">{item.sub}</p>
-                  </div>
-                  <span className="text-xs text-slate-400 shrink-0">
-                    {fmtDate(item.date.slice(0, 10))}
                   </span>
                 </div>
-              ))}
-            </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{
+                    fontFamily: FONT_UI,
+                    fontSize: "0.78rem",
+                    fontWeight: 600,
+                    color: TEXT_PRIMARY,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap" as const,
+                  }}>
+                    {item.label}
+                  </p>
+                  <p style={{
+                    fontFamily: FONT_UI,
+                    fontSize: "0.65rem",
+                    fontWeight: 500,
+                    color: TEXT_MUTED,
+                    marginTop: "1px",
+                  }}>
+                    {item.sub}
+                  </p>
+                </div>
+                <span style={{
+                  fontFamily: FONT_UI,
+                  fontSize: "0.65rem",
+                  fontWeight: 500,
+                  color: TEXT_FAINT,
+                  flexShrink: 0,
+                }}>
+                  {fmtDate(item.date.slice(0, 10))}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
+
       </div>
     </div>
   )

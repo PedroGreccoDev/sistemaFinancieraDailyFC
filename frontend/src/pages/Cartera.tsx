@@ -8,6 +8,12 @@ import DateRangePicker from '../components/DateRangePicker'
 
 type FilterPreset = 'hoy' | 'semana' | 'mes' | 'anio' | 'custom'
 
+const FN = "'Bebas Neue', sans-serif"
+const FM = "'Manrope', sans-serif"
+const CARD = { background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }
+const TH = { fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' as const, color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left' as const, background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'nowrap' as const }
+const TD = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }
+
 function presetRange(preset: FilterPreset, desde: string | null, hasta: string | null): [string, string] {
   const hoy = todayISO()
   if (preset === 'hoy')    return [hoy, hoy]
@@ -26,16 +32,15 @@ function filterByRange(cheques: Cheque[], start: string, end: string): Cheque[] 
 }
 
 function diasBadge(dias: number | null) {
-  if (dias === null) return <span className="text-slate-400 text-xs">Sin fecha</span>
-  if (dias < 0)
-    return <span className="inline-flex items-center text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 rounded-full px-2 py-0.5">Vencido {Math.abs(dias)}d</span>
-  if (dias === 0)
-    return <span className="inline-flex items-center text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 rounded-full px-2 py-0.5">Hoy</span>
-  if (dias <= 7)
-    return <span className="inline-flex items-center text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 rounded-full px-2 py-0.5">{dias}d</span>
-  if (dias <= 30)
-    return <span className="inline-flex items-center text-xs font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400 rounded-full px-2 py-0.5">{dias}d</span>
-  return <span className="inline-flex items-center text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 rounded-full px-2 py-0.5">{dias}d</span>
+  if (dias === null) return <span style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)' }}>Sin fecha</span>
+  const s = (color: string, label: string) => (
+    <span style={{ fontFamily: FM, fontSize: '0.7rem', fontWeight: 700, color, background: `${color}18`, border: `1px solid ${color}35`, padding: '1px 7px' }}>{label}</span>
+  )
+  if (dias < 0)   return s('#f87171', `Vencido ${Math.abs(dias)}d`)
+  if (dias === 0) return s('#fb923c', 'Hoy')
+  if (dias <= 7)  return s('#fbbf24', `${dias}d`)
+  if (dias <= 30) return s('#a3e635', `${dias}d`)
+  return s('#4ade80', `${dias}d`)
 }
 
 function totalCartera(cheques: Cheque[]): number {
@@ -55,23 +60,11 @@ export default function Cartera() {
   }
 
   const labelPersonalizado =
-    customDesde && customHasta
-      ? `${fmtDate(customDesde)} — ${fmtDate(customHasta)}`
-      : customDesde
-      ? `Desde ${fmtDate(customDesde)}`
-      : 'Personalizado'
+    customDesde && customHasta ? `${fmtDate(customDesde)} — ${fmtDate(customHasta)}`
+    : customDesde ? `Desde ${fmtDate(customDesde)}` : 'Personalizado'
 
-  const { data: cheques, isLoading, error, refetch } = useQuery({
-    queryKey: ['cartera'],
-    queryFn: getChequeCartera,
-    refetchInterval: 30_000,
-  })
-
-  const { data: vendidos } = useQuery({
-    queryKey: ['cheques-vendidos'],
-    queryFn: () => getCheques('VENDIDO'),
-    refetchInterval: 60_000,
-  })
+  const { data: cheques, isLoading, error, refetch } = useQuery({ queryKey: ['cartera'], queryFn: getChequeCartera, refetchInterval: 30_000 })
+  const { data: vendidos } = useQuery({ queryKey: ['cheques-vendidos'], queryFn: () => getCheques('VENDIDO'), refetchInterval: 60_000 })
 
   const sorted = cheques
     ? [...cheques].sort((a, b) => {
@@ -84,79 +77,70 @@ export default function Cartera() {
 
   const [rangeStart, rangeEnd] = presetRange(preset, customDesde, customHasta)
   const filteredVendidos = vendidos
-    ? [...filterByRange(vendidos, rangeStart, rangeEnd)].sort((a, b) =>
-        (b.ultimo_evento_manual_at ?? '').localeCompare(a.ultimo_evento_manual_at ?? '')
-      )
+    ? [...filterByRange(vendidos, rangeStart, rangeEnd)].sort((a, b) => (b.ultimo_evento_manual_at ?? '').localeCompare(a.ultimo_evento_manual_at ?? ''))
     : []
   const totalGanancia = filteredVendidos.reduce((acc, c) => acc + parseFloat(c.ganancia), 0)
 
   return (
-    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+    <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
 
-      {/* ── Cartera en stock ── */}
-      <div className="flex items-center justify-between mb-5">
+      {/* Header cartera */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Cartera</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Cheques en stock</p>
+          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Cartera</h1>
+          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Cheques en stock</p>
         </div>
-        <button
-          onClick={() => refetch()}
-          className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 border border-slate-200 dark:border-slate-700 rounded px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-        >
+        <button onClick={() => refetch()} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>
           Actualizar
         </button>
       </div>
 
+      {/* KPIs */}
       {cheques && (
-        <div className="grid grid-cols-2 gap-3 mb-5">
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
-            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">En cartera</p>
-            <p className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mt-1">{cheques.length}</p>
-          </div>
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
-            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Total</p>
-            <p className="text-lg sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mt-1">{fmtARS(totalCartera(cheques))}</p>
-          </div>
+        <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.25rem' }}>
+          {[
+            { label: 'En cartera', value: String(cheques.length), color: '#f8fafc' },
+            { label: 'Total', value: fmtARS(totalCartera(cheques)), color: '#f8fafc' },
+          ].map(({ label, value, color }) => (
+            <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
+              <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
+              <p style={{ fontFamily: FN, fontSize: '2rem', color, letterSpacing: '0.03em', lineHeight: 1 }}>{value}</p>
+            </div>
+          ))}
         </div>
       )}
 
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-        {isLoading && (
-          <div className="p-12 text-center text-slate-400">Cargando cartera…</div>
-        )}
-        {error && (
-          <div className="p-12 text-center text-red-500">Error al cargar la cartera.</div>
-        )}
-        {cheques && cheques.length === 0 && (
-          <div className="p-12 text-center text-slate-400">
-            <p className="text-4xl mb-3">📭</p>
-            <p className="font-medium">La cartera está vacía</p>
-          </div>
-        )}
+      {/* Tabla cartera */}
+      <div style={{ ...CARD, overflow: 'hidden', marginBottom: '2.5rem' }}>
+        {isLoading && <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.7)', fontFamily: FM, fontSize: '0.82rem' }}>Cargando cartera…</div>}
+        {error && <div style={{ padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar la cartera.</div>}
+        {cheques && cheques.length === 0 && <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>La cartera está vacía</div>}
         {sorted.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[540px]">
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '540px' }}>
               <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50">
-                  <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Nº Cheque</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Monto</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400 hidden sm:table-cell">Compra %</th>
-                  <th className="text-center px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Fecha pago</th>
-                  <th className="text-center px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Vence</th>
-                  <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400 hidden sm:table-cell">Ingresado</th>
+                <tr>
+                  <th style={TH}>Nº Cheque</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>Monto</th>
+                  <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">Compra %</th>
+                  <th style={{ ...TH, textAlign: 'center' }}>Fecha pago</th>
+                  <th style={{ ...TH, textAlign: 'center' }}>Vence</th>
+                  <th style={TH} className="hidden sm:table-cell">Ingresado</th>
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((cheque) => {
                   const dias = cheque.fecha_pago ? daysUntil(cheque.fecha_pago) : null
                   return (
-                    <tr key={cheque.nro_cheque} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
-                      <td className="px-4 py-3 font-mono font-medium text-slate-800 dark:text-slate-200 text-xs sm:text-sm">{cheque.nro_cheque}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900 dark:text-slate-100">{fmtARS(cheque.monto)}</td>
-                      <td className="px-4 py-3 text-right text-slate-600 dark:text-slate-400 hidden sm:table-cell">{parseFloat(cheque.porcentaje_compra).toFixed(2)}%</td>
-                      <td className="px-4 py-3 text-center text-slate-600 dark:text-slate-400">{fmtDate(cheque.fecha_pago)}</td>
-                      <td className="px-4 py-3 text-center">{diasBadge(dias)}</td>
-                      <td className="px-4 py-3 text-slate-400 dark:text-slate-500 text-xs hidden sm:table-cell">{fmtDate(cheque.created_at.slice(0, 10))}</td>
+                    <tr key={cheque.nro_cheque} style={{ transition: 'background 0.1s' }}
+                      onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                      onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
+                      <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{cheque.nro_cheque}</td>
+                      <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(cheque.monto)}</td>
+                      <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.7)' }} className="hidden sm:table-cell">{parseFloat(cheque.porcentaje_compra).toFixed(2)}%</td>
+                      <td style={{ ...TD, textAlign: 'center', color: 'rgba(148,163,184,0.7)' }}>{fmtDate(cheque.fecha_pago)}</td>
+                      <td style={{ ...TD, textAlign: 'center' }}>{diasBadge(dias)}</td>
+                      <td style={{ ...TD, color: 'rgba(100,116,139,0.6)', fontSize: '0.72rem' }} className="hidden sm:table-cell">{fmtDate(cheque.created_at.slice(0, 10))}</td>
                     </tr>
                   )
                 })}
@@ -166,109 +150,101 @@ export default function Cartera() {
         )}
       </div>
 
-      {/* ── Historial de ventas ── */}
-      <div className="mt-10">
-        <div className="mb-5">
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">Historial de Ventas</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Cheques vendidos por período</p>
-        </div>
-
-        {/* Filtros de período */}
-        <div className="relative flex flex-wrap items-end gap-3 mb-4">
-          <DropdownFilter
-            label="Período"
-            value={preset}
-            options={[
-              { value: 'hoy' as FilterPreset, label: 'Hoy' },
-              { value: 'semana' as FilterPreset, label: 'Esta semana' },
-              { value: 'mes' as FilterPreset, label: 'Este mes' },
-              { value: 'anio' as FilterPreset, label: 'Este año' },
-              { value: 'custom' as FilterPreset, label: labelPersonalizado },
-            ]}
-            onChange={handlePreset}
-          />
-
-          {showPicker && (
-            <DateRangePicker
-              from={customDesde}
-              to={customHasta}
-              onChange={(f, t) => { setCustomDesde(f); setCustomHasta(t) }}
-              onClose={() => setShowPicker(false)}
-            />
-          )}
-        </div>
-
-        {/* Resumen del período */}
-        <div className="grid grid-cols-2 gap-3 mb-5">
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
-            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Cheques vendidos</p>
-            <p className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mt-1">{filteredVendidos.length}</p>
-          </div>
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 sm:p-4">
-            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Ganancia del período</p>
-            <p className="text-lg sm:text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{fmtARS(totalGanancia)}</p>
-          </div>
-        </div>
-
-        {/* Tabla */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-          {filteredVendidos.length === 0 ? (
-            <div className="p-12 text-center text-slate-400">
-              <p className="text-4xl mb-3">📭</p>
-              <p className="font-medium">Sin ventas en el período</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[620px]">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50">
-                    <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Nº Cheque</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Monto</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400 hidden sm:table-cell">% Compra</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400 hidden sm:table-cell">% Venta</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Spread</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Ganancia</th>
-                    <th className="text-center px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Fecha venta</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredVendidos.map(c => {
-                    const spread = c.porcentaje_venta !== null
-                      ? (parseFloat(c.porcentaje_compra) - parseFloat(c.porcentaje_venta)).toFixed(2)
-                      : null
-                    return (
-                      <tr key={c.nro_cheque} className="border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
-                        <td className="px-4 py-3 font-mono font-medium text-slate-800 dark:text-slate-200 text-xs sm:text-sm">{c.nro_cheque}</td>
-                        <td className="px-4 py-3 text-right font-semibold text-slate-900 dark:text-slate-100">{fmtARS(c.monto)}</td>
-                        <td className="px-4 py-3 text-right text-slate-500 hidden sm:table-cell">{parseFloat(c.porcentaje_compra).toFixed(2)}%</td>
-                        <td className="px-4 py-3 text-right text-slate-500 hidden sm:table-cell">
-                          {c.porcentaje_venta !== null ? `${parseFloat(c.porcentaje_venta).toFixed(2)}%` : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-indigo-600 dark:text-indigo-400">
-                          {spread !== null ? `${spread}%` : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-right font-semibold text-emerald-600 dark:text-emerald-400">{fmtARS(c.ganancia)}</td>
-                        <td className="px-4 py-3 text-center text-slate-500 text-xs">
-                          {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/50">
-                    <td colSpan={5} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-right hidden sm:table-cell">Total</td>
-                    <td colSpan={5} className="px-4 py-3 font-semibold text-slate-700 dark:text-slate-300 text-right sm:hidden">Total</td>
-                    <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">{fmtARS(totalGanancia)}</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
+      {/* Historial de ventas */}
+      <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div>
+          <h2 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Historial de Ventas</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Cheques vendidos por período</p>
         </div>
       </div>
 
+      <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}>
+        <DropdownFilter
+          label="Período"
+          value={preset}
+          options={[
+            { value: 'hoy' as FilterPreset, label: 'Hoy' },
+            { value: 'semana' as FilterPreset, label: 'Esta semana' },
+            { value: 'mes' as FilterPreset, label: 'Este mes' },
+            { value: 'anio' as FilterPreset, label: 'Este año' },
+            { value: 'custom' as FilterPreset, label: labelPersonalizado },
+          ]}
+          onChange={handlePreset}
+        />
+        {showPicker && (
+          <DateRangePicker
+            from={customDesde} to={customHasta}
+            onChange={(f, t) => { setCustomDesde(f); setCustomHasta(t) }}
+            onClose={() => setShowPicker(false)}
+          />
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.25rem' }}>
+        {[
+          { label: 'Cheques vendidos', value: String(filteredVendidos.length), color: '#f8fafc' },
+          { label: 'Ganancia del período', value: fmtARS(totalGanancia), color: '#4ade80' },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
+            <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
+            <p style={{ fontFamily: FN, fontSize: '2rem', color, letterSpacing: '0.03em', lineHeight: 1 }}>{value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ ...CARD, overflow: 'hidden' }}>
+        {filteredVendidos.length === 0 ? (
+          <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>Sin ventas en el período</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '620px' }}>
+              <thead>
+                <tr>
+                  <th style={TH}>Nº Cheque</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>Monto</th>
+                  <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">% Compra</th>
+                  <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">% Venta</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>Spread</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>Ganancia</th>
+                  <th style={{ ...TH, textAlign: 'center' }}>Fecha venta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredVendidos.map(c => {
+                  const spread = c.porcentaje_venta !== null
+                    ? (parseFloat(c.porcentaje_compra) - parseFloat(c.porcentaje_venta)).toFixed(2)
+                    : null
+                  return (
+                    <tr key={c.nro_cheque}
+                      onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                      onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
+                      <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{c.nro_cheque}</td>
+                      <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(c.monto)}</td>
+                      <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">{parseFloat(c.porcentaje_compra).toFixed(2)}%</td>
+                      <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">
+                        {c.porcentaje_venta !== null ? `${parseFloat(c.porcentaje_venta).toFixed(2)}%` : '—'}
+                      </td>
+                      <td style={{ ...TD, textAlign: 'right', fontWeight: 600, color: '#818cf8' }}>{spread !== null ? `${spread}%` : '—'}</td>
+                      <td style={{ ...TD, textAlign: 'right', fontWeight: 600, color: '#4ade80' }}>{fmtARS(c.ganancia)}</td>
+                      <td style={{ ...TD, textAlign: 'center', color: 'rgba(148,163,184,0.65)', fontSize: '0.72rem' }}>
+                        {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{ borderTop: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.025)' }}>
+                  <td colSpan={5} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="hidden sm:table-cell">Total</td>
+                  <td colSpan={5} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="sm:hidden">Total</td>
+                  <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#4ade80', borderBottom: 'none' }}>{fmtARS(totalGanancia)}</td>
+                  <td style={{ ...TD, borderBottom: 'none' }} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
