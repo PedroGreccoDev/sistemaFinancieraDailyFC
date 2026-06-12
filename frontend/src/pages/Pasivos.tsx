@@ -341,7 +341,7 @@ export default function Pasivos() {
                     onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
                     onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                     <td style={{ ...TD, fontWeight: 600 }}>{pasivo.acreedor}</td>
-                    <td style={{ ...TD, color: 'rgba(148,163,184,0.7)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pasivo.concepto}</td>
+                    <td style={{ ...TD, color: 'rgba(148,163,184,0.7)', maxWidth: '220px', whiteSpace: 'normal', wordBreak: 'break-word' }}>{pasivo.concepto}</td>
                     <td style={{ ...TD, textAlign: 'right', color: 'rgba(100,116,139,0.6)' }}>{fmtMoneda(pasivo.monto, pasivo.moneda)}</td>
                     <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#f87171' }}>{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</td>
                     <td style={{ ...TD, color: 'rgba(100,116,139,0.6)', fontSize: '0.72rem', whiteSpace: 'nowrap' }}>{pasivo.fecha_vencimiento ? fmtDate(pasivo.fecha_vencimiento) : '—'}</td>

@@ -99,7 +99,7 @@ export default function DeudoresPrestamos() {
             <div key={p.id} style={{ background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: `1px solid ${cfg.borderColor}`, boxShadow: `0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px ${cfg.borderColor}`, padding: '1.1rem 1.2rem' }}>
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
-                <h3 style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '65%' }}>{nombre}</h3>
+                <h3 style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', wordBreak: 'break-word', maxWidth: '70%' }}>{nombre}</h3>
                 <span style={{ fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, color: cfg.accent, background: cfg.badgeBg, border: `1px solid ${cfg.borderColor}`, padding: '2px 8px', letterSpacing: '0.05em', flexShrink: 0 }}>
                   {cfg.label}
                 </span>

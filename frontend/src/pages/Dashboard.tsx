@@ -140,9 +140,7 @@ function RowItem({
           fontSize: "0.84rem",
           fontWeight: 600,
           color: TEXT_PRIMARY,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap" as const,
+          wordBreak: "break-word" as const,
         }}>
           {primary}
         </p>
@@ -381,9 +379,7 @@ export default function Dashboard() {
                     fontSize: "0.78rem",
                     fontWeight: 600,
                     color: TEXT_PRIMARY,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap" as const,
+                    wordBreak: "break-word" as const,
                   }}>
                     {item.label}
                   </p>

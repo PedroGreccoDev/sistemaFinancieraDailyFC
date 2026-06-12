@@ -227,9 +227,9 @@ export default function Movimientos() {
                         </span>
                       </td>
                       <td style={{ padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                        <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '260px' }}>{item.descripcion}</p>
+                        <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0', whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: '260px' }}>{item.descripcion}</p>
                         {item.detalle && (
-                          <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.55)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '260px', marginTop: '1px' }}>{item.detalle}</p>
+                          <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.55)', whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: '260px', marginTop: '1px' }}>{item.detalle}</p>
                         )}
                       </td>
                       <td style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 700, padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: item.esGasto ? '#f87171' : '#e2e8f0', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
