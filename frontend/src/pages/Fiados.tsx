@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getFiados, cobrarEfectivo, cobrarConCheque } from '../api/fiados'
 import { getChequeCartera, fiarCheque } from '../api/cheques'
-import { getClientes } from '../api/clientes'
+import { getClientes, createCliente } from '../api/clientes'
 import { fmtARS, fmtDate } from '../lib/fmt'
-import type { Fiado, FiadoEstado, CobrarConChequeResult } from '../types'
+import type { Fiado, FiadoEstado, CobrarConChequeResult, Cliente } from '../types'
 
 type Filtro = 'ABIERTO' | 'todos' | 'CANCELADO'
 
@@ -287,12 +287,19 @@ function ModalResultado({ result, onClose }: { result: CobrarConChequeResult; on
 // ── Modal nuevo cheque fiado ──────────────────────────────────────────
 
 function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const queryClient = useQueryClient()
   const [chequeNro, setChequeNro] = useState('')
   const [clienteId, setClienteId] = useState('')
   const [pct, setPct] = useState('')
   const [motivo, setMotivo] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const [mostrandoNuevoCliente, setMostrandoNuevoCliente] = useState(false)
+  const [nuevoNombre, setNuevoNombre] = useState('')
+  const [nuevoTelefono, setNuevoTelefono] = useState('')
+  const [cargandoCliente, setCargandoCliente] = useState(false)
+  const [errorCliente, setErrorCliente] = useState<string | null>(null)
 
   const { data: cartera } = useQuery({ queryKey: ['cartera'], queryFn: getChequeCartera })
   const { data: clientes } = useQuery({ queryKey: ['clientes'], queryFn: getClientes, staleTime: 60_000 })
@@ -302,6 +309,27 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
   const montoNominal = chequeSeleccionado ? parseFloat(chequeSeleccionado.monto) : 0
   const saldoInicial = montoNominal * (100 - pctNum) / 100
   const showPreview = !!chequeSeleccionado && pct !== ''
+
+  async function handleCrearCliente() {
+    if (!nuevoNombre.trim()) return
+    setCargandoCliente(true)
+    setErrorCliente(null)
+    try {
+      const nuevo = await createCliente({
+        nombre: nuevoNombre.trim(),
+        telefono: nuevoTelefono.trim() || null,
+      })
+      queryClient.setQueryData<Cliente[]>(['clientes'], (prev) => [...(prev ?? []), nuevo])
+      setClienteId(nuevo.id)
+      setMostrandoNuevoCliente(false)
+      setNuevoNombre('')
+      setNuevoTelefono('')
+    } catch (err) {
+      setErrorCliente((err as Error).message)
+    } finally {
+      setCargandoCliente(false)
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -324,8 +352,8 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl">
-        <div className="p-5 border-b border-slate-200 dark:border-slate-700">
+      <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl max-h-[92vh] overflow-y-auto">
+        <div className="p-5 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
           <h2 className="font-semibold text-slate-900 dark:text-slate-100">Nuevo cheque fiado</h2>
           <p className="text-sm text-slate-500 mt-0.5">Seleccioná el cheque y el cliente</p>
         </div>
@@ -349,19 +377,67 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
 
           <div>
             <label className={labelCls()}>Cliente</label>
-            <select
-              value={clienteId}
-              onChange={(e) => setClienteId(e.target.value)}
-              required
-              className={inputCls()}
-            >
-              <option value="">Seleccionar cliente…</option>
-              {clientes?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
+            {!mostrandoNuevoCliente ? (
+              <>
+                <select
+                  value={clienteId}
+                  onChange={(e) => setClienteId(e.target.value)}
+                  required={!mostrandoNuevoCliente}
+                  className={inputCls()}
+                >
+                  <option value="">Seleccionar cliente…</option>
+                  {clientes?.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => { setMostrandoNuevoCliente(true); setClienteId('') }}
+                  className="mt-1.5 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                  + Agregar cliente nuevo
+                </button>
+              </>
+            ) : (
+              <div className="border border-indigo-200 dark:border-indigo-700 rounded-lg p-3 space-y-2 bg-indigo-50/50 dark:bg-indigo-900/10">
+                <p className="text-xs font-medium text-indigo-700 dark:text-indigo-400">Nuevo cliente</p>
+                <input
+                  type="text"
+                  value={nuevoNombre}
+                  onChange={(e) => setNuevoNombre(e.target.value)}
+                  placeholder="Nombre *"
+                  autoFocus
+                  className={inputCls()}
+                />
+                <input
+                  type="text"
+                  value={nuevoTelefono}
+                  onChange={(e) => setNuevoTelefono(e.target.value)}
+                  placeholder="Teléfono (opcional)"
+                  className={inputCls()}
+                />
+                {errorCliente && <p className="text-xs text-red-500">{errorCliente}</p>}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setMostrandoNuevoCliente(false); setErrorCliente(null) }}
+                    className="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    Volver
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCrearCliente}
+                    disabled={cargandoCliente || !nuevoNombre.trim()}
+                    className="flex-1 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                  >
+                    {cargandoCliente ? 'Creando…' : 'Crear cliente'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -408,7 +484,7 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
               className="flex-1 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
               Cancelar
             </button>
-            <button type="submit" disabled={loading}
+            <button type="submit" disabled={loading || mostrandoNuevoCliente}
               className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
               {loading ? 'Guardando…' : 'Confirmar'}
             </button>
