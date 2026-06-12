@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -38,6 +39,7 @@ def create_pasivo(
         acreedor=payload.acreedor.strip(),
         concepto=payload.concepto.strip(),
         monto=payload.monto,
+        saldo_pendiente=payload.monto,
         moneda=payload.moneda,
         estado=PasivoEstado.PENDIENTE,
         fecha_vencimiento=payload.fecha_vencimiento,
@@ -73,6 +75,7 @@ def cancelar_pasivo(
     if pasivo.estado == PasivoEstado.CANCELADA:
         raise ConflictError("El pasivo ya está cancelado.")
     pasivo.estado = PasivoEstado.CANCELADA
+    pasivo.saldo_pendiente = Decimal("0.00")
     pasivo.fecha_cancelacion = payload.fecha_cancelacion or date.today()
     db.commit()
     db.refresh(pasivo)
@@ -82,11 +85,24 @@ def cancelar_pasivo(
 def cancelar_con_efectivo(
     db: Session, pasivo_id: uuid.UUID, payload: PasivoCancelarEfectivoRequest
 ) -> Pasivo:
-    pasivo = get_pasivo(db, pasivo_id)
+    pasivo = db.scalar(select(Pasivo).where(Pasivo.id == pasivo_id).with_for_update())
+    if pasivo is None:
+        raise NotFoundError(f"Pasivo {pasivo_id} no encontrado.")
     if pasivo.estado == PasivoEstado.CANCELADA:
         raise ConflictError("El pasivo ya está cancelado.")
-    pasivo.estado = PasivoEstado.CANCELADA
-    pasivo.fecha_cancelacion = payload.fecha_cancelacion or date.today()
+    if payload.monto_cobrado > pasivo.saldo_pendiente:
+        raise ValidationError(
+            f"El monto cobrado ({payload.monto_cobrado}) supera el saldo pendiente "
+            f"({pasivo.saldo_pendiente})."
+        )
+
+    pasivo.saldo_pendiente = (pasivo.saldo_pendiente - payload.monto_cobrado).quantize(
+        Decimal("0.01")
+    )
+    if pasivo.saldo_pendiente == Decimal("0.00"):
+        pasivo.estado = PasivoEstado.CANCELADA
+        pasivo.fecha_cancelacion = payload.fecha_cancelacion or date.today()
+
     db.commit()
     db.refresh(pasivo)
     return pasivo
@@ -112,6 +128,13 @@ def cancelar_con_cheque(
             f"(estado: {cheque.estado.value})."
         )
 
+    valor_neto = (
+        cheque.monto * (Decimal("100") - payload.porcentaje_venta) / Decimal("100")
+    ).quantize(Decimal("0.01"))
+
+    # diferencia > 0: el cheque cubre de más | diferencia < 0: saldo restante
+    diferencia = (valor_neto - pasivo.saldo_pendiente).quantize(Decimal("0.01"))
+
     try:
         cheque.transition_to(
             ChequeEstado.VENDIDO,
@@ -119,8 +142,13 @@ def cancelar_con_cheque(
             motivo=payload.motivo,
             porcentaje_venta=payload.porcentaje_venta,
         )
-        pasivo.estado = PasivoEstado.CANCELADA
-        pasivo.fecha_cancelacion = payload.fecha_cancelacion or date.today()
+        if diferencia >= Decimal("0.00"):
+            pasivo.saldo_pendiente = Decimal("0.00")
+            pasivo.estado = PasivoEstado.CANCELADA
+            pasivo.fecha_cancelacion = payload.fecha_cancelacion or date.today()
+        else:
+            pasivo.saldo_pendiente = (-diferencia).quantize(Decimal("0.01"))
+
         db.commit()
         db.refresh(pasivo)
         return pasivo

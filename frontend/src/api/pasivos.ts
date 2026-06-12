@@ -23,7 +23,7 @@ export const cancelarPasivo = (id: string): Promise<Pasivo> =>
 
 export const cancelarPasivoEfectivo = (
   id: string,
-  payload: { fecha_cancelacion?: string | null },
+  payload: { monto_cobrado: number; fecha_cancelacion?: string | null },
 ): Promise<Pasivo> =>
   apiFetch<Pasivo>(`/pasivos/${id}/cancelar-efectivo`, {
     method: 'POST',

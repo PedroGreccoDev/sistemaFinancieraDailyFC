@@ -23,6 +23,7 @@ class PasivoCancelarRequest(BaseModel):
 
 
 class PasivoCancelarEfectivoRequest(BaseModel):
+    monto_cobrado: Decimal = Field(gt=0)
     fecha_cancelacion: date | None = None
 
 
@@ -39,6 +40,7 @@ class PasivoRead(BaseModel):
     acreedor: str
     concepto: str
     monto: Decimal
+    saldo_pendiente: Decimal
     moneda: Moneda
     estado: PasivoEstado
     fecha_vencimiento: date | None

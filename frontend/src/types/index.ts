@@ -100,6 +100,7 @@ export interface Pasivo {
   acreedor: string
   concepto: string
   monto: string
+  saldo_pendiente: string
   moneda: Moneda
   estado: PasivoEstado
   fecha_vencimiento: string | null

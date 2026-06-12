@@ -19,8 +19,8 @@ function EstadoBadge({ estado }: { estado: PasivoEstado }) {
   )
 }
 
-function fmtMonto(pasivo: Pasivo): string {
-  return pasivo.moneda === 'USD' ? fmtUSD(pasivo.monto) : fmtARS(pasivo.monto)
+function fmtMoneda(monto: string | number, moneda: Moneda): string {
+  return moneda === 'USD' ? fmtUSD(monto) : fmtARS(monto)
 }
 
 function inputCls() {
@@ -76,61 +76,42 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
             <label className={labelCls()}>A quién le debo</label>
             <input
               type="text" value={acreedor} onChange={(e) => setAcreedor(e.target.value)}
-              required
-              className={inputCls()}
+              required className={inputCls()}
             />
           </div>
-
           <div>
             <label className={labelCls()}>Concepto / razón</label>
             <input
               type="text" value={concepto} onChange={(e) => setConcepto(e.target.value)}
-              required
-              className={inputCls()}
+              required className={inputCls()}
             />
           </div>
-
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls()}>Monto</label>
               <input
                 type="number" step="0.01" min="0.01"
                 value={monto} onChange={(e) => setMonto(e.target.value)}
-                required
-                className={inputCls()}
+                required className={inputCls()}
               />
             </div>
             <div>
               <label className={labelCls()}>Moneda</label>
-              <select
-                value={moneda} onChange={(e) => setMoneda(e.target.value as Moneda)}
-                className={inputCls()}
-              >
+              <select value={moneda} onChange={(e) => setMoneda(e.target.value as Moneda)} className={inputCls()}>
                 <option value="ARS">ARS</option>
                 <option value="USD">USD</option>
               </select>
             </div>
           </div>
-
           <div>
             <label className={labelCls()}>Fecha de vencimiento <span className="text-slate-400 font-normal">(opcional)</span></label>
-            <input
-              type="date" value={fechaVenc} onChange={(e) => setFechaVenc(e.target.value)}
-              className={inputCls()}
-            />
+            <input type="date" value={fechaVenc} onChange={(e) => setFechaVenc(e.target.value)} className={inputCls()} />
           </div>
-
           <div>
             <label className={labelCls()}>Observaciones <span className="text-slate-400 font-normal">(opcional)</span></label>
-            <textarea
-              value={observaciones} onChange={(e) => setObservaciones(e.target.value)}
-              rows={2}
-              className={`${inputCls()} resize-none`}
-            />
+            <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} className={`${inputCls()} resize-none`} />
           </div>
-
           {error && <p className="text-sm text-red-500">{error}</p>}
-
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose}
               className="flex-1 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
@@ -158,15 +139,20 @@ function ModalCancelarEfectivo({
   onClose: () => void
   onSuccess: () => void
 }) {
+  const saldo = parseFloat(pasivo.saldo_pendiente)
+  const [montoCobrado, setMontoCobrado] = useState(pasivo.saldo_pendiente)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const montoNum = parseFloat(montoCobrado) || 0
+  const cancelaTotal = montoNum === saldo && saldo > 0
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     setLoading(true)
     try {
-      await cancelarPasivoEfectivo(pasivo.id, {})
+      await cancelarPasivoEfectivo(pasivo.id, { monto_cobrado: montoNum })
       onSuccess()
     } catch (err) {
       setError((err as Error).message)
@@ -179,23 +165,41 @@ function ModalCancelarEfectivo({
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
       <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl">
         <div className="p-5 border-b border-slate-200 dark:border-slate-700">
-          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Cancelar con efectivo</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Confirmar pago en cash</p>
+          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Pagar con efectivo</h2>
+          <p className="text-sm text-slate-500 mt-0.5">{pasivo.acreedor}</p>
         </div>
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4 space-y-1 text-sm">
+          {/* Resumen */}
+          <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 space-y-1 text-sm">
             <div className="flex justify-between">
-              <span className="text-slate-500 dark:text-slate-400">Acreedor</span>
-              <span className="font-medium text-slate-900 dark:text-slate-100">{pasivo.acreedor}</span>
+              <span className="text-slate-500 dark:text-slate-400">Deuda original</span>
+              <span className="font-medium">{fmtMoneda(pasivo.monto, pasivo.moneda)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500 dark:text-slate-400">Concepto</span>
-              <span className="font-medium text-slate-900 dark:text-slate-100 text-right max-w-[180px] truncate">{pasivo.concepto}</span>
+              <span className="text-slate-500 dark:text-slate-400">Saldo pendiente</span>
+              <span className="font-bold text-red-600 dark:text-red-400">{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500 dark:text-slate-400">Monto</span>
-              <span className="font-bold text-red-600 dark:text-red-400">{fmtMonto(pasivo)}</span>
-            </div>
+          </div>
+
+          {/* Monto a pagar */}
+          <div>
+            <label className={labelCls()}>Monto a pagar</label>
+            <input
+              type="number" step="0.01" min="0.01" max={saldo}
+              value={montoCobrado}
+              onChange={(e) => setMontoCobrado(e.target.value)}
+              required className={inputCls()}
+            />
+            {montoNum > 0 && montoNum <= saldo && (
+              <p className={`text-xs mt-1 ${cancelaTotal ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                {cancelaTotal
+                  ? 'Cancela la deuda completamente'
+                  : `Saldo restante: ${fmtMoneda(saldo - montoNum, pasivo.moneda)}`}
+              </p>
+            )}
+            {montoNum > saldo && (
+              <p className="text-xs mt-1 text-red-500">Supera el saldo pendiente</p>
+            )}
           </div>
 
           {error && <p className="text-sm text-red-500">{error}</p>}
@@ -205,9 +209,9 @@ function ModalCancelarEfectivo({
               className="flex-1 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
               Volver
             </button>
-            <button type="submit" disabled={loading}
+            <button type="submit" disabled={loading || montoNum <= 0 || montoNum > saldo}
               className="flex-1 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors">
-              {loading ? 'Cancelando…' : 'Confirmar pago'}
+              {loading ? 'Registrando…' : 'Confirmar pago'}
             </button>
           </div>
         </form>
@@ -227,6 +231,7 @@ function ModalCancelarCheque({
   onClose: () => void
   onSuccess: () => void
 }) {
+  const saldo = parseFloat(pasivo.saldo_pendiente)
   const [chequeSeleccionado, setChequeSeleccionado] = useState<Cheque | null>(null)
   const [porcentajeVenta, setPorcentajeVenta] = useState('')
   const [operadorId, setOperadorId] = useState('')
@@ -247,7 +252,8 @@ function ModalCancelarCheque({
 
   const montoNum = chequeSeleccionado ? parseFloat(chequeSeleccionado.monto) : 0
   const pctNum = parseFloat(porcentajeVenta) || 0
-  const valorNeto = montoNum > 0 ? montoNum * (100 - pctNum) / 100 : null
+  const valorNeto = montoNum > 0 ? parseFloat((montoNum * (100 - pctNum) / 100).toFixed(2)) : null
+  const diferencia = valorNeto !== null ? parseFloat((valorNeto - saldo).toFixed(2)) : null
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -273,7 +279,7 @@ function ModalCancelarCheque({
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
       <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl max-h-[92vh] overflow-y-auto">
         <div className="p-5 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
-          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Cancelar con cheque</h2>
+          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Pagar con cheque</h2>
           <p className="text-sm text-slate-500 mt-0.5">Entregar un cheque de cartera al acreedor</p>
         </div>
         <form onSubmit={handleSubmit} className="p-5 space-y-3">
@@ -285,8 +291,8 @@ function ModalCancelarCheque({
               <span className="font-medium text-slate-900 dark:text-slate-100">{pasivo.acreedor}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500 dark:text-slate-400">Deuda</span>
-              <span className="font-bold text-red-600 dark:text-red-400">{fmtMonto(pasivo)}</span>
+              <span className="text-slate-500 dark:text-slate-400">Saldo pendiente</span>
+              <span className="font-bold text-red-600 dark:text-red-400">{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</span>
             </div>
           </div>
 
@@ -301,8 +307,7 @@ function ModalCancelarCheque({
               <select
                 value={chequeSeleccionado?.nro_cheque ?? ''}
                 onChange={(e) => handleSelectCheque(e.target.value)}
-                required
-                className={inputCls()}
+                required className={inputCls()}
               >
                 <option value="">— Seleccioná un cheque —</option>
                 {cheques.map((c) => (
@@ -322,8 +327,7 @@ function ModalCancelarCheque({
               type="number" step="0.0001" min="0" max="100"
               value={porcentajeVenta}
               onChange={(e) => setPorcentajeVenta(e.target.value)}
-              required
-              className={inputCls()}
+              required className={inputCls()}
             />
             {chequeSeleccionado && (
               <p className="text-xs text-slate-400 mt-1">
@@ -332,9 +336,13 @@ function ModalCancelarCheque({
             )}
           </div>
 
-          {/* Preview valor neto */}
-          {chequeSeleccionado && valorNeto !== null && (
-            <div className="rounded-lg border border-slate-200 dark:border-slate-600 p-3 text-sm space-y-1">
+          {/* Preview */}
+          {chequeSeleccionado && valorNeto !== null && diferencia !== null && (
+            <div className={`rounded-lg border p-3 text-sm space-y-1 ${
+              diferencia >= 0
+                ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20'
+                : 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20'
+            }`}>
               <div className="flex justify-between">
                 <span className="text-slate-500 dark:text-slate-400">Nominal cheque</span>
                 <span className="font-medium">{fmtARS(chequeSeleccionado.monto)}</span>
@@ -342,6 +350,16 @@ function ModalCancelarCheque({
               <div className="flex justify-between">
                 <span className="text-slate-500 dark:text-slate-400">Valor neto ({pctNum}%)</span>
                 <span className="font-semibold">{fmtARS(valorNeto)}</span>
+              </div>
+              <div className="flex justify-between border-t border-slate-200 dark:border-slate-600 pt-1 mt-1">
+                <span className="font-medium">
+                  {diferencia >= 0 ? 'Cancela la deuda completamente' : 'Saldo restante'}
+                </span>
+                <span className={`font-bold ${diferencia >= 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                  {diferencia >= 0
+                    ? diferencia > 0 ? `+${fmtARS(diferencia)}` : '✓'
+                    : fmtARS(-diferencia)}
+                </span>
               </div>
             </div>
           )}
@@ -361,8 +379,7 @@ function ModalCancelarCheque({
             <label className={labelCls()}>Motivo</label>
             <input
               type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)}
-              required
-              className={inputCls()}
+              required className={inputCls()}
             />
           </div>
 
@@ -378,7 +395,7 @@ function ModalCancelarCheque({
               disabled={loading || !chequeSeleccionado || !cheques || cheques.length === 0}
               className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
-              {loading ? 'Cancelando…' : 'Confirmar'}
+              {loading ? 'Registrando…' : 'Confirmar'}
             </button>
           </div>
         </form>
@@ -404,8 +421,8 @@ export default function Pasivos() {
   })
 
   const pendientes = pasivos?.filter((p) => p.estado === 'PENDIENTE') ?? []
-  const totalARS = pendientes.filter((p) => p.moneda === 'ARS').reduce((acc, p) => acc + parseFloat(p.monto), 0)
-  const totalUSD = pendientes.filter((p) => p.moneda === 'USD').reduce((acc, p) => acc + parseFloat(p.monto), 0)
+  const totalARS = pendientes.filter((p) => p.moneda === 'ARS').reduce((acc, p) => acc + parseFloat(p.saldo_pendiente), 0)
+  const totalUSD = pendientes.filter((p) => p.moneda === 'USD').reduce((acc, p) => acc + parseFloat(p.saldo_pendiente), 0)
 
   function handleSuccess() {
     setPasivoEfectivo(null)
@@ -438,18 +455,18 @@ export default function Pasivos() {
         </div>
       </div>
 
-      {/* KPIs */}
+      {/* KPIs — muestra saldo pendiente total, no monto original */}
       {filtro !== 'CANCELADA' && (
         <div className="grid grid-cols-2 gap-3 mb-5">
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4">
-            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-1">Pendiente ARS</p>
+            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-1">Saldo pendiente ARS</p>
             <p className="text-xl sm:text-2xl font-bold text-red-500 dark:text-red-400 leading-none">
               {fmtARS(totalARS)}
             </p>
             <p className="text-xs text-slate-400 mt-1">{pendientes.filter((p) => p.moneda === 'ARS').length} deuda(s)</p>
           </div>
           <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4">
-            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-1">Pendiente USD</p>
+            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-1">Saldo pendiente USD</p>
             <p className="text-xl sm:text-2xl font-bold text-red-500 dark:text-red-400 leading-none">
               {fmtUSD(totalUSD)}
             </p>
@@ -477,12 +494,8 @@ export default function Pasivos() {
 
       {/* Lista */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-        {isLoading && (
-          <div className="p-12 text-center text-slate-400">Cargando deudas…</div>
-        )}
-        {error && (
-          <div className="p-12 text-center text-red-500">Error al cargar las deudas.</div>
-        )}
+        {isLoading && <div className="p-12 text-center text-slate-400">Cargando deudas…</div>}
+        {error && <div className="p-12 text-center text-red-500">Error al cargar las deudas.</div>}
         {pasivos && pasivos.length === 0 && (
           <div className="p-12 text-center text-slate-400">
             <p className="text-4xl mb-3">✅</p>
@@ -491,12 +504,13 @@ export default function Pasivos() {
         )}
         {pasivos && pasivos.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[580px]">
+            <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50">
                   <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Acreedor</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Concepto</th>
-                  <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Monto</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Original</th>
+                  <th className="text-right px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Saldo</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Vencimiento</th>
                   <th className="text-left px-4 py-3 font-medium text-slate-600 dark:text-slate-400">Estado</th>
                   <th className="px-4 py-3" />
@@ -511,11 +525,14 @@ export default function Pasivos() {
                     <td className="px-4 py-3 font-medium text-slate-900 dark:text-slate-100">
                       {pasivo.acreedor}
                     </td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-400 max-w-[200px] truncate">
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-400 max-w-[160px] truncate">
                       {pasivo.concepto}
                     </td>
+                    <td className="px-4 py-3 text-right text-slate-500 dark:text-slate-400">
+                      {fmtMoneda(pasivo.monto, pasivo.moneda)}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold text-red-600 dark:text-red-400">
-                      {fmtMonto(pasivo)}
+                      {fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}
                     </td>
                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400 text-xs whitespace-nowrap">
                       {pasivo.fecha_vencimiento ? fmtDate(pasivo.fecha_vencimiento) : '—'}
@@ -550,26 +567,13 @@ export default function Pasivos() {
       </div>
 
       {mostrarNueva && (
-        <ModalNuevaDeuda
-          onClose={() => setMostrarNueva(false)}
-          onSuccess={handleSuccess}
-        />
+        <ModalNuevaDeuda onClose={() => setMostrarNueva(false)} onSuccess={handleSuccess} />
       )}
-
       {pasivoEfectivo && (
-        <ModalCancelarEfectivo
-          pasivo={pasivoEfectivo}
-          onClose={() => setPasivoEfectivo(null)}
-          onSuccess={handleSuccess}
-        />
+        <ModalCancelarEfectivo pasivo={pasivoEfectivo} onClose={() => setPasivoEfectivo(null)} onSuccess={handleSuccess} />
       )}
-
       {pasivoCheque && (
-        <ModalCancelarCheque
-          pasivo={pasivoCheque}
-          onClose={() => setPasivoCheque(null)}
-          onSuccess={handleSuccess}
-        />
+        <ModalCancelarCheque pasivo={pasivoCheque} onClose={() => setPasivoCheque(null)} onSuccess={handleSuccess} />
       )}
     </div>
   )

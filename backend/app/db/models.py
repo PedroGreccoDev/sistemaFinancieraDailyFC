@@ -454,6 +454,7 @@ class Pasivo(Base):
     acreedor:          Mapped[str]            = mapped_column(sa.String(200), nullable=False)
     concepto:          Mapped[str]            = mapped_column(sa.Text(),      nullable=False)
     monto:             Mapped[Decimal]        = mapped_column(sa.Numeric(18, 2))
+    saldo_pendiente:   Mapped[Decimal]        = mapped_column(sa.Numeric(18, 2))
     moneda:            Mapped[Moneda]         = mapped_column(
         sa.Enum(Moneda, name="moneda", create_type=False)
     )
