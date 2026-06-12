@@ -20,3 +20,29 @@ export const createPasivo = (payload: PasivoCreatePayload): Promise<Pasivo> =>
 
 export const cancelarPasivo = (id: string): Promise<Pasivo> =>
   apiFetch<Pasivo>(`/pasivos/${id}/cancelar`, { method: 'POST', body: JSON.stringify({}) })
+
+export const cancelarPasivoEfectivo = (
+  id: string,
+  payload: { fecha_cancelacion?: string | null },
+): Promise<Pasivo> =>
+  apiFetch<Pasivo>(`/pasivos/${id}/cancelar-efectivo`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+export interface CancelarConChequePayload {
+  nro_cheque: string
+  porcentaje_venta: number
+  operador_id: string
+  motivo: string
+  fecha_cancelacion?: string | null
+}
+
+export const cancelarPasivoConCheque = (
+  id: string,
+  payload: CancelarConChequePayload,
+): Promise<Pasivo> =>
+  apiFetch<Pasivo>(`/pasivos/${id}/cancelar-con-cheque`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })

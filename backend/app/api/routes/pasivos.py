@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.db.models import PasivoEstado
 from app.db.session import get_db
-from app.schemas.pasivos import PasivoCancelarRequest, PasivoCreate, PasivoRead
+from app.schemas.pasivos import (
+    PasivoCancelarConChequeRequest,
+    PasivoCancelarEfectivoRequest,
+    PasivoCancelarRequest,
+    PasivoCreate,
+    PasivoRead,
+)
 from app.services import pasivos as service
 
 router = APIRouter(prefix="/pasivos", tags=["pasivos"])
@@ -41,3 +47,21 @@ def cancelar_pasivo(
     db: DbSession,
 ) -> PasivoRead:
     return service.cancelar_pasivo(db, pasivo_id, payload)
+
+
+@router.post("/{pasivo_id}/cancelar-efectivo", response_model=PasivoRead)
+def cancelar_pasivo_efectivo(
+    pasivo_id: UUID,
+    payload: PasivoCancelarEfectivoRequest,
+    db: DbSession,
+) -> PasivoRead:
+    return service.cancelar_con_efectivo(db, pasivo_id, payload)
+
+
+@router.post("/{pasivo_id}/cancelar-con-cheque", response_model=PasivoRead)
+def cancelar_pasivo_con_cheque(
+    pasivo_id: UUID,
+    payload: PasivoCancelarConChequeRequest,
+    db: DbSession,
+) -> PasivoRead:
+    return service.cancelar_con_cheque(db, pasivo_id, payload)

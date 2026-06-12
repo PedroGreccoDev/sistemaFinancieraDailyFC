@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPasivos, cancelarPasivo, createPasivo } from '../api/pasivos'
+import { getPasivos, createPasivo, cancelarPasivoEfectivo, cancelarPasivoConCheque } from '../api/pasivos'
+import { getChequeCartera } from '../api/cheques'
 import { fmtARS, fmtUSD, fmtDate } from '../lib/fmt'
-import type { Moneda, Pasivo, PasivoEstado } from '../types'
+import type { Cheque, Moneda, Pasivo, PasivoEstado } from '../types'
 
 type Filtro = 'todos' | PasivoEstado
 
@@ -146,11 +147,252 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
   )
 }
 
+// ── Modal cancelar con efectivo ───────────────────────────────────────
+
+function ModalCancelarEfectivo({
+  pasivo,
+  onClose,
+  onSuccess,
+}: {
+  pasivo: Pasivo
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      await cancelarPasivoEfectivo(pasivo.id, {})
+      onSuccess()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
+      <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl">
+        <div className="p-5 border-b border-slate-200 dark:border-slate-700">
+          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Cancelar con efectivo</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Confirmar pago en cash</p>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4 space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-500 dark:text-slate-400">Acreedor</span>
+              <span className="font-medium text-slate-900 dark:text-slate-100">{pasivo.acreedor}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500 dark:text-slate-400">Concepto</span>
+              <span className="font-medium text-slate-900 dark:text-slate-100 text-right max-w-[180px] truncate">{pasivo.concepto}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500 dark:text-slate-400">Monto</span>
+              <span className="font-bold text-red-600 dark:text-red-400">{fmtMonto(pasivo)}</span>
+            </div>
+          </div>
+
+          {error && <p className="text-sm text-red-500">{error}</p>}
+
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose}
+              className="flex-1 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+              Volver
+            </button>
+            <button type="submit" disabled={loading}
+              className="flex-1 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors">
+              {loading ? 'Cancelando…' : 'Confirmar pago'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Modal cancelar con cheque ─────────────────────────────────────────
+
+function ModalCancelarCheque({
+  pasivo,
+  onClose,
+  onSuccess,
+}: {
+  pasivo: Pasivo
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const [chequeSeleccionado, setChequeSeleccionado] = useState<Cheque | null>(null)
+  const [porcentajeVenta, setPorcentajeVenta] = useState('')
+  const [operadorId, setOperadorId] = useState('')
+  const [motivo, setMotivo] = useState(`Cancelación de deuda con ${pasivo.acreedor}`)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const { data: cheques, isLoading: loadingCheques } = useQuery({
+    queryKey: ['cheques', 'cartera'],
+    queryFn: getChequeCartera,
+  })
+
+  function handleSelectCheque(nro: string) {
+    const found = cheques?.find((c) => c.nro_cheque === nro) ?? null
+    setChequeSeleccionado(found)
+    if (found) setPorcentajeVenta(found.porcentaje_compra)
+  }
+
+  const montoNum = chequeSeleccionado ? parseFloat(chequeSeleccionado.monto) : 0
+  const pctNum = parseFloat(porcentajeVenta) || 0
+  const valorNeto = montoNum > 0 ? montoNum * (100 - pctNum) / 100 : null
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!chequeSeleccionado) return
+    setError(null)
+    setLoading(true)
+    try {
+      await cancelarPasivoConCheque(pasivo.id, {
+        nro_cheque: chequeSeleccionado.nro_cheque,
+        porcentaje_venta: pctNum,
+        operador_id: operadorId.trim(),
+        motivo: motivo.trim(),
+      })
+      onSuccess()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
+      <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl max-h-[92vh] overflow-y-auto">
+        <div className="p-5 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
+          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Cancelar con cheque</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Entregar un cheque de cartera al acreedor</p>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-3">
+
+          {/* Resumen de la deuda */}
+          <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-3 space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-500 dark:text-slate-400">Acreedor</span>
+              <span className="font-medium text-slate-900 dark:text-slate-100">{pasivo.acreedor}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500 dark:text-slate-400">Deuda</span>
+              <span className="font-bold text-red-600 dark:text-red-400">{fmtMonto(pasivo)}</span>
+            </div>
+          </div>
+
+          {/* Selector de cheque */}
+          <div>
+            <label className={labelCls()}>Cheque a entregar</label>
+            {loadingCheques ? (
+              <p className="text-sm text-slate-400">Cargando cheques…</p>
+            ) : !cheques || cheques.length === 0 ? (
+              <p className="text-sm text-amber-600 dark:text-amber-400">No hay cheques en cartera.</p>
+            ) : (
+              <select
+                value={chequeSeleccionado?.nro_cheque ?? ''}
+                onChange={(e) => handleSelectCheque(e.target.value)}
+                required
+                className={inputCls()}
+              >
+                <option value="">— Seleccioná un cheque —</option>
+                {cheques.map((c) => (
+                  <option key={c.nro_cheque} value={c.nro_cheque}>
+                    #{c.nro_cheque} — {fmtARS(c.monto)}
+                    {c.fecha_pago ? ` — vence ${fmtDate(c.fecha_pago)}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {/* % venta */}
+          <div>
+            <label className={labelCls()}>% venta aplicado</label>
+            <input
+              type="number" step="0.0001" min="0" max="100"
+              value={porcentajeVenta}
+              onChange={(e) => setPorcentajeVenta(e.target.value)}
+              required
+              className={inputCls()}
+            />
+            {chequeSeleccionado && (
+              <p className="text-xs text-slate-400 mt-1">
+                % compra original: {chequeSeleccionado.porcentaje_compra}%
+              </p>
+            )}
+          </div>
+
+          {/* Preview valor neto */}
+          {chequeSeleccionado && valorNeto !== null && (
+            <div className="rounded-lg border border-slate-200 dark:border-slate-600 p-3 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-500 dark:text-slate-400">Nominal cheque</span>
+                <span className="font-medium">{fmtARS(chequeSeleccionado.monto)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 dark:text-slate-400">Valor neto ({pctNum}%)</span>
+                <span className="font-semibold">{fmtARS(valorNeto)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Operador */}
+          <div>
+            <label className={labelCls()}>Operador</label>
+            <input
+              type="text" value={operadorId} onChange={(e) => setOperadorId(e.target.value)}
+              required placeholder="Nombre del operador"
+              className={inputCls()}
+            />
+          </div>
+
+          {/* Motivo */}
+          <div>
+            <label className={labelCls()}>Motivo</label>
+            <input
+              type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)}
+              required
+              className={inputCls()}
+            />
+          </div>
+
+          {error && <p className="text-sm text-red-500">{error}</p>}
+
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+              Volver
+            </button>
+            <button
+              type="submit"
+              disabled={loading || !chequeSeleccionado || !cheques || cheques.length === 0}
+              className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              {loading ? 'Cancelando…' : 'Confirmar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── Página principal ──────────────────────────────────────────────────
 
 export default function Pasivos() {
   const [filtro, setFiltro] = useState<Filtro>('PENDIENTE')
-  const [cancelando, setCancelando] = useState<string | null>(null)
+  const [pasivoEfectivo, setPasivoEfectivo] = useState<Pasivo | null>(null)
+  const [pasivoCheque, setPasivoCheque] = useState<Pasivo | null>(null)
   const [mostrarNueva, setMostrarNueva] = useState(false)
   const queryClient = useQueryClient()
 
@@ -165,20 +407,12 @@ export default function Pasivos() {
   const totalARS = pendientes.filter((p) => p.moneda === 'ARS').reduce((acc, p) => acc + parseFloat(p.monto), 0)
   const totalUSD = pendientes.filter((p) => p.moneda === 'USD').reduce((acc, p) => acc + parseFloat(p.monto), 0)
 
-  async function handleCancelar(id: string) {
-    if (!confirm('¿Confirmar cancelación del pasivo?')) return
-    setCancelando(id)
-    try {
-      await cancelarPasivo(id)
-      queryClient.invalidateQueries({ queryKey: ['pasivos'] })
-    } finally {
-      setCancelando(null)
-    }
-  }
-
-  function handleNuevaSuccess() {
+  function handleSuccess() {
+    setPasivoEfectivo(null)
+    setPasivoCheque(null)
     setMostrarNueva(false)
     queryClient.invalidateQueries({ queryKey: ['pasivos'] })
+    queryClient.invalidateQueries({ queryKey: ['cheques'] })
   }
 
   return (
@@ -291,13 +525,20 @@ export default function Pasivos() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       {pasivo.estado === 'PENDIENTE' && (
-                        <button
-                          onClick={() => handleCancelar(pasivo.id)}
-                          disabled={cancelando === pasivo.id}
-                          className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-200 font-medium disabled:opacity-50 transition-colors"
-                        >
-                          {cancelando === pasivo.id ? 'Cancelando…' : 'Cancelar'}
-                        </button>
+                        <div className="flex gap-2 justify-end">
+                          <button
+                            onClick={() => setPasivoEfectivo(pasivo)}
+                            className="text-xs text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200 font-medium transition-colors border border-green-200 dark:border-green-800 rounded px-2 py-0.5"
+                          >
+                            Efectivo
+                          </button>
+                          <button
+                            onClick={() => setPasivoCheque(pasivo)}
+                            className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-200 font-medium transition-colors border border-indigo-200 dark:border-indigo-800 rounded px-2 py-0.5"
+                          >
+                            Con cheque
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -311,7 +552,23 @@ export default function Pasivos() {
       {mostrarNueva && (
         <ModalNuevaDeuda
           onClose={() => setMostrarNueva(false)}
-          onSuccess={handleNuevaSuccess}
+          onSuccess={handleSuccess}
+        />
+      )}
+
+      {pasivoEfectivo && (
+        <ModalCancelarEfectivo
+          pasivo={pasivoEfectivo}
+          onClose={() => setPasivoEfectivo(null)}
+          onSuccess={handleSuccess}
+        />
+      )}
+
+      {pasivoCheque && (
+        <ModalCancelarCheque
+          pasivo={pasivoCheque}
+          onClose={() => setPasivoCheque(null)}
+          onSuccess={handleSuccess}
         />
       )}
     </div>
