@@ -107,6 +107,8 @@ def dispatch(
             return _consulta_cartera(db)
         if intent == "CONSULTA_CLIENTE":
             return _consulta_cliente(db, data)
+        if intent == "CONSULTA_PRESTAMOS":
+            return _consulta_prestamos(db)
         if intent == "EDITAR_OPERACION":
             return _editar_operacion(db, data)
         # ACLARACION_REQUERIDA y DESCONOCIDO no tocan la BD
@@ -863,6 +865,57 @@ def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
 
     if not hay_algo:
         lines.append("\nNo tiene deudas activas registradas.")
+
+    return False, "\n".join(lines)
+
+
+def _consulta_prestamos(db: Session) -> DispatchResult:
+    """Lista todos los préstamos activos con lo que falta cobrar de cada uno."""
+    prestamos: list[Prestamo] = list(
+        db.scalars(
+            select(Prestamo)
+            .where(Prestamo.estado == PrestamoEstado.ACTIVO)
+            .order_by(Prestamo.created_at.asc())
+        ).all()
+    )
+
+    if not prestamos:
+        return False, "📭 No tenés préstamos activos por cobrar."
+
+    # Saldo pendiente por moneda = suma de cuotas pendientes.
+    pendiente_por_moneda: dict[Moneda, Decimal] = {}
+    lines: list[str] = [f"💳 *Préstamos activos — {len(prestamos)}*", ""]
+
+    for p in prestamos:
+        cuotas_pendientes: list[Cuota] = list(
+            db.scalars(
+                select(Cuota).where(
+                    Cuota.prestamo_id == p.id,
+                    Cuota.estado == CuotaEstado.PENDIENTE,
+                ).order_by(Cuota.numero_cuota.asc())
+            ).all()
+        )
+        saldo = sum((c.monto for c in cuotas_pendientes), Decimal("0.00"))
+        pendiente_por_moneda[p.moneda] = pendiente_por_moneda.get(p.moneda, Decimal("0.00")) + saldo
+
+        simbolo = "U$D" if p.moneda == Moneda.USD else "$"
+        proxima = cuotas_pendientes[0] if cuotas_pendientes else None
+        prox_txt = (
+            f"próx. #{proxima.numero_cuota} ({_fmt_date(proxima.fecha_vencimiento)})"
+            if proxima else "sin cuotas pendientes"
+        )
+        lines.append(
+            f"👤 {p.cliente.nombre} — falta {simbolo}{_fmt_num(saldo)} "
+            f"({len(cuotas_pendientes)} cuota(s), {prox_txt})"
+        )
+
+    lines.append("")
+    totales = " | ".join(
+        f"{'U$D' if m == Moneda.USD else '$'}{_fmt_num(t)}"
+        for m, t in pendiente_por_moneda.items()
+        if t > 0
+    )
+    lines.append(f"*Total por cobrar:* {totales or '$0,00'}")
 
     return False, "\n".join(lines)
 

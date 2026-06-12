@@ -30,6 +30,7 @@ INTENTS = {
     "REGISTRAR_GASTO",
     "CONSULTA_CARTERA",
     "CONSULTA_CLIENTE",
+    "CONSULTA_PRESTAMOS",
     "EDITAR_OPERACION",
     "ACLARACION_REQUERIDA",
     "DESCONOCIDO",
@@ -168,6 +169,15 @@ OPERACIONES DISPONIBLES
     data:
       - cliente_nombre: string
 
+13c. CONSULTA_PRESTAMOS
+    Cuándo: El operador pregunta por los préstamos en general (sin nombrar a un cliente),
+        típicamente para saber qué tiene por cobrar.
+    Ej: "Qué préstamos tengo por cobrar?", "Qué préstamos tengo activos?",
+        "Cuánto me deben en préstamos?", "Listame los préstamos"
+    ⚠️ NO confundir con CONSULTA_CARTERA (eso es cheques). Los préstamos son dinero
+       prestado sin cheque. Si dice "préstamo(s)" o "cuotas" → CONSULTA_PRESTAMOS.
+    data: {}
+
 14. EDITAR_OPERACION
     Cuándo: El operador quiere corregir un dato ya registrado.
     Ej: "El cheque 12345 tiene mal el porcentaje, era 3% no 2%",
@@ -232,7 +242,17 @@ REGLAS CRÍTICAS
 12. Números de cheque abreviados: si el operador menciona solo los últimos dígitos
     (ej: "el 681") y en el historial hay un cheque cuyo nro termina en ese sufijo
     (ej: "03789681"), usá SIEMPRE el número completo del historial como nro_cheque.
-    Si hay ambigüedad o no hay historial con ese cheque → ACLARACION_REQUERIDA.
+    Si hay ambigüedad o no hay historial con ese cheque → ponés el parcial igual y el
+    sistema lo resuelve en la BD. Solo usá ACLARACION_REQUERIDA si hay ambigüedad real.
+13. Reconstrucción multi-turno: si el mensaje actual parece ser la respuesta a una
+    pregunta de aclaración del asistente (ej: el asistente preguntó qué cheque o qué
+    dato, y el operador ahora responde con un número, un nombre o un valor), reconstruí
+    la operación original del historial y completala con ese dato.
+    Ej: historial muestra que el operador quería corregir el porcentaje_compra de un
+    cheque pero faltaba identificarlo, y ahora dice "el 5068" o "el que termina en 5068"
+    → devolvé EDITAR_OPERACION con los datos originales más identificador="5068".
+    NUNCA respondas con DESCONOCIDO ni ACLARACION_REQUERIDA si la operación original
+    está clara en el historial y el operador solo está completando el dato faltante.
 
 ═══════════════════════════════════════
 FORMATO DE RESPUESTA — SIEMPRE ESTE EXACTO
@@ -263,9 +283,46 @@ class IntentResult(BaseModel):
         """True si la intención modifica la base de datos."""
         return self.intent not in {
             "CONSULTA_CARTERA",
+            "CONSULTA_CLIENTE",
+            "CONSULTA_PRESTAMOS",
             "ACLARACION_REQUERIDA",
             "DESCONOCIDO",
         }
+
+
+def _parse_json_object(raw_text: str) -> dict[str, Any]:
+    """Extrae el objeto JSON de la respuesta de Claude de forma tolerante.
+
+    Claude a veces antepone texto explicativo o envuelve el JSON en un bloque
+    de código markdown, sobre todo en conversaciones multi-turno con historial
+    cargado. Intenta el parseo directo y, si falla, recorta desde la primera
+    llave de apertura hasta la última de cierre.
+
+    Raises:
+        json.JSONDecodeError si no se encuentra un objeto JSON válido.
+    """
+    text = raw_text.strip()
+
+    # Limpiar bloques de código markdown accidentales.
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: recortar al objeto JSON más externo (Claude antepuso prosa).
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        return json.loads(text[start : end + 1])
+
+    # Re-lanzar el error original para que el caller lo maneje.
+    return json.loads(text)
 
 
 # ---------------------------------------------------------------------------
@@ -328,15 +385,7 @@ async def extraer_intencion(
         )
 
         raw_text = response.content[0].text.strip()
-
-        # Limpiar posibles bloques de código (defensa ante markdown accidental)
-        if raw_text.startswith("```"):
-            raw_text = raw_text.split("```")[1]
-            if raw_text.startswith("json"):
-                raw_text = raw_text[4:]
-            raw_text = raw_text.strip()
-
-        parsed = json.loads(raw_text)
+        parsed = _parse_json_object(raw_text)
 
         # Validar que el intent sea uno de los reconocidos
         if parsed.get("intent") not in INTENTS:

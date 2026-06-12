@@ -148,12 +148,10 @@ async def _procesar_mensaje(
     )
     logger.info("Intent extraído: %s (phone=%s)", intent_result.intent, phone)
 
-    # ── 3f. Agregar respuesta de Claude al historial ─────────────────────────
-    wa_session.add_assistant_message(phone, intent_result.respuesta_usuario)
-
-    # ── 3g. Dispatch ─────────────────────────────────────────────────────────
+    # ── 3f. Dispatch ─────────────────────────────────────────────────────────
     if intent_result.confirmacion_requerida:
         wa_session.set_pending_intent(phone, intent_result)
+        wa_session.add_assistant_message(phone, intent_result.respuesta_usuario)
         await wa_client.send_text(phone, intent_result.respuesta_usuario)
         return
 
@@ -174,9 +172,7 @@ async def _ejecutar_y_responder(
 
     if limpiar_sesion:
         wa_session.clear_session(phone)
-        # Tras limpiar, dejar la confirmación como único contexto residual.
-        # Así el operador puede preguntar sobre lo que acaba de pasar ("240 qué?",
-        # "de la deuda que hablamos") sin arrastrar historial de operaciones anteriores.
-        wa_session.add_assistant_message(phone, respuesta)
-
+    # Siempre guardar la respuesta real en historial (no solo el respuesta_usuario de Claude).
+    # Esto permite que consultas (cartera, cliente) queden visibles para el siguiente turno.
+    wa_session.add_assistant_message(phone, respuesta)
     await wa_client.send_text(phone, respuesta)
