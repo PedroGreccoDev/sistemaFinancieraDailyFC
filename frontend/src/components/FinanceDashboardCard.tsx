@@ -19,7 +19,7 @@ if (typeof document !== "undefined" && !document.getElementById(RESPONSIVE_STYLE
       .fc-card-body        { padding: 0.75rem 0.9rem !important; }
       .fc-card-num         { font-size: 2.4rem !important; }
       .fc-card-prefix      { font-size: 1rem !important; margin-bottom: 0.3rem !important; }
-      .fc-card-title       { font-size: 0.62rem !important; }
+      .fc-card-title       { font-size: 0.62rem !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; max-width: none !important; }
       .fc-card-subtitle    { font-size: 0.7rem !important; }
       .fc-card-header      { margin-bottom: 0.35rem !important; }
       .fc-card-numrow      { margin-bottom: 0.35rem !important; }
