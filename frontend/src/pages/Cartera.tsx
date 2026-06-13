@@ -10,9 +10,9 @@ type FilterPreset = 'hoy' | 'semana' | 'mes' | 'anio' | 'custom'
 
 const FN = "'Bebas Neue', sans-serif"
 const FM = "'Manrope', sans-serif"
-const CARD = { background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }
-const TH = { fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' as const, color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left' as const, background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'nowrap' as const }
-const TD = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }
+const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)' }
+const TH = { fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' as const, color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left' as const, background: 'var(--ov-0025)', borderBottom: '1px solid var(--bd-006)', whiteSpace: 'nowrap' as const }
+const TD = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'var(--text-1)' }
 
 function presetRange(preset: FilterPreset, desde: string | null, hasta: string | null): [string, string] {
   const hoy = todayISO()
@@ -87,10 +87,10 @@ export default function Cartera() {
       {/* Header cartera */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
         <div>
-          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Cartera</h1>
+          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Cartera</h1>
           <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Cheques en stock</p>
         </div>
-        <button onClick={() => refetch()} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>
+        <button onClick={() => refetch()} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-010)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>
           Actualizar
         </button>
       </div>
@@ -99,8 +99,8 @@ export default function Cartera() {
       {cheques && (
         <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.25rem' }}>
           {[
-            { label: 'En cartera', value: String(cheques.length), color: '#f8fafc' },
-            { label: 'Total', value: fmtARS(totalCartera(cheques)), color: '#f8fafc' },
+            { label: 'En cartera', value: String(cheques.length), color: 'var(--text-strong)' },
+            { label: 'Total', value: fmtARS(totalCartera(cheques)), color: 'var(--text-strong)' },
           ].map(({ label, value, color }) => (
             <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
@@ -122,13 +122,13 @@ export default function Cartera() {
             {sorted.map((cheque) => {
               const dias = cheque.fecha_pago ? daysUntil(cheque.fecha_pago) : null
               return (
-                <div key={cheque.nro_cheque} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <div key={cheque.nro_cheque} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: '#e2e8f0', wordBreak: 'break-word' }}>{cheque.nro_cheque}</p>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{cheque.nro_cheque}</p>
                     <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>Pago {fmtDate(cheque.fecha_pago)}</p>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <p style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0' }}>{fmtARS(cheque.monto)}</p>
+                    <p style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(cheque.monto)}</p>
                     <div style={{ marginTop: '4px' }}>{diasBadge(dias)}</div>
                   </div>
                 </div>
@@ -153,7 +153,7 @@ export default function Cartera() {
                   const dias = cheque.fecha_pago ? daysUntil(cheque.fecha_pago) : null
                   return (
                     <tr key={cheque.nro_cheque} style={{ transition: 'background 0.1s' }}
-                      onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                      onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                       <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{cheque.nro_cheque}</td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(cheque.monto)}</td>
@@ -174,7 +174,7 @@ export default function Cartera() {
       {/* Historial de ventas */}
       <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
-          <h2 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Historial de Ventas</h2>
+          <h2 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Historial de Ventas</h2>
           <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Cheques vendidos por período</p>
         </div>
       </div>
@@ -203,7 +203,7 @@ export default function Cartera() {
 
       <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.25rem' }}>
         {[
-          { label: 'Cheques vendidos', value: String(filteredVendidos.length), color: '#f8fafc' },
+          { label: 'Cheques vendidos', value: String(filteredVendidos.length), color: 'var(--text-strong)' },
           { label: 'Ganancia del período', value: fmtARS(totalGanancia), color: '#4ade80' },
         ].map(({ label, value, color }) => (
           <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
@@ -225,9 +225,9 @@ export default function Cartera() {
                 ? (parseFloat(c.porcentaje_compra) - parseFloat(c.porcentaje_venta)).toFixed(2)
                 : null
               return (
-                <div key={c.nro_cheque} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <div key={c.nro_cheque} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: '#e2e8f0', wordBreak: 'break-word' }}>{c.nro_cheque}</p>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{c.nro_cheque}</p>
                     <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>
                       {fmtARS(c.monto)} · {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
                       {spread !== null && <span style={{ color: '#818cf8' }}> · spread {spread}%</span>}
@@ -240,7 +240,7 @@ export default function Cartera() {
                 </div>
               )
             })}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.8rem 1rem', background: 'rgba(255,255,255,0.025)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.8rem 1rem', background: 'var(--ov-0025)' }}>
               <span style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, color: 'rgba(148,163,184,0.8)' }}>Total ganancia</span>
               <span style={{ fontFamily: FM, fontSize: '0.9rem', fontWeight: 700, color: '#4ade80' }}>{fmtARS(totalGanancia)}</span>
             </div>
@@ -266,7 +266,7 @@ export default function Cartera() {
                     : null
                   return (
                     <tr key={c.nro_cheque}
-                      onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                      onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                       <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{c.nro_cheque}</td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(c.monto)}</td>
@@ -284,7 +284,7 @@ export default function Cartera() {
                 })}
               </tbody>
               <tfoot>
-                <tr style={{ borderTop: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.025)' }}>
+                <tr style={{ borderTop: '1px solid var(--bd-010)', background: 'var(--ov-0025)' }}>
                   <td colSpan={5} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="hidden sm:table-cell">Total</td>
                   <td colSpan={5} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="sm:hidden">Total</td>
                   <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#4ade80', borderBottom: 'none' }}>{fmtARS(totalGanancia)}</td>

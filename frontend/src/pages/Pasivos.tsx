@@ -10,12 +10,12 @@ type Filtro = 'todos' | PasivoEstado
 
 const FM = "'Manrope', sans-serif"
 const FN = "'Bebas Neue', sans-serif"
-const CARD = { background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }
-const MODAL_BG = '#0d0d14'
-const INPUT_STYLE: React.CSSProperties = { width: '100%', background: '#080810', border: '1px solid rgba(255,255,255,0.12)', color: '#e2e8f0', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
+const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)' }
+const MODAL_BG = 'var(--modal)'
+const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
 const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
-const TH: React.CSSProperties = { fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'nowrap' }
-const TD: React.CSSProperties = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }
+const TH: React.CSSProperties = { fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left', background: 'var(--ov-0025)', borderBottom: '1px solid var(--bd-006)', whiteSpace: 'nowrap' }
+const TD: React.CSSProperties = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'var(--text-1)' }
 
 function EstadoBadge({ estado }: { estado: PasivoEstado }) {
   const isPending = estado === 'PENDIENTE'
@@ -55,9 +55,9 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid rgba(255,255,255,0.08)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
-        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
-          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1 }}>Nueva deuda</h2>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Nueva deuda</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Registrar una deuda del negocio</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
@@ -71,7 +71,7 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
           <div><label style={LABEL_STYLE}>Observaciones <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Cancelar</button>
+            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-012)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Cancelar</button>
             <button type="submit" disabled={loading} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>{loading ? 'Guardando…' : 'Registrar'}</button>
           </div>
         </form>
@@ -101,15 +101,15 @@ function ModalCancelarEfectivo({ pasivo, onClose, onSuccess }: { pasivo: Pasivo;
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid rgba(255,255,255,0.08)', width: '100%', maxWidth: '380px' }}>
-        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1 }}>Pagar con efectivo</h2>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', width: '100%', maxWidth: '380px' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)' }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Pagar con efectivo</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{pasivo.acreedor}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+          <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
             {[
-              { label: 'Deuda original', value: fmtMoneda(pasivo.monto, pasivo.moneda), color: '#e2e8f0' },
+              { label: 'Deuda original', value: fmtMoneda(pasivo.monto, pasivo.moneda), color: 'var(--text-1)' },
               { label: 'Saldo pendiente', value: fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda), color: '#f87171' },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
@@ -130,7 +130,7 @@ function ModalCancelarEfectivo({ pasivo, onClose, onSuccess }: { pasivo: Pasivo;
           </div>
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Volver</button>
+            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-012)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Volver</button>
             <button type="submit" disabled={loading || montoNum <= 0 || montoNum > saldo} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#16a34a', border: 'none', color: '#fff', cursor: 'pointer', opacity: (loading || montoNum <= 0 || montoNum > saldo) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar pago'}</button>
           </div>
         </form>
@@ -175,15 +175,15 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid rgba(255,255,255,0.08)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
-        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
-          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1 }}>Pagar con cheque</h2>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Pagar con cheque</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Entregar un cheque de cartera al acreedor</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+          <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
             {[
-              { label: 'Acreedor', value: pasivo.acreedor, color: '#e2e8f0' },
+              { label: 'Acreedor', value: pasivo.acreedor, color: 'var(--text-1)' },
               { label: 'Saldo pendiente', value: fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda), color: '#f87171' },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
@@ -217,10 +217,10 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
               ].map(({ label, value }) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
                   <span style={{ color: 'rgba(100,116,139,0.65)' }}>{label}</span>
-                  <span style={{ fontWeight: 600, color: '#e2e8f0' }}>{value}</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{value}</span>
                 </div>
               ))}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.3rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.3rem', borderTop: '1px solid var(--bd-006)' }}>
                 <span style={{ fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#fbbf24' }}>{diferencia >= 0 ? 'Cancela la deuda completamente' : 'Saldo restante'}</span>
                 <span style={{ fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#fbbf24' }}>{diferencia >= 0 ? (diferencia > 0 ? `+${fmtARS(diferencia)}` : '✓') : fmtARS(-diferencia)}</span>
               </div>
@@ -232,7 +232,7 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
 
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Volver</button>
+            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-012)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Volver</button>
             <button type="submit" disabled={loading || !chequeSeleccionado || !cheques || cheques.length === 0} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', cursor: 'pointer', opacity: (loading || !chequeSeleccionado) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar'}</button>
           </div>
         </form>
@@ -272,12 +272,12 @@ export default function Pasivos() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
-          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Deudas</h1>
+          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Deudas</h1>
           <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Deudas del negocio con clientes y proveedores</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button onClick={() => setMostrarNueva(true)} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>+ Nueva deuda</button>
-          <button onClick={() => refetch()} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>Actualizar</button>
+          <button onClick={() => refetch()} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-010)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>Actualizar</button>
         </div>
       </div>
 
@@ -326,10 +326,10 @@ export default function Pasivos() {
           {/* Mobile: tarjetas */}
           <div className="sm:hidden">
             {pasivos.map((pasivo) => (
-              <div key={`m-${pasivo.id}`} style={{ padding: '0.85rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <div key={`m-${pasivo.id}`} style={{ padding: '0.85rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.4rem' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: FM, fontSize: '0.86rem', fontWeight: 700, color: '#e2e8f0', wordBreak: 'break-word' }}>{pasivo.acreedor}</p>
+                    <p style={{ fontFamily: FM, fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word' }}>{pasivo.acreedor}</p>
                     <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(148,163,184,0.7)', wordBreak: 'break-word', marginTop: '1px' }}>{pasivo.concepto}</p>
                   </div>
                   <EstadoBadge estado={pasivo.estado} />
@@ -367,7 +367,7 @@ export default function Pasivos() {
               <tbody>
                 {pasivos.map((pasivo) => (
                   <tr key={pasivo.id}
-                    onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                    onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                     onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                     <td style={{ ...TD, fontWeight: 600 }}>{pasivo.acreedor}</td>
                     <td style={{ ...TD, color: 'rgba(148,163,184,0.7)', maxWidth: '220px', whiteSpace: 'normal', wordBreak: 'break-word' }}>{pasivo.concepto}</td>

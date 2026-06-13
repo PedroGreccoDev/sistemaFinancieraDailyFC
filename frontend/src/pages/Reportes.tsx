@@ -9,7 +9,7 @@ type Preset = 'hoy' | 'semana' | 'mes' | 'custom'
 
 const FN = "'Bebas Neue', sans-serif"
 const FM = "'Manrope', sans-serif"
-const CARD = { background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }
+const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)' }
 
 function getRangeForPreset(preset: Preset, customDesde: string | null, customHasta: string | null) {
   const hoy = todayISO()
@@ -22,7 +22,7 @@ function getRangeForPreset(preset: Preset, customDesde: string | null, customHas
 function MetricCard({ label, value, sub, color = 'default' }: {
   label: string; value: string; sub?: string; color?: 'default' | 'green' | 'red' | 'indigo'
 }) {
-  const numColor = { default: '#e2e8f0', green: '#4ade80', red: '#f87171', indigo: '#818cf8' }[color]
+  const numColor = { default: 'var(--text-1)', green: '#4ade80', red: '#f87171', indigo: '#818cf8' }[color]
   return (
     <div style={{ ...CARD, padding: '1rem 1.2rem' }}>
       <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
@@ -60,7 +60,7 @@ export default function Reportes() {
     <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
       {/* Header */}
       <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Reportes</h1>
+        <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Reportes</h1>
         <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Arqueo de caja y ganancias consolidadas</p>
       </div>
 
@@ -105,7 +105,7 @@ export default function Reportes() {
           <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.5rem' }}>
             <div style={{ ...CARD, padding: '1.1rem 1.2rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>Total bruto</p>
-              <p style={{ fontFamily: FN, fontSize: '2.2rem', color: '#e2e8f0', letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{fmtARS(data.total_ganancias)}</p>
+              <p style={{ fontFamily: FN, fontSize: '2.2rem', color: 'var(--text-1)', letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{fmtARS(data.total_ganancias)}</p>
               <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>Sin descontar gastos</p>
             </div>
             <div style={{ background: 'linear-gradient(145deg, #3730a3, #4338ca)', border: '1px solid rgba(99,102,241,0.4)', boxShadow: '0 4px 24px rgba(99,102,241,0.2)', padding: '1.1rem 1.2rem' }}>
@@ -121,9 +121,9 @@ export default function Reportes() {
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '320px' }}>
                 <thead>
                   <tr>
-                    <th style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>Módulo</th>
-                    <th style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'right', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>Importe</th>
-                    <th style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'right', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>% del bruto</th>
+                    <th style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left', background: 'var(--ov-0025)', borderBottom: '1px solid var(--bd-006)' }}>Módulo</th>
+                    <th style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'right', background: 'var(--ov-0025)', borderBottom: '1px solid var(--bd-006)' }}>Importe</th>
+                    <th style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'right', background: 'var(--ov-0025)', borderBottom: '1px solid var(--bd-006)' }}>% del bruto</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -138,20 +138,20 @@ export default function Reportes() {
                       : '0.0'
                     return (
                       <tr key={row.label}
-                        onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                        onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                         onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
-                        <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }}>{row.label}</td>
-                        <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', fontWeight: 600, color: row.egreso ? '#f87171' : '#4ade80' }}>
+                        <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'var(--text-1)' }}>{row.label}</td>
+                        <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', textAlign: 'right', fontWeight: 600, color: row.egreso ? '#f87171' : '#4ade80' }}>
                           {row.egreso ? '−' : ''}{fmtARS(row.value)}
                         </td>
-                        <td style={{ fontFamily: FM, fontSize: '0.78rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: 'rgba(100,116,139,0.6)' }}>
+                        <td style={{ fontFamily: FM, fontSize: '0.78rem', padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', textAlign: 'right', color: 'rgba(100,116,139,0.6)' }}>
                           {row.egreso ? '−' : ''}{pct}%
                         </td>
                       </tr>
                     )
                   })}
-                  <tr style={{ background: 'rgba(255,255,255,0.025)' }}>
-                    <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', fontWeight: 700, color: '#e2e8f0' }}>Neto</td>
+                  <tr style={{ background: 'var(--ov-0025)' }}>
+                    <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', fontWeight: 700, color: 'var(--text-1)' }}>Neto</td>
                     <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', textAlign: 'right', fontWeight: 700, color: '#818cf8' }}>{fmtARS(data.neto)}</td>
                     <td style={{ fontFamily: FM, fontSize: '0.78rem', padding: '0.65rem 1rem', textAlign: 'right', color: 'rgba(100,116,139,0.5)' }}>—</td>
                   </tr>

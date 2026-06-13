@@ -25,15 +25,21 @@ export function daysUntil(dateStr: string): number {
   return Math.round((target.getTime() - today.getTime()) / 86_400_000)
 }
 
+// Fecha local en formato ISO (YYYY-MM-DD). NO usar toISOString(): devuelve UTC
+// y en Argentina (UTC−3) de noche adelanta un día, corriendo todos los filtros.
+function localISO(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  return localISO(new Date())
 }
 
 export function weekStartISO(): string {
   const d = new Date()
   d.setHours(0, 0, 0, 0)
   d.setDate(d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1))
-  return d.toISOString().slice(0, 10)
+  return localISO(d)
 }
 
 export function monthStartISO(): string {

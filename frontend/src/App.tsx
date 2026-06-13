@@ -47,7 +47,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <div className="min-h-dvh flex flex-col md:flex-row" style={{ background: "#080810" }}>
+        <div className="min-h-dvh flex flex-col md:flex-row" style={{ background: "var(--bg)" }}>
           <Navbar />
           <main className="flex-1 min-w-0 overflow-y-auto pb-40 md:pb-0">
             <Routes>
@@ -69,7 +69,7 @@ export default function App() {
         <button
           onClick={toggleDark}
           aria-label={dark ? 'Activar modo claro' : 'Activar modo oscuro'}
-          className="fixed left-3 z-50 w-8 h-8 flex items-center justify-center rounded-full bg-slate-800/40 dark:bg-slate-600/40 text-slate-400 dark:text-slate-500 hover:bg-slate-800/70 dark:hover:bg-slate-600/70 hover:text-white transition-all"
+          className="fixed left-3 z-50 w-9 h-9 flex items-center justify-center rounded-full shadow-sm border border-slate-300/70 bg-white/80 text-slate-500 hover:bg-white hover:text-slate-900 dark:border-white/10 dark:bg-slate-700/50 dark:text-slate-300 dark:hover:bg-slate-600 dark:hover:text-white transition-all"
           style={{ bottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
         >
           {dark ? <SunIcon /> : <MoonIcon />}

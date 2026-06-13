@@ -6,8 +6,8 @@ const ACCENT = '#6366f1'
 export default function Deudores() {
   return (
     <div>
-      <div className="px-4 pt-5 sm:px-8" style={{ background: 'linear-gradient(145deg, #0c0c10, #13131a)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <h1 style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.25rem' }}>
+      <div className="px-4 pt-5 sm:px-8" style={{ background: 'var(--surface-grad)', borderBottom: '1px solid var(--bd-006)' }}>
+        <h1 style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.25rem' }}>
           Deudores
         </h1>
         <div style={{ display: 'flex', gap: 0, marginTop: '0.75rem' }}>
@@ -26,7 +26,7 @@ export default function Deudores() {
                 letterSpacing: '0.03em',
                 textDecoration: 'none',
                 padding: '0.5rem 1rem',
-                color: isActive ? '#f8fafc' : 'rgba(148,163,184,0.55)',
+                color: isActive ? 'var(--text-strong)' : 'rgba(148,163,184,0.55)',
                 borderBottom: isActive ? `2px solid ${ACCENT}` : '2px solid transparent',
                 transition: 'all 0.15s',
               })}

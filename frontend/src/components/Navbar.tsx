@@ -11,8 +11,8 @@ const NAV_LINKS = [
 ]
 
 const ACCENT = "#6366f1"
-const BG     = "#0a0a0e"
-const BORDER = "1px solid rgba(255,255,255,0.06)"
+const BG     = "var(--nav-bg)"
+const BORDER = "1px solid var(--bd-006)"
 
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
@@ -21,7 +21,7 @@ function Brand({ compact = false }: { compact?: boolean }) {
         fontFamily: "'Bebas Neue', sans-serif",
         fontSize: compact ? "1.5rem" : "1.9rem",
         letterSpacing: "0.1em",
-        color: "#f8fafc",
+        color: "var(--text-strong)",
         lineHeight: 1,
         display: "block",
       }}>
@@ -63,7 +63,7 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
             fontWeight: isActive ? 700 : 500,
             letterSpacing: "0.04em",
             textDecoration: "none",
-            color: isActive ? "#f8fafc" : "rgba(148,163,184,0.6)",
+            color: isActive ? "var(--text-strong)" : "rgba(148,163,184,0.6)",
             borderLeft: isActive ? `2px solid ${ACCENT}` : "2px solid transparent",
             background: isActive ? "rgba(99,102,241,0.08)" : "transparent",
             transition: "all 0.15s",
@@ -71,8 +71,8 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
           onMouseEnter={(e) => {
             const el = e.currentTarget as HTMLAnchorElement
             if (!el.style.borderLeftColor.includes("rgb(99")) {
-              el.style.color = "rgba(226,232,240,0.85)"
-              el.style.background = "rgba(255,255,255,0.03)"
+              el.style.color = "var(--text-1)"
+              el.style.background = "var(--ov-003)"
             }
           }}
           onMouseLeave={(e) => {
@@ -177,7 +177,7 @@ export default function Navbar() {
             height: "40px",
             background: "transparent",
             border: "none",
-            color: "rgba(226,232,240,0.85)",
+            color: "var(--text-1)",
             cursor: "pointer",
             flexShrink: 0,
           }}
@@ -188,7 +188,7 @@ export default function Navbar() {
           fontFamily: "'Bebas Neue', sans-serif",
           fontSize: "1.5rem",
           letterSpacing: "0.1em",
-          color: "#f8fafc",
+          color: "var(--text-strong)",
         }}>
           Daily FC
         </span>

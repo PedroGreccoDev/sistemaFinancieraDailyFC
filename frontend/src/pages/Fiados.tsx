@@ -11,12 +11,12 @@ type Filtro = 'ABIERTO' | 'todos' | 'CANCELADO'
 
 const FM = "'Manrope', sans-serif"
 const FN = "'Bebas Neue', sans-serif"
-const CARD = { background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }
-const MODAL_BG = '#0d0d14'
-const INPUT_STYLE: React.CSSProperties = { width: '100%', background: '#080810', border: '1px solid rgba(255,255,255,0.12)', color: '#e2e8f0', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
+const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)' }
+const MODAL_BG = 'var(--modal)'
+const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
 const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
-const TH: React.CSSProperties = { fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'nowrap' }
-const TD: React.CSSProperties = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }
+const TH: React.CSSProperties = { fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left', background: 'var(--ov-0025)', borderBottom: '1px solid var(--bd-006)', whiteSpace: 'nowrap' }
+const TD: React.CSSProperties = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'var(--text-1)' }
 
 function EstadoBadge({ estado }: { estado: FiadoEstado }) {
   const isOpen = estado === 'ABIERTO'
@@ -48,13 +48,13 @@ function ModalEfectivo({ fiado, clienteNombre, onClose, onSuccess }: { fiado: Fi
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid rgba(255,255,255,0.08)', width: '100%', maxWidth: '380px' }}>
-        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1 }}>Cobrar en efectivo</h2>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', width: '100%', maxWidth: '380px' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)' }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Cobrar en efectivo</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{clienteNombre} · Cheque {fiado.cheque_nro}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-          <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', padding: '0.75rem 1rem' }}>
+          <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem' }}>
             <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.3rem' }}>Saldo pendiente</p>
             <p style={{ fontFamily: FN, fontSize: '1.5rem', color: '#fbbf24', letterSpacing: '0.03em', lineHeight: 1 }}>{fmtARS(saldo)}</p>
           </div>
@@ -66,7 +66,7 @@ function ModalEfectivo({ fiado, clienteNombre, onClose, onSuccess }: { fiado: Fi
           </div>
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Cancelar</button>
+            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-012)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Cancelar</button>
             <button type="submit" disabled={loading || montoNum <= 0} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', cursor: 'pointer', opacity: (loading || montoNum <= 0) ? 0.5 : 1 }}>{loading ? 'Guardando…' : 'Cobrar'}</button>
           </div>
         </form>
@@ -105,9 +105,9 @@ function ModalCheque({ fiado, clienteNombre, onClose, onSuccess }: { fiado: Fiad
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid rgba(255,255,255,0.08)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
-        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
-          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1 }}>Cobrar con cheque</h2>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Cobrar con cheque</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{clienteNombre} · Saldo: {fmtARS(saldo)}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
@@ -125,9 +125,9 @@ function ModalCheque({ fiado, clienteNombre, onClose, onSuccess }: { fiado: Fiad
             <div style={{ background: diferencia >= 0 ? 'rgba(74,222,128,0.06)' : 'rgba(251,191,36,0.06)', border: `1px solid ${diferencia >= 0 ? 'rgba(74,222,128,0.2)' : 'rgba(251,191,36,0.2)'}`, padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
                 <span style={{ color: 'rgba(100,116,139,0.65)' }}>Valor neto del cheque</span>
-                <span style={{ fontWeight: 600, color: '#e2e8f0' }}>{fmtARS(valorNeto)}</span>
+                <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{fmtARS(valorNeto)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.3rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.3rem', borderTop: '1px solid var(--bd-006)' }}>
                 <span style={{ fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#fbbf24' }}>
                   {diferencia > 0 ? 'Le debés al cliente' : diferencia < 0 ? 'Saldo restante' : 'Cancela exacto'}
                 </span>
@@ -138,7 +138,7 @@ function ModalCheque({ fiado, clienteNombre, onClose, onSuccess }: { fiado: Fiad
 
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Cancelar</button>
+            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-012)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Cancelar</button>
             <button type="submit" disabled={loading} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', cursor: 'pointer', opacity: loading ? 0.5 : 1 }}>{loading ? 'Procesando…' : 'Confirmar'}</button>
           </div>
         </form>
@@ -155,10 +155,10 @@ function ModalResultado({ result, onClose }: { result: CobrarConChequeResult; on
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid rgba(255,255,255,0.08)', width: '100%', maxWidth: '380px', padding: '1.5rem' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', width: '100%', maxWidth: '380px', padding: '1.5rem' }}>
         <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
           <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{cancelado ? '🎉' : '✅'}</p>
-          <h2 style={{ fontFamily: FN, fontSize: '1.75rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1 }}>{cancelado ? 'Fiado cancelado' : 'Pago parcial registrado'}</h2>
+          <h2 style={{ fontFamily: FN, fontSize: '1.75rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>{cancelado ? 'Fiado cancelado' : 'Pago parcial registrado'}</h2>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.25rem' }}>
           {[
@@ -167,17 +167,17 @@ function ModalResultado({ result, onClose }: { result: CobrarConChequeResult; on
           ].map(({ label, value, mono }) => (
             <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.82rem' }}>
               <span style={{ color: 'rgba(100,116,139,0.65)' }}>{label}</span>
-              <span style={{ fontWeight: 700, color: '#e2e8f0', fontFamily: mono ? "'JetBrains Mono', monospace" : FM }}>{value}</span>
+              <span style={{ fontWeight: 700, color: 'var(--text-1)', fontFamily: mono ? "'JetBrains Mono', monospace" : FM }}>{value}</span>
             </div>
           ))}
           {cancelado && diferencia > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.82rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.82rem', paddingTop: '0.5rem', borderTop: '1px solid var(--bd-006)' }}>
               <span style={{ fontWeight: 700, color: '#fbbf24' }}>Le debés al cliente</span>
               <span style={{ fontWeight: 700, color: '#fbbf24' }}>{fmtARS(diferencia)}</span>
             </div>
           )}
           {!cancelado && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.82rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.82rem', paddingTop: '0.5rem', borderTop: '1px solid var(--bd-006)' }}>
               <span style={{ fontWeight: 700, color: '#fbbf24' }}>Saldo restante</span>
               <span style={{ fontWeight: 700, color: '#fbbf24' }}>{fmtARS(result.fiado.saldo_pendiente)}</span>
             </div>
@@ -235,9 +235,9 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid rgba(255,255,255,0.08)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
-        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
-          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1 }}>Nuevo cheque fiado</h2>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Nuevo cheque fiado</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Seleccioná el cheque y el cliente</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
@@ -268,7 +268,7 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
                 <input type="text" value={nuevoTelefono} onChange={(e) => setNuevoTelefono(e.target.value)} placeholder="Teléfono (opcional)" style={INPUT_STYLE} />
                 {errorCliente && <p style={{ fontFamily: FM, fontSize: '0.72rem', color: '#f87171' }}>{errorCliente}</p>}
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button type="button" onClick={() => { setMostrandoNuevoCliente(false); setErrorCliente(null) }} style={{ flex: 1, padding: '0.45rem', fontFamily: FM, fontSize: '0.72rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Volver</button>
+                  <button type="button" onClick={() => { setMostrandoNuevoCliente(false); setErrorCliente(null) }} style={{ flex: 1, padding: '0.45rem', fontFamily: FM, fontSize: '0.72rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-012)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Volver</button>
                   <button type="button" onClick={handleCrearCliente} disabled={cargandoCliente || !nuevoNombre.trim()} style={{ flex: 1, padding: '0.45rem', fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', cursor: 'pointer', opacity: (cargandoCliente || !nuevoNombre.trim()) ? 0.5 : 1 }}>{cargandoCliente ? 'Creando…' : 'Crear cliente'}</button>
                 </div>
               </div>
@@ -279,12 +279,12 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
           <div><label style={LABEL_STYLE}>Motivo</label><input type="text" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Motivo del fiado" required style={INPUT_STYLE} /></div>
 
           {showPreview && (
-            <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
                 <span style={{ color: 'rgba(100,116,139,0.65)' }}>Monto nominal</span>
-                <span style={{ fontWeight: 600, color: '#e2e8f0' }}>{fmtARS(montoNominal)}</span>
+                <span style={{ fontWeight: 600, color: 'var(--text-1)' }}>{fmtARS(montoNominal)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.3rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.3rem', borderTop: '1px solid var(--bd-006)' }}>
                 <span style={{ fontWeight: 700, color: '#fbbf24' }}>Saldo inicial a cobrar</span>
                 <span style={{ fontWeight: 700, color: '#fbbf24' }}>{fmtARS(saldoInicial)}</span>
               </div>
@@ -293,7 +293,7 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
 
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Cancelar</button>
+            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-012)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Cancelar</button>
             <button type="submit" disabled={loading || mostrandoNuevoCliente} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', cursor: 'pointer', opacity: (loading || mostrandoNuevoCliente) ? 0.5 : 1 }}>{loading ? 'Guardando…' : 'Confirmar'}</button>
           </div>
         </form>
@@ -350,11 +350,11 @@ export default function Fiados() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
-          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Cheques fiados</h1>
+          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Cheques fiados</h1>
           <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Deudas de clientes por cheques entregados en crédito</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button onClick={() => refetch()} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>Actualizar</button>
+          <button onClick={() => refetch()} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-010)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>Actualizar</button>
           <button onClick={() => setCreandoFiado(true)} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>Nuevo</button>
         </div>
       </div>
@@ -364,7 +364,7 @@ export default function Fiados() {
         <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.25rem' }}>
           {[
             { label: 'Saldo total a cobrar', value: fmtARS(totalSaldo), color: '#fbbf24', sub: `${abiertos.length} fiado(s) abierto(s)` },
-            { label: 'Clientes con deuda', value: String(clientesDistintos), color: '#e2e8f0', sub: 'cliente(s) distintos' },
+            { label: 'Clientes con deuda', value: String(clientesDistintos), color: 'var(--text-1)', sub: 'cliente(s) distintos' },
           ].map(({ label, value, color, sub }) => (
             <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
@@ -404,10 +404,10 @@ export default function Fiados() {
           {/* Mobile: tarjetas */}
           <div className="sm:hidden">
             {fiados.map((fiado) => (
-              <div key={`m-${fiado.id}`} style={{ padding: '0.85rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <div key={`m-${fiado.id}`} style={{ padding: '0.85rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.4rem' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: FM, fontSize: '0.86rem', fontWeight: 700, color: '#e2e8f0', wordBreak: 'break-word' }}>{nombreCliente(fiado.cliente_id)}</p>
+                    <p style={{ fontFamily: FM, fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word' }}>{nombreCliente(fiado.cliente_id)}</p>
                     <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '1px' }}>{fiado.cheque_nro} · {fmtDate(fiado.fecha_fiado)}</p>
                   </div>
                   <EstadoBadge estado={fiado.estado} />
@@ -444,7 +444,7 @@ export default function Fiados() {
               <tbody>
                 {fiados.map((fiado) => (
                   <tr key={fiado.id}
-                    onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                    onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                     onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                     <td style={{ ...TD, fontWeight: 600 }}>{nombreCliente(fiado.cliente_id)}</td>
                     <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem', color: 'rgba(100,116,139,0.6)' }}>{fiado.cheque_nro}</td>

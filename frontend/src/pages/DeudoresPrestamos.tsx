@@ -10,7 +10,7 @@ const FM = "'Manrope', sans-serif"
 
 function getSemaforo(prestamo: Prestamo): Semaforo {
   if (prestamo.estado !== 'ACTIVO') return 'cancelado'
-  const pendientes = prestamo.cuotas_detalle.filter((c) => c.estado === 'PENDIENTE')
+  const pendientes = prestamo.cuotas_detalle.filter((c) => c.estado !== 'COBRADA')
   if (pendientes.length === 0) return 'cancelado'
   const enMora = pendientes.some((c) => daysUntil(c.fecha_vencimiento) < 0)
   if (enMora) return 'mora'
@@ -22,7 +22,7 @@ function getSemaforo(prestamo: Prestamo): Semaforo {
 function proximaCuota(prestamo: Prestamo): Cuota | null {
   return (
     prestamo.cuotas_detalle
-      .filter((c) => c.estado === 'PENDIENTE')
+      .filter((c) => c.estado !== 'COBRADA')
       .sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))[0] ?? null
   )
 }
@@ -31,7 +31,7 @@ const semaforoConfig: Record<Semaforo, { accent: string; borderColor: string; ba
   mora:     { accent: '#f87171', borderColor: 'rgba(248,113,113,0.5)',  badgeBg: 'rgba(248,113,113,0.12)', label: 'En mora' },
   proximo:  { accent: '#fbbf24', borderColor: 'rgba(251,191,36,0.5)',  badgeBg: 'rgba(251,191,36,0.12)',  label: 'Vence pronto' },
   ok:       { accent: '#4ade80', borderColor: 'rgba(74,222,128,0.4)',  badgeBg: 'rgba(74,222,128,0.12)',  label: 'Al día' },
-  cancelado:{ accent: 'rgba(100,116,139,0.5)', borderColor: 'rgba(255,255,255,0.08)', badgeBg: 'rgba(255,255,255,0.06)', label: 'Cancelado' },
+  cancelado:{ accent: 'rgba(100,116,139,0.5)', borderColor: 'var(--bd-008)', badgeBg: 'var(--bd-006)', label: 'Cancelado' },
 }
 
 export default function DeudoresPrestamos() {
@@ -96,10 +96,10 @@ export default function DeudoresPrestamos() {
           const pct = (cobradas / p.cuotas) * 100
 
           return (
-            <div key={p.id} style={{ background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: `1px solid ${cfg.borderColor}`, boxShadow: `0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px ${cfg.borderColor}`, padding: '1.1rem 1.2rem' }}>
+            <div key={p.id} style={{ background: 'var(--surface-grad)', border: `1px solid ${cfg.borderColor}`, boxShadow: `var(--shadow-card), 0 0 0 1px ${cfg.borderColor}`, padding: '1.1rem 1.2rem' }}>
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
-                <h3 style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0', wordBreak: 'break-word', maxWidth: '70%' }}>{nombre}</h3>
+                <h3 style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word', maxWidth: '70%' }}>{nombre}</h3>
                 <span style={{ fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, color: cfg.accent, background: cfg.badgeBg, border: `1px solid ${cfg.borderColor}`, padding: '2px 8px', letterSpacing: '0.05em', flexShrink: 0 }}>
                   {cfg.label}
                 </span>
@@ -113,13 +113,13 @@ export default function DeudoresPrestamos() {
                 ].map(({ label, value }) => (
                   <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
                     <span style={{ color: 'rgba(100,116,139,0.7)' }}>{label}</span>
-                    <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{value}</span>
+                    <span style={{ color: 'var(--text-1)', fontWeight: 600 }}>{value}</span>
                   </div>
                 ))}
                 {proxima && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.25rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.25rem', borderTop: '1px solid var(--bd-006)' }}>
                     <span style={{ color: 'rgba(100,116,139,0.7)', flexShrink: 0 }}>Próxima cuota</span>
-                    <div style={{ textAlign: 'right', color: '#e2e8f0', fontWeight: 600 }}>
+                    <div style={{ textAlign: 'right', color: 'var(--text-1)', fontWeight: 600 }}>
                       <span style={{ display: 'block', fontSize: '0.72rem', color: 'rgba(148,163,184,0.65)' }}>{fmtDate(proxima.fecha_vencimiento)}</span>
                       <span style={{ display: 'block' }}>{fmtMonto(proxima.monto, p.moneda)}</span>
                     </div>
@@ -133,7 +133,7 @@ export default function DeudoresPrestamos() {
                   <span>{cobradas} de {p.cuotas} cuotas</span>
                   <span style={{ textTransform: 'lowercase' }}>{p.frecuencia}</span>
                 </div>
-                <div style={{ height: '3px', background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                <div style={{ height: '3px', background: 'var(--bd-006)', overflow: 'hidden' }}>
                   <div style={{ height: '100%', background: cfg.accent, width: `${pct}%`, transition: 'width 0.3s ease' }} />
                 </div>
               </div>
@@ -152,10 +152,10 @@ export default function DeudoresPrestamos() {
             {cancelados.map((p) => {
               const nombre = clienteMap.get(p.cliente_id) ?? '…'
               return (
-                <div key={p.id} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', padding: '0.75rem 1rem', opacity: 0.55 }}>
+                <div key={p.id} style={{ background: 'var(--ov-002)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', opacity: 0.55 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0' }}>{nombre}</span>
-                    <span style={{ fontFamily: FM, fontSize: '0.62rem', fontWeight: 700, color: 'rgba(100,116,139,0.6)', background: 'rgba(255,255,255,0.04)', padding: '1px 7px' }}>{p.estado}</span>
+                    <span style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-1)' }}>{nombre}</span>
+                    <span style={{ fontFamily: FM, fontSize: '0.62rem', fontWeight: 700, color: 'rgba(100,116,139,0.6)', background: 'var(--ov-004)', padding: '1px 7px' }}>{p.estado}</span>
                   </div>
                   <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{fmtMonto(p.credito, p.moneda)} · {p.cuotas} cuotas</p>
                 </div>

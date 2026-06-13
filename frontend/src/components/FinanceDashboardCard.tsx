@@ -82,18 +82,18 @@ export function FinanceDashboardCard({
     <div
       className="relative overflow-hidden group"
       style={{
-        background: "linear-gradient(145deg, #0c0c10 0%, #13131a 100%)",
+        background: "var(--surface-grad)",
         borderLeft: `2px solid ${accentColor}`,
-        boxShadow: `0 4px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)`,
+        boxShadow: `var(--shadow-card), inset 0 1px 0 var(--ov-004)`,
         transition: "box-shadow 0.3s ease, transform 0.3s ease",
         fontFamily: "'Manrope', sans-serif",
       }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 48px rgba(0,0,0,0.6), 0 0 0 1px ${accentColor}30, inset 0 1px 0 rgba(255,255,255,0.06)`;
+        (e.currentTarget as HTMLDivElement).style.boxShadow = `var(--shadow-card-hover), 0 0 0 1px ${accentColor}30, inset 0 1px 0 var(--bd-006)`;
         (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)";
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 4px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)`;
+        (e.currentTarget as HTMLDivElement).style.boxShadow = `var(--shadow-card), inset 0 1px 0 var(--ov-004)`;
         (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
       }}
     >
@@ -103,7 +103,7 @@ export function FinanceDashboardCard({
         style={{
           backgroundImage: `repeating-linear-gradient(
             -45deg, transparent, transparent 8px,
-            rgba(255,255,255,1) 8px, rgba(255,255,255,1) 9px
+            var(--hatch) 8px, var(--hatch) 9px
           )`,
         }}
       />
@@ -156,7 +156,7 @@ export function FinanceDashboardCard({
             <span className="fc-card-prefix" style={{
               fontFamily: "'Bebas Neue', sans-serif",
               fontSize: "1.6rem",
-              color: "rgba(203,213,225,0.5)",
+              color: "var(--num-prefix)",
               letterSpacing: "0.04em",
               marginBottom: "0.5rem",
             }}>
@@ -167,7 +167,7 @@ export function FinanceDashboardCard({
             fontFamily: "'Bebas Neue', sans-serif",
             fontSize: "4rem",
             lineHeight: 1,
-            color: "#f8fafc",
+            color: "var(--text-strong)",
             letterSpacing: "0.02em",
             textShadow: `0 0 40px ${accentColor}25`,
           }}>
@@ -191,7 +191,7 @@ export function FinanceDashboardCard({
         <div className="fc-card-divider" style={{
           height: "1px",
           marginBottom: "0.6rem",
-          background: `linear-gradient(to right, ${accentColor}35, rgba(255,255,255,0.04) 60%, transparent)`,
+          background: `linear-gradient(to right, ${accentColor}35, var(--ov-004) 60%, transparent)`,
         }} />
 
         {/* Trend */}

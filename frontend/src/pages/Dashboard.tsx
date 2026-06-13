@@ -15,7 +15,7 @@ function cuotasVencidas(prestamos: Prestamo[]) {
     .filter((p) => p.estado === 'ACTIVO')
     .flatMap((p) =>
       p.cuotas_detalle
-        .filter((c) => c.estado === 'PENDIENTE' && daysUntil(c.fecha_vencimiento) < 0)
+        .filter((c) => c.estado !== 'COBRADA' && daysUntil(c.fecha_vencimiento) < 0)
         .map((c) => ({ ...c, prestamo_id: p.id, cliente_id: p.cliente_id, moneda: p.moneda }))
     )
     .sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))
@@ -33,11 +33,11 @@ function chequesPorVencer(cheques: Cheque[], dias: number) {
 
 // ── design tokens ─────────────────────────────────────────────────────
 
-const CARD_BG = "linear-gradient(145deg, #0c0c10 0%, #13131a 100%)"
-const CARD_BORDER = "1px solid rgba(255,255,255,0.06)"
-const CARD_SHADOW = "0 4px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04)"
-const DIVIDER = "1px solid rgba(255,255,255,0.05)"
-const TEXT_PRIMARY = "#e2e8f0"
+const CARD_BG = "var(--surface-grad)"
+const CARD_BORDER = "1px solid var(--bd-006)"
+const CARD_SHADOW = "var(--shadow-card), inset 0 1px 0 var(--ov-004)"
+const DIVIDER = "1px solid var(--ov-005)"
+const TEXT_PRIMARY = "var(--text-1)"
 const TEXT_MUTED = "rgba(148,163,184,0.6)"
 const TEXT_FAINT = "rgba(100,116,139,0.7)"
 const FONT_UI = "'Manrope', sans-serif"
@@ -218,7 +218,7 @@ export default function Dashboard() {
           fontFamily: FONT_NUM,
           fontSize: "2.2rem",
           letterSpacing: "0.06em",
-          color: "#e2e8f0",
+          color: "var(--text-1)",
           lineHeight: 1,
           marginBottom: "0.25rem",
         }}>

@@ -14,7 +14,7 @@ type PresetFecha = 'HOY' | 'SEMANA' | 'MES' | 'PERSONALIZADO'
 
 const FM = "'Manrope', sans-serif"
 const FN = "'Bebas Neue', sans-serif"
-const CARD = { background: 'linear-gradient(145deg, #0c0c10 0%, #13131a 100%)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 4px 24px rgba(0,0,0,0.4)' }
+const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)' }
 
 interface MovimientoUnificado {
   id: string
@@ -149,13 +149,13 @@ export default function Movimientos() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
-          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: '#e2e8f0', lineHeight: 1, marginBottom: '0.2rem' }}>Movimientos</h1>
+          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Movimientos</h1>
           <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>
             {filtrados.length} registro{filtrados.length !== 1 ? 's' : ''}
             {desde || hasta ? ` · ${desde ? fmtDate(desde) : '…'} → ${hasta ? fmtDate(hasta) : '…'}` : ''}
           </p>
         </div>
-        <button onClick={handleRefetch} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>
+        <button onClick={handleRefetch} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-010)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>
           Actualizar
         </button>
       </div>
@@ -208,17 +208,17 @@ export default function Movimientos() {
               const cfg = SECCION_CONFIG[item.seccion]
               const montoFmt = fmtMonto(item.monto, item.moneda)
               return (
-                <div key={`m-${item.seccion}-${item.id}`} style={{ padding: '0.8rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <div key={`m-${item.seccion}-${item.id}`} style={{ padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem' }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
                         <span style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '2px 8px' }}>{cfg.label}</span>
                         <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.68rem', color: 'rgba(100,116,139,0.6)' }}>{fmtDate(item.fecha)}</span>
                       </div>
-                      <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0', wordBreak: 'break-word' }}>{item.descripcion}</p>
+                      <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-1)', wordBreak: 'break-word' }}>{item.descripcion}</p>
                       {item.detalle && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.55)', wordBreak: 'break-word', marginTop: '1px' }}>{item.detalle}</p>}
                     </div>
-                    <span style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: item.esGasto ? '#f87171' : '#e2e8f0', whiteSpace: 'nowrap', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+                    <span style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: item.esGasto ? '#f87171' : 'var(--text-1)', whiteSpace: 'nowrap', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
                       {item.esGasto ? `−${montoFmt}` : montoFmt}
                     </span>
                   </div>
@@ -232,7 +232,7 @@ export default function Movimientos() {
               <thead>
                 <tr>
                   {['Fecha', 'Sección', 'Descripción', 'Monto'].map((h, i) => (
-                    <th key={h} style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: i === 3 ? 'right' : 'left', background: 'rgba(255,255,255,0.025)', borderBottom: '1px solid rgba(255,255,255,0.06)', whiteSpace: 'nowrap' }}>{h}</th>
+                    <th key={h} style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: i === 3 ? 'right' : 'left', background: 'var(--ov-0025)', borderBottom: '1px solid var(--bd-006)', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -242,23 +242,23 @@ export default function Movimientos() {
                   const montoFmt = fmtMonto(item.monto, item.moneda)
                   return (
                     <tr key={`${item.seccion}-${item.id}`}
-                      onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'rgba(255,255,255,0.02)'}
+                      onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
-                      <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.72rem', padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', color: 'rgba(100,116,139,0.6)', whiteSpace: 'nowrap' }}>
+                      <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.72rem', padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'rgba(100,116,139,0.6)', whiteSpace: 'nowrap' }}>
                         {fmtDate(item.fecha)}
                       </td>
-                      <td style={{ padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', whiteSpace: 'nowrap' }}>
                         <span style={{ fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '2px 8px' }}>
                           {cfg.label}
                         </span>
                       </td>
-                      <td style={{ padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                        <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0', whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: '260px' }}>{item.descripcion}</p>
+                      <td style={{ padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
+                        <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-1)', whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: '260px' }}>{item.descripcion}</p>
                         {item.detalle && (
                           <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.55)', whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: '260px', marginTop: '1px' }}>{item.detalle}</p>
                         )}
                       </td>
-                      <td style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 700, padding: '0.65rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: item.esGasto ? '#f87171' : '#e2e8f0', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                      <td style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 700, padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', textAlign: 'right', color: item.esGasto ? '#f87171' : 'var(--text-1)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                         {item.esGasto ? `−${montoFmt}` : montoFmt}
                       </td>
                     </tr>

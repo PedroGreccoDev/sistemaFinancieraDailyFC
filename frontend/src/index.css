@@ -2,16 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  Tokens de tema. Light en :root (por defecto); dark en html.dark
+  (valores idénticos al diseño original — el modo oscuro no cambia).
+  Las páginas usan estos tokens vía var(--token) en sus estilos inline.
+*/
+:root {
+  /* Paleta crema unificada: fondo, navbar y tarjetas en tonos cercanos
+     para que nada "resalte". Las tarjetas apenas más claras + sombra suave. */
+  --bg: #ebe4d6;
+  --surface-grad: #f2ede2;
+  --modal: #f5f1e9;
+  --nav-bg: #ebe4d6;
+  --input-bg: #e4ddcc;
+
+  --text-1: #3b3526;       /* texto primario (warm slate) */
+  --text-strong: #2a2418;  /* títulos / números grandes */
+  --num-prefix: rgba(120,108,82,0.55);
+
+  --shadow-card: 0 1px 3px rgba(70,58,34,0.08);
+  --shadow-card-hover: 0 4px 14px rgba(70,58,34,0.13);
+
+  --ov-002:  rgba(15,23,42,0.03);
+  --ov-0025: rgba(15,23,42,0.04);
+  --ov-003:  rgba(15,23,42,0.04);
+  --ov-004:  rgba(15,23,42,0.05);
+  --ov-005:  rgba(15,23,42,0.06);
+  --bd-006:  rgba(15,23,42,0.10);
+  --bd-008:  rgba(15,23,42,0.12);
+  --bd-010:  rgba(15,23,42,0.14);
+  --bd-012:  rgba(15,23,42,0.16);
+  --hatch:   rgba(15,23,42,1);
+}
+
+html.dark {
+  --bg: #080810;
+  --surface-grad: linear-gradient(145deg, #0c0c10 0%, #13131a 100%);
+  --modal: #0d0d14;
+  --nav-bg: #0a0a0e;
+  --input-bg: #080810;
+
+  --text-1: #e2e8f0;
+  --text-strong: #f8fafc;
+  --num-prefix: rgba(203,213,225,0.5);
+
+  --shadow-card: 0 4px 24px rgba(0,0,0,0.4);
+  --shadow-card-hover: 0 8px 48px rgba(0,0,0,0.6);
+
+  --ov-002:  rgba(255,255,255,0.02);
+  --ov-0025: rgba(255,255,255,0.025);
+  --ov-003:  rgba(255,255,255,0.03);
+  --ov-004:  rgba(255,255,255,0.04);
+  --ov-005:  rgba(255,255,255,0.05);
+  --bd-006:  rgba(255,255,255,0.06);
+  --bd-008:  rgba(255,255,255,0.08);
+  --bd-010:  rgba(255,255,255,0.1);
+  --bd-012:  rgba(255,255,255,0.12);
+  --hatch:   rgba(255,255,255,1);
+}
+
 * {
   box-sizing: border-box;
 }
 
-/* Evita el degradé blanco del overscroll rubber-band de iOS Safari */
+/* El fondo del body sigue al tema para evitar franjas blancas/negras
+   en el overscroll rubber-band de iOS Safari */
 body {
-  background-color: #f8fafc; /* slate-50 — light mode */
-}
-html.dark body {
-  background-color: #0f172a; /* slate-900 — dark mode */
+  background-color: var(--bg);
 }
 
 /* Safe area utilities para iPhone (notch + home indicator) */
