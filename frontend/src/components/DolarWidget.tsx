@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getDolarBlue } from '../api/dolar'
 import type { CSSProperties } from 'react'
 
 const POS_KEY = 'dolar-widget-pos'
+const COLLAPSE_KEY = 'dolar-widget-collapsed'
 const MARGIN = 8 // px de margen mínimo respecto al borde
 
 type Pos = { x: number; y: number }
@@ -27,6 +28,9 @@ function useDraggable() {
   const [pos, setPos] = useState<Pos | null>(() => {
     try { const s = localStorage.getItem(POS_KEY); return s ? JSON.parse(s) : null } catch { return null }
   })
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem(COLLAPSE_KEY) === '1' } catch { return false }
+  })
   const drag = useRef<{ pointerId: number; startX: number; startY: number; origX: number; origY: number; moved: boolean } | null>(null)
   const didDragRef = useRef(false)
 
@@ -40,12 +44,25 @@ function useDraggable() {
     }
   }
 
+  // Recordar si quedó minimizado entre recargas
+  useEffect(() => {
+    try { localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0') } catch { /* ignore */ }
+  }, [collapsed])
+
   // Reajustar si la ventana cambia de tamaño y la posición quedó fuera de pantalla
   useEffect(() => {
     function onResize() { setPos((p) => (p ? clamp(p) : p)) }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
+
+  // Reencuadrar al montar y cada vez que cambia el tamaño del widget
+  // (minimizar ↔ expandir). Sin esto, al expandirse desde una posición pegada
+  // al borde inferior el cuerpo grande queda fuera de pantalla. useLayoutEffect
+  // mide el nuevo tamaño y corrige antes de pintar (sin parpadeo).
+  useLayoutEffect(() => {
+    setPos((p) => (p ? clamp(p) : p))
+  }, [collapsed])
 
   const dragProps = {
     onPointerDown(e: React.PointerEvent) {
@@ -89,12 +106,11 @@ function useDraggable() {
     ? { left: pos.x, top: pos.y, right: 'auto', bottom: 'auto' }
     : { bottom: '1.5rem', right: '1rem' }
 
-  return { nodeRef, dragProps, positionStyle, didDragRef }
+  return { nodeRef, dragProps, positionStyle, didDragRef, collapsed, setCollapsed }
 }
 
 export default function DolarWidget() {
-  const [collapsed, setCollapsed] = useState(false)
-  const { nodeRef, dragProps, positionStyle, didDragRef } = useDraggable()
+  const { nodeRef, dragProps, positionStyle, didDragRef, collapsed, setCollapsed } = useDraggable()
 
   const { data: dolar } = useQuery({
     queryKey: ['dolar-blue'],
