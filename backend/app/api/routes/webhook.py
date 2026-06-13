@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
@@ -21,16 +22,51 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
 # Palabras que el operador usa para confirmar o cancelar una operación pendiente
-_CONFIRM_WORDS = frozenset({"sí", "si", "ok", "dale", "confirmar", "confirmo", "yes", "va", "s", "👍"})
-_REJECT_WORDS  = frozenset({"no", "cancelar", "cancelá", "cancel", "nop", "nope", "n"})
+_CONFIRM_WORDS = frozenset({
+    "sí", "si", "ok", "oka", "okey", "okay", "dale", "confirmar", "confirmo",
+    "confirmado", "yes", "ya", "va", "vamos", "s", "👍", "correcto", "perfecto",
+    "exacto", "tal cual", "obvio", "claro", "listo", "joya",
+})
+_REJECT_WORDS = frozenset({
+    "no", "cancelar", "cancelá", "cancela", "cancel", "nop", "nope", "n",
+    "negativo", "para", "pará", "frená", "frena", "mejor no", "no no",
+})
+
+
+def _normalizar_repeticiones(palabra: str) -> str:
+    """Colapsa letras repetidas (siii→si) y repeticiones de 'si'/'no' (sisi→si)."""
+    # Colapsa cualquier letra repetida a una sola: "siii"/"sii" → "si", "daleee" → "dale".
+    # Seguro porque ninguna palabra de confirmación/rechazo tiene letras dobles legítimas.
+    palabra = re.sub(r"(.)\1+", r"\1", palabra)
+    # Colapsa repeticiones de afirmación/negación pegadas: "sisi"→"si", "nono"→"no"
+    m = re.fullmatch(r"(si|no)(?:\1)+", palabra)
+    if m:
+        return m.group(1)
+    return palabra
 
 
 def _clasificar_respuesta(text: str) -> str | None:
     """Devuelve 'confirm', 'reject' o None si no se puede clasificar."""
-    normalized = text.strip().lower().rstrip(".!¡¿?")
+    normalized = text.strip().lower().rstrip(".!¡¿? ")
+    if not normalized:
+        return None
+
+    # Match directo de la frase completa (cubre "tal cual", "mejor no", "no no")
     if normalized in _CONFIRM_WORDS:
         return "confirm"
     if normalized in _REJECT_WORDS:
+        return "reject"
+
+    # Tokeniza y normaliza repeticiones para tolerar "sisi", "siii", "dale dale"
+    tokens = [_normalizar_repeticiones(t) for t in re.split(r"[\s,]+", normalized) if t]
+    if not tokens:
+        return None
+
+    es_confirm = all(t in _CONFIRM_WORDS for t in tokens)
+    es_reject = all(t in _REJECT_WORDS for t in tokens)
+    if es_confirm and not es_reject:
+        return "confirm"
+    if es_reject and not es_confirm:
         return "reject"
     return None
 

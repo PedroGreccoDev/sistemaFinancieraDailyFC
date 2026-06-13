@@ -851,15 +851,16 @@ def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
                 ).all()
             )
             simbolo = "U$D" if p.moneda == Moneda.USD else "$"
+            saldo = sum((c.monto for c in cuotas_pendientes), Decimal("0.00"))
             proxima = cuotas_pendientes[0] if cuotas_pendientes else None
             prox_txt = (
                 f"próx. cuota #{proxima.numero_cuota}: {simbolo}{_fmt_num(proxima.monto)}"
                 if proxima else "sin cuotas pendientes"
             )
             lines.append(
-                f"  • {simbolo}{_fmt_num(p.total_a_cobrar)} en {p.cuotas} cuotas "
-                f"{_FRECUENCIA_PLURAL[p.frecuencia]} — {prox_txt} "
-                f"({len(cuotas_pendientes)} restante(s))"
+                f"  • Debe {simbolo}{_fmt_num(saldo)} de {simbolo}{_fmt_num(p.total_a_cobrar)} "
+                f"en {p.cuotas} cuotas {_FRECUENCIA_PLURAL[p.frecuencia]} — {prox_txt} "
+                f"({len(cuotas_pendientes)} de {p.cuotas} restante(s))"
             )
 
     # Fiados abiertos
