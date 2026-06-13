@@ -49,7 +49,7 @@ export default function App() {
       <BrowserRouter>
         <div className="min-h-dvh flex flex-col md:flex-row" style={{ background: "#080810" }}>
           <Navbar />
-          <main className="flex-1 min-w-0 overflow-y-auto">
+          <main className="flex-1 min-w-0 overflow-y-auto pb-40 md:pb-0">
             <Routes>
               <Route path="/"          element={<Dashboard />} />
               <Route path="/cartera"      element={<Cartera />} />

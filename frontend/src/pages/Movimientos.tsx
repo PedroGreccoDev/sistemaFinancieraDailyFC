@@ -201,7 +201,33 @@ export default function Movimientos() {
           </div>
         )}
         {!isLoading && filtrados.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
+          <>
+          {/* Mobile: tarjetas */}
+          <div className="sm:hidden">
+            {filtrados.map((item) => {
+              const cfg = SECCION_CONFIG[item.seccion]
+              const montoFmt = fmtMonto(item.monto, item.moneda)
+              return (
+                <div key={`m-${item.seccion}-${item.id}`} style={{ padding: '0.8rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                        <span style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '2px 8px' }}>{cfg.label}</span>
+                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.68rem', color: 'rgba(100,116,139,0.6)' }}>{fmtDate(item.fecha)}</span>
+                      </div>
+                      <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0', wordBreak: 'break-word' }}>{item.descripcion}</p>
+                      {item.detalle && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.55)', wordBreak: 'break-word', marginTop: '1px' }}>{item.detalle}</p>}
+                    </div>
+                    <span style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: item.esGasto ? '#f87171' : '#e2e8f0', whiteSpace: 'nowrap', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+                      {item.esGasto ? `−${montoFmt}` : montoFmt}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {/* Desktop: tabla */}
+          <div className="hidden sm:block" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '480px' }}>
               <thead>
                 <tr>
@@ -241,6 +267,7 @@ export default function Movimientos() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
     </div>

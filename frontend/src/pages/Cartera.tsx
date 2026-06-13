@@ -116,7 +116,27 @@ export default function Cartera() {
         {error && <div style={{ padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar la cartera.</div>}
         {cheques && cheques.length === 0 && <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>La cartera está vacía</div>}
         {sorted.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
+          <>
+          {/* Mobile: tarjetas */}
+          <div className="sm:hidden">
+            {sorted.map((cheque) => {
+              const dias = cheque.fecha_pago ? daysUntil(cheque.fecha_pago) : null
+              return (
+                <div key={cheque.nro_cheque} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: '#e2e8f0', wordBreak: 'break-word' }}>{cheque.nro_cheque}</p>
+                    <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>Pago {fmtDate(cheque.fecha_pago)}</p>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <p style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: '#e2e8f0' }}>{fmtARS(cheque.monto)}</p>
+                    <div style={{ marginTop: '4px' }}>{diasBadge(dias)}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {/* Desktop: tabla */}
+          <div className="hidden sm:block" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '540px' }}>
               <thead>
                 <tr>
@@ -147,6 +167,7 @@ export default function Cartera() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
@@ -196,7 +217,36 @@ export default function Cartera() {
         {filteredVendidos.length === 0 ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>Sin ventas en el período</div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <>
+          {/* Mobile: tarjetas */}
+          <div className="sm:hidden">
+            {filteredVendidos.map((c) => {
+              const spread = c.porcentaje_venta !== null
+                ? (parseFloat(c.porcentaje_compra) - parseFloat(c.porcentaje_venta)).toFixed(2)
+                : null
+              return (
+                <div key={c.nro_cheque} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: '#e2e8f0', wordBreak: 'break-word' }}>{c.nro_cheque}</p>
+                    <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>
+                      {fmtARS(c.monto)} · {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
+                      {spread !== null && <span style={{ color: '#818cf8' }}> · spread {spread}%</span>}
+                    </p>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)' }}>Ganancia</p>
+                    <p style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: '#4ade80', marginTop: '2px' }}>{fmtARS(c.ganancia)}</p>
+                  </div>
+                </div>
+              )
+            })}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.8rem 1rem', background: 'rgba(255,255,255,0.025)' }}>
+              <span style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, color: 'rgba(148,163,184,0.8)' }}>Total ganancia</span>
+              <span style={{ fontFamily: FM, fontSize: '0.9rem', fontWeight: 700, color: '#4ade80' }}>{fmtARS(totalGanancia)}</span>
+            </div>
+          </div>
+          {/* Desktop: tabla */}
+          <div className="hidden sm:block" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '620px' }}>
               <thead>
                 <tr>
@@ -243,6 +293,7 @@ export default function Cartera() {
               </tfoot>
             </table>
           </div>
+          </>
         )}
       </div>
     </div>

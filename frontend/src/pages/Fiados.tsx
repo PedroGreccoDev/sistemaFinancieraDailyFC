@@ -400,7 +400,35 @@ export default function Fiados() {
           </div>
         )}
         {fiados && fiados.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
+          <>
+          {/* Mobile: tarjetas */}
+          <div className="sm:hidden">
+            {fiados.map((fiado) => (
+              <div key={`m-${fiado.id}`} style={{ padding: '0.85rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.4rem' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontFamily: FM, fontSize: '0.86rem', fontWeight: 700, color: '#e2e8f0', wordBreak: 'break-word' }}>{nombreCliente(fiado.cliente_id)}</p>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '1px' }}>{fiado.cheque_nro} · {fmtDate(fiado.fecha_fiado)}</p>
+                  </div>
+                  <EstadoBadge estado={fiado.estado} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.75rem' }}>
+                  <span style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)' }}>
+                    Orig. {fmtARS(fiado.monto_original)} · {fiado.porcentaje_venta}%
+                  </span>
+                  <span style={{ fontFamily: FM, fontSize: '0.9rem', fontWeight: 700, whiteSpace: 'nowrap', color: fiado.estado === 'ABIERTO' ? '#fbbf24' : 'rgba(100,116,139,0.5)' }}>{fmtARS(fiado.saldo_pendiente)}</span>
+                </div>
+                {fiado.estado === 'ABIERTO' && (
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
+                    <button onClick={() => setCobrandoEfectivo(fiado)} style={{ flex: 1, fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, color: '#818cf8', background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)', padding: '0.4rem', cursor: 'pointer' }}>Efectivo</button>
+                    <button onClick={() => setCobrandoCheque(fiado)} style={{ flex: 1, fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, color: '#34d399', background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)', padding: '0.4rem', cursor: 'pointer' }}>Con cheque</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {/* Desktop: tabla */}
+          <div className="hidden sm:block" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '640px' }}>
               <thead>
                 <tr>
@@ -442,6 +470,7 @@ export default function Fiados() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 

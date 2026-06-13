@@ -322,7 +322,36 @@ export default function Pasivos() {
           </div>
         )}
         {pasivos && pasivos.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
+          <>
+          {/* Mobile: tarjetas */}
+          <div className="sm:hidden">
+            {pasivos.map((pasivo) => (
+              <div key={`m-${pasivo.id}`} style={{ padding: '0.85rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.4rem' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontFamily: FM, fontSize: '0.86rem', fontWeight: 700, color: '#e2e8f0', wordBreak: 'break-word' }}>{pasivo.acreedor}</p>
+                    <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(148,163,184,0.7)', wordBreak: 'break-word', marginTop: '1px' }}>{pasivo.concepto}</p>
+                  </div>
+                  <EstadoBadge estado={pasivo.estado} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.75rem' }}>
+                  <span style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)' }}>
+                    Original {fmtMoneda(pasivo.monto, pasivo.moneda)}
+                    {pasivo.fecha_vencimiento && ` · vence ${fmtDate(pasivo.fecha_vencimiento)}`}
+                  </span>
+                  <span style={{ fontFamily: FM, fontSize: '0.9rem', fontWeight: 700, color: '#f87171', whiteSpace: 'nowrap' }}>{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</span>
+                </div>
+                {pasivo.estado === 'PENDIENTE' && (
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
+                    <button onClick={() => setPasivoEfectivo(pasivo)} style={{ flex: 1, fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)', padding: '0.4rem', cursor: 'pointer' }}>Efectivo</button>
+                    <button onClick={() => setPasivoCheque(pasivo)} style={{ flex: 1, fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, color: '#818cf8', background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)', padding: '0.4rem', cursor: 'pointer' }}>Con cheque</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {/* Desktop: tabla */}
+          <div className="hidden sm:block" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '640px' }}>
               <thead>
                 <tr>
@@ -359,6 +388,7 @@ export default function Pasivos() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
