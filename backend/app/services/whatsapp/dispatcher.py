@@ -288,14 +288,14 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
 
     cliente = _buscar_cliente_o_error(db, cliente_nombre)
 
-    # Buscar cuotas pendientes del cliente
+    # Buscar cuotas por cobrar del cliente (PENDIENTE o EN_MORA).
     stmt = (
         select(Cuota)
         .join(Prestamo, Cuota.prestamo_id == Prestamo.id)
         .where(
             Prestamo.cliente_id == cliente.id,
-            Prestamo.estado == PrestamoEstado.ACTIVO,
-            Cuota.estado == CuotaEstado.PENDIENTE,
+            Prestamo.estado != PrestamoEstado.CANCELADO,
+            Cuota.estado != CuotaEstado.COBRADA,
         )
         .order_by(Cuota.fecha_vencimiento.asc())
     )
@@ -846,7 +846,7 @@ def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
                 db.scalars(
                     select(Cuota).where(
                         Cuota.prestamo_id == p.id,
-                        Cuota.estado == CuotaEstado.PENDIENTE,
+                        Cuota.estado != CuotaEstado.COBRADA,
                     ).order_by(Cuota.numero_cuota.asc())
                 ).all()
             )
@@ -906,7 +906,7 @@ def _consulta_prestamos(db: Session) -> DispatchResult:
             db.scalars(
                 select(Cuota).where(
                     Cuota.prestamo_id == p.id,
-                    Cuota.estado == CuotaEstado.PENDIENTE,
+                    Cuota.estado != CuotaEstado.COBRADA,
                 ).order_by(Cuota.numero_cuota.asc())
             ).all()
         )

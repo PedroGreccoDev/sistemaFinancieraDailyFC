@@ -100,7 +100,7 @@ def _get_saldo_pasivos(db: Session) -> SaldoPasivos:
     def _sum(moneda: Moneda) -> Decimal:
         return _money(
             db.scalar(
-                select(func.coalesce(func.sum(Pasivo.monto), 0)).where(
+                select(func.coalesce(func.sum(Pasivo.saldo_pendiente), 0)).where(
                     Pasivo.estado == PasivoEstado.PENDIENTE,
                     Pasivo.moneda == moneda,
                 )
