@@ -1,7 +1,12 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getDolarBlue } from '../api/dolar'
 import type { CSSProperties } from 'react'
+
+const POS_KEY = 'dolar-widget-pos'
+const MARGIN = 8 // px de margen mínimo respecto al borde
+
+type Pos = { x: number; y: number }
 
 const glass: CSSProperties = {
   backdropFilter: 'blur(48px) saturate(200%) brightness(1.06)',
@@ -17,8 +22,73 @@ const glass: CSSProperties = {
   ].join(', '),
 }
 
+function useDraggable() {
+  const nodeRef = useRef<HTMLElement | null>(null)
+  const [pos, setPos] = useState<Pos | null>(() => {
+    try { const s = localStorage.getItem(POS_KEY); return s ? JSON.parse(s) : null } catch { return null }
+  })
+  const drag = useRef<{ startX: number; startY: number; origX: number; origY: number; moved: boolean } | null>(null)
+  const didDragRef = useRef(false)
+
+  function clamp(p: Pos): Pos {
+    const el = nodeRef.current
+    const w = el?.offsetWidth ?? 0
+    const h = el?.offsetHeight ?? 0
+    return {
+      x: Math.max(MARGIN, Math.min(p.x, window.innerWidth - w - MARGIN)),
+      y: Math.max(MARGIN, Math.min(p.y, window.innerHeight - h - MARGIN)),
+    }
+  }
+
+  // Reajustar si la ventana cambia de tamaño y la posición quedó fuera de pantalla
+  useEffect(() => {
+    function onResize() { setPos((p) => (p ? clamp(p) : p)) }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const dragProps = {
+    onPointerDown(e: React.PointerEvent) {
+      if (e.button !== 0) return
+      const el = nodeRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      drag.current = { startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top, moved: false }
+      didDragRef.current = false
+      el.setPointerCapture(e.pointerId)
+    },
+    onPointerMove(e: React.PointerEvent) {
+      const d = drag.current
+      if (!d) return
+      const dx = e.clientX - d.startX
+      const dy = e.clientY - d.startY
+      if (!d.moved && Math.hypot(dx, dy) < 4) return
+      d.moved = true
+      setPos(clamp({ x: d.origX + dx, y: d.origY + dy }))
+    },
+    onPointerUp() {
+      const d = drag.current
+      drag.current = null
+      if (d?.moved) {
+        didDragRef.current = true
+        setPos((p) => {
+          if (p) { try { localStorage.setItem(POS_KEY, JSON.stringify(p)) } catch { /* ignore */ } }
+          return p
+        })
+      }
+    },
+  }
+
+  const positionStyle: CSSProperties = pos
+    ? { left: pos.x, top: pos.y, right: 'auto', bottom: 'auto' }
+    : { bottom: '1.5rem', right: '1rem' }
+
+  return { nodeRef, dragProps, positionStyle, didDragRef }
+}
+
 export default function DolarWidget() {
   const [collapsed, setCollapsed] = useState(false)
+  const { nodeRef, dragProps, positionStyle, didDragRef } = useDraggable()
 
   const { data: dolar } = useQuery({
     queryKey: ['dolar-blue'],
@@ -34,9 +104,11 @@ export default function DolarWidget() {
   if (collapsed) {
     return (
       <button
-        onClick={() => setCollapsed(false)}
-        style={{ ...glass, position: 'fixed', bottom: '1.5rem', right: '1rem', zIndex: 50, borderRadius: '100px' }}
-        className="flex items-center gap-2.5 px-4 py-2.5 hover:-translate-y-0.5 active:translate-y-0 transition-transform duration-200"
+        ref={(el) => { nodeRef.current = el }}
+        {...dragProps}
+        onClick={() => { if (didDragRef.current) { didDragRef.current = false; return } setCollapsed(false) }}
+        style={{ ...glass, position: 'fixed', ...positionStyle, zIndex: 50, borderRadius: '100px', touchAction: 'none', cursor: 'grab' }}
+        className="flex items-center gap-2.5 px-4 py-2.5 active:cursor-grabbing"
       >
         <span
           style={{ background: 'linear-gradient(135deg,#34d399,#10b981)', boxShadow: '0 0 8px rgba(52,211,153,0.55)' }}
@@ -56,8 +128,10 @@ export default function DolarWidget() {
 
   return (
     <div
-      style={{ ...glass, position: 'fixed', bottom: '1.5rem', right: '1rem', zIndex: 50, borderRadius: '24px', minWidth: '198px' }}
-      className="p-4 hover:-translate-y-0.5 transition-transform duration-200"
+      ref={(el) => { nodeRef.current = el }}
+      {...dragProps}
+      style={{ ...glass, position: 'fixed', ...positionStyle, zIndex: 50, borderRadius: '24px', minWidth: '198px', touchAction: 'none', cursor: 'grab' }}
+      className="p-4 active:cursor-grabbing"
     >
       {/* Specular top sheen */}
       <div style={{
@@ -79,7 +153,7 @@ export default function DolarWidget() {
           <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 tracking-wide">Dólar Blue</span>
         </div>
         <button
-          onClick={() => setCollapsed(true)}
+          onClick={() => { if (didDragRef.current) { didDragRef.current = false; return } setCollapsed(true) }}
           style={{ background: 'rgba(148,163,184,0.18)', borderRadius: '100px' }}
           className="w-5 h-5 flex items-center justify-center hover:bg-slate-400/30 transition-colors"
           aria-label="Minimizar"
