@@ -26,7 +26,7 @@ export default function Deudores() {
                 letterSpacing: '0.03em',
                 textDecoration: 'none',
                 padding: '0.5rem 1rem',
-                color: isActive ? 'var(--text-strong)' : 'rgba(148,163,184,0.55)',
+                color: isActive ? 'var(--text-strong)' : 'var(--nav-inactive)',
                 borderBottom: isActive ? `2px solid ${ACCENT}` : '2px solid transparent',
                 transition: 'all 0.15s',
               })}

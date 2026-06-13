@@ -84,6 +84,7 @@ export function FinanceDashboardCard({
       style={{
         background: "var(--surface-grad)",
         borderLeft: `2px solid ${accentColor}`,
+        borderRadius: "var(--r-lg)",
         boxShadow: `var(--shadow-card), inset 0 1px 0 var(--ov-004)`,
         transition: "box-shadow 0.3s ease, transform 0.3s ease",
         fontFamily: "'Manrope', sans-serif",
@@ -125,10 +126,8 @@ export function FinanceDashboardCard({
               textTransform: "uppercase",
               color: accentColor,
               opacity: 0.95,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              maxWidth: "calc(100% - 1.5rem)",
+              lineHeight: 1.25,
+              maxWidth: "calc(100% - 1.25rem)",
             }}>
               {title}
             </p>

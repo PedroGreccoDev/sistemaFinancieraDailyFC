@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
+import type { ComponentType } from 'react'
+import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange } from './icons'
 
-const NAV_LINKS = [
-  { to: '/',            label: 'Inicio',      end: true  },
-  { to: '/cartera',     label: 'Cartera',     end: false },
-  { to: '/deudores',    label: 'Deudores',    end: false },
-  { to: '/pasivos',     label: 'Deudas',      end: false },
-  { to: '/reportes',    label: 'Reportes',    end: false },
-  { to: '/movimientos', label: 'Movimientos', end: false },
+const NAV_LINKS: { to: string; label: string; end: boolean; Icon: ComponentType<{ size?: number }> }[] = [
+  { to: '/',            label: 'Inicio',      end: true,  Icon: IconHome },
+  { to: '/cartera',     label: 'Cartera',     end: false, Icon: IconWallet },
+  { to: '/deudores',    label: 'Deudores',    end: false, Icon: IconUsers },
+  { to: '/pasivos',     label: 'Deudas',      end: false, Icon: IconReceipt },
+  { to: '/reportes',    label: 'Reportes',    end: false, Icon: IconChart },
+  { to: '/movimientos', label: 'Movimientos', end: false, Icon: IconExchange },
 ]
 
 const ACCENT = "#6366f1"
@@ -48,7 +50,7 @@ function Brand({ compact = false }: { compact?: boolean }) {
 function NavItems({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div style={{ padding: "0.75rem 0", flex: 1 }}>
-      {NAV_LINKS.map(({ to, label, end }) => (
+      {NAV_LINKS.map(({ to, label, end, Icon }) => (
         <NavLink
           key={to}
           to={to}
@@ -57,13 +59,14 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
           style={({ isActive }) => ({
             display: "flex",
             alignItems: "center",
+            gap: "0.7rem",
             padding: "0.7rem 1.5rem",
             fontFamily: "'Manrope', sans-serif",
             fontSize: "0.82rem",
             fontWeight: isActive ? 700 : 500,
             letterSpacing: "0.04em",
             textDecoration: "none",
-            color: isActive ? "var(--text-strong)" : "rgba(148,163,184,0.6)",
+            color: isActive ? "var(--text-strong)" : "var(--nav-inactive)",
             borderLeft: isActive ? `2px solid ${ACCENT}` : "2px solid transparent",
             background: isActive ? "rgba(99,102,241,0.08)" : "transparent",
             transition: "all 0.15s",
@@ -78,12 +81,13 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
           onMouseLeave={(e) => {
             const el = e.currentTarget as HTMLAnchorElement
             if (!el.style.borderLeftColor.includes("rgb(99")) {
-              el.style.color = "rgba(148,163,184,0.6)"
+              el.style.color = "var(--nav-inactive)"
               el.style.background = "transparent"
             }
           }}
         >
-          {label}
+          <Icon size={17} />
+          <span>{label}</span>
         </NavLink>
       ))}
     </div>

@@ -5,6 +5,9 @@ import { getGastos } from '../api/gastos_operativos'
 import { getCheques } from '../api/cheques'
 import { getPrestamos } from '../api/prestamos'
 import { fmtUSD, fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
+import { btnBordered } from '../lib/ui'
+import { IconRefresh } from '../components/icons'
+import { SkeletonRows } from '../components/Skeleton'
 import type { MovimientoEfectivo, GastoOperativo, Cheque, Prestamo } from '../types'
 import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
@@ -14,7 +17,7 @@ type PresetFecha = 'HOY' | 'SEMANA' | 'MES' | 'PERSONALIZADO'
 
 const FM = "'Manrope', sans-serif"
 const FN = "'Bebas Neue', sans-serif"
-const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)' }
+const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)', borderRadius: 'var(--r-lg)' }
 
 interface MovimientoUnificado {
   id: string
@@ -155,8 +158,8 @@ export default function Movimientos() {
             {desde || hasta ? ` · ${desde ? fmtDate(desde) : '…'} → ${hasta ? fmtDate(hasta) : '…'}` : ''}
           </p>
         </div>
-        <button onClick={handleRefetch} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-010)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>
-          Actualizar
+        <button onClick={handleRefetch} style={{ ...btnBordered('neutral'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, padding: '0.45rem 0.875rem' }}>
+          <IconRefresh size={14} />Actualizar
         </button>
       </div>
 
@@ -190,9 +193,7 @@ export default function Movimientos() {
 
       {/* Tabla */}
       <div style={{ ...CARD, overflow: 'hidden' }}>
-        {isLoading && (
-          <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>Cargando movimientos…</div>
-        )}
+        {isLoading && <SkeletonRows rows={6} />}
         {!isLoading && filtrados.length === 0 && (
           <div style={{ padding: '3rem', textAlign: 'center' }}>
             <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📭</p>

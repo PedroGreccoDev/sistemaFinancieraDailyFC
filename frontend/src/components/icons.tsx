@@ -1,0 +1,41 @@
+import type { CSSProperties } from 'react'
+
+/* Iconos stroke (estilo lucide), inline, sin dependencia. Heredan currentColor. */
+
+type P = { size?: number; style?: CSSProperties; strokeWidth?: number }
+
+const base = (size: number, sw: number) => ({
+  width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+  stroke: 'currentColor', strokeWidth: sw, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const,
+})
+
+export function IconHome({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M3 9.5 12 3l9 6.5" /><path d="M5 10v10h14V10" /></svg>)
+}
+export function IconWallet({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><rect x="3" y="6" width="18" height="14" rx="2" /><path d="M3 10h18" /><circle cx="16.5" cy="14" r="1.2" fill="currentColor" stroke="none" /></svg>)
+}
+export function IconUsers({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><circle cx="9" cy="8" r="3" /><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" /><path d="M16 4.5a3 3 0 0 1 0 7" /><path d="M21 20c0-2.5-1.5-4.7-3.5-5.6" /></svg>)
+}
+export function IconReceipt({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M5 3v18l2-1.2L9 21l2-1.2L13 21l2-1.2L17 21l2-1.2V3l-2 1.2L15 3l-2 1.2L11 3 9 4.2 7 3 5 4.2Z" /><path d="M8 8h8M8 12h8" /></svg>)
+}
+export function IconChart({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M3 3v18h18" /><rect x="7" y="11" width="3" height="6" /><rect x="12.5" y="7" width="3" height="10" /><rect x="18" y="13" width="3" height="4" /></svg>)
+}
+export function IconExchange({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M4 8h13l-3-3" /><path d="M20 16H7l3 3" /></svg>)
+}
+export function IconPlus({ size = 16, style, strokeWidth = 2.4 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M12 5v14M5 12h14" /></svg>)
+}
+export function IconRefresh({ size = 15, style, strokeWidth = 2.2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 4v4h-4" /></svg>)
+}
+export function IconCheck({ size = 18, style, strokeWidth = 2.4 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M20 6 9 17l-5-5" /></svg>)
+}
+export function IconAlert({ size = 18, style, strokeWidth = 2.2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16.5v.01" /></svg>)
+}

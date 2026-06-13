@@ -7,6 +7,7 @@ import { getReporteGanancias } from '../api/reportes'
 import { fmtARS, fmtMonto, fmtDate, daysUntil, monthStartISO, todayISO } from '../lib/fmt'
 import type { Cheque, Prestamo } from '../types'
 import { FinanceDashboardCard } from '../components/FinanceDashboardCard'
+import { SkeletonKpis, Skeleton } from '../components/Skeleton'
 
 // ── helpers ───────────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ function AlertCard({ dot, label, count, children }: AlertCardProps) {
       background: CARD_BG,
       border: CARD_BORDER,
       boxShadow: CARD_SHADOW,
+      borderRadius: "var(--r-lg)",
       overflow: "hidden",
       marginBottom: "0.875rem",
     }}>
@@ -167,6 +169,22 @@ function RowItem({
   )
 }
 
+function LoadingRows({ rows = 2 }: { rows?: number }) {
+  return (
+    <div>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.7rem 1.1rem', borderBottom: '1px solid var(--ov-004)' }}>
+          <div style={{ flex: 1 }}>
+            <Skeleton w={`${50 + i * 12}%`} h={12} />
+            <Skeleton w="30%" h={8} style={{ marginTop: '0.45rem' }} />
+          </div>
+          <Skeleton w={70} h={14} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function EmptyRow({ text }: { text: string }) {
   return (
     <div style={{
@@ -236,6 +254,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI cards */}
+      {!cheques && !prestamos && !reporte ? <SkeletonKpis /> : (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" style={{ marginBottom: "1.75rem" }}>
         <FinanceDashboardCard
           title="Cheques en cartera"
@@ -266,6 +285,7 @@ export default function Dashboard() {
           formatValue={(v) => v.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
         />
       </div>
+      )}
 
       {/* Lower grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -276,7 +296,7 @@ export default function Dashboard() {
 
           {/* Cuotas vencidas */}
           <AlertCard dot="#ef4444" label="Cuotas vencidas" count={vencidas.length}>
-            {vencidas.length === 0 && !prestamos && <EmptyRow text="Cargando…" />}
+            {vencidas.length === 0 && !prestamos && <LoadingRows />}
             {vencidas.length === 0 && prestamos  && <EmptyRow text="Sin cuotas vencidas" />}
             {vencidas.slice(0, 4).map((c) => (
               <RowItem
@@ -297,7 +317,7 @@ export default function Dashboard() {
           {/* Fiados abiertos */}
           {((fiados && fiados.length > 0) || !fiados) && (
             <AlertCard dot="#f59e0b" label="Fiados abiertos" count={fiados?.length}>
-              {!fiados && <EmptyRow text="Cargando…" />}
+              {!fiados && <LoadingRows />}
               {fiados?.slice(0, 4).map((f) => (
                 <RowItem
                   key={f.id}
@@ -317,7 +337,7 @@ export default function Dashboard() {
 
           {/* Cheques próximos a vencer */}
           <AlertCard dot="#facc15" label="Cheques vencen en 7 días" count={proximos.length}>
-            {proximos.length === 0 && !cheques  && <EmptyRow text="Cargando…" />}
+            {proximos.length === 0 && !cheques  && <LoadingRows />}
             {proximos.length === 0 && cheques   && <EmptyRow text="Sin cheques por vencer" />}
             {proximos.slice(0, 4).map((c) => {
               const dias = daysUntil(c.fecha_pago!)
@@ -341,10 +361,11 @@ export default function Dashboard() {
             background: CARD_BG,
             border: CARD_BORDER,
             boxShadow: CARD_SHADOW,
+            borderRadius: "var(--r-lg)",
             overflow: "hidden",
           }}>
             {actividad.length === 0 && (
-              <EmptyRow text={!cheques && !prestamos ? 'Cargando…' : 'Sin actividad registrada'} />
+              !cheques && !prestamos ? <LoadingRows /> : <EmptyRow text="Sin actividad registrada" />
             )}
             {actividad.map((item) => (
               <div key={item.id} style={{

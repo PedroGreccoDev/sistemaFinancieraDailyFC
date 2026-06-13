@@ -31,7 +31,7 @@ export default function DropdownFilter<T extends string>({
       <div style={{ position: 'relative' }}>
         <button
           onClick={() => setOpen((v) => !v)}
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: FONT, fontSize: '0.78rem', fontWeight: 600, background: 'linear-gradient(145deg, #0c0c10, #13131a)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0', padding: '0.45rem 0.85rem', minWidth: '150px', justifyContent: 'space-between', cursor: 'pointer' }}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', fontFamily: FONT, fontSize: '0.78rem', fontWeight: 600, background: 'var(--surface-grad)', border: '1px solid var(--bd-008)', color: 'var(--text-1)', padding: '0.45rem 0.85rem', minWidth: '150px', justifyContent: 'space-between', cursor: 'pointer', borderRadius: 'var(--r-md)' }}
         >
           <span>{current?.label}</span>
           <svg style={{ width: '12px', height: '12px', color: 'rgba(148,163,184,0.5)', transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none', flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -40,14 +40,14 @@ export default function DropdownFilter<T extends string>({
         </button>
 
         {open && (
-          <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 30, minWidth: '100%', background: '#0f0f16', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 30, minWidth: '100%', background: 'var(--modal)', border: '1px solid var(--bd-010)', boxShadow: 'var(--shadow-card-hover)', overflow: 'hidden', borderRadius: 'var(--r-md)' }}>
             {options.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => { onChange(opt.value); setOpen(false) }}
-                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '0.5rem 0.85rem', fontFamily: FONT, fontSize: '0.78rem', fontWeight: opt.value === value ? 700 : 500, color: opt.value === value ? '#f8fafc' : 'rgba(148,163,184,0.75)', background: opt.value === value ? 'rgba(99,102,241,0.12)' : 'transparent', borderLeft: opt.value === value ? '2px solid #6366f1' : '2px solid transparent', cursor: 'pointer' }}
-                onMouseEnter={(e) => { if (opt.value !== value) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)' }}
-                onMouseLeave={(e) => { if (opt.value !== value) (e.currentTarget as HTMLButtonElement).style.background = opt.value === value ? 'rgba(99,102,241,0.12)' : 'transparent' }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '0.5rem 0.85rem', fontFamily: FONT, fontSize: '0.78rem', fontWeight: opt.value === value ? 700 : 500, color: opt.value === value ? 'var(--text-strong)' : 'var(--text-2)', background: opt.value === value ? 'color-mix(in srgb, var(--primary) 14%, transparent)' : 'transparent', borderLeft: opt.value === value ? '2px solid var(--primary)' : '2px solid transparent', cursor: 'pointer', borderRadius: 0 }}
+                onMouseEnter={(e) => { if (opt.value !== value) (e.currentTarget as HTMLButtonElement).style.background = 'var(--ov-004)' }}
+                onMouseLeave={(e) => { if (opt.value !== value) (e.currentTarget as HTMLButtonElement).style.background = opt.value === value ? 'color-mix(in srgb, var(--primary) 14%, transparent)' : 'transparent' }}
               >
                 {opt.label}
               </button>

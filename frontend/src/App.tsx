@@ -11,6 +11,7 @@ import Reportes from './pages/Reportes'
 import Fiados from './pages/Fiados'
 import Movimientos from './pages/Movimientos'
 import { useDarkMode } from './hooks/useDarkMode'
+import { ToastProvider } from './lib/toast'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -46,6 +47,7 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ToastProvider>
       <BrowserRouter>
         <div className="min-h-dvh flex flex-col md:flex-row" style={{ background: "var(--bg)" }}>
           <Navbar />
@@ -75,6 +77,7 @@ export default function App() {
           {dark ? <SunIcon /> : <MoonIcon />}
         </button>
       </BrowserRouter>
+      </ToastProvider>
     </QueryClientProvider>
   )
 }

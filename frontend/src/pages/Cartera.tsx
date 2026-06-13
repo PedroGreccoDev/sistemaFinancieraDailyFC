@@ -2,6 +2,9 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getChequeCartera, getCheques } from '../api/cheques'
 import { fmtARS, fmtDate, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
+import { btnBordered } from '../lib/ui'
+import { IconRefresh } from '../components/icons'
+import { SkeletonRows } from '../components/Skeleton'
 import type { Cheque } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
 import DateRangePicker from '../components/DateRangePicker'
@@ -10,7 +13,7 @@ type FilterPreset = 'hoy' | 'semana' | 'mes' | 'anio' | 'custom'
 
 const FN = "'Bebas Neue', sans-serif"
 const FM = "'Manrope', sans-serif"
-const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)' }
+const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)', borderRadius: 'var(--r-lg)' }
 const TH = { fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' as const, color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left' as const, background: 'var(--ov-0025)', borderBottom: '1px solid var(--bd-006)', whiteSpace: 'nowrap' as const }
 const TD = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'var(--text-1)' }
 
@@ -90,8 +93,8 @@ export default function Cartera() {
           <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Cartera</h1>
           <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Cheques en stock</p>
         </div>
-        <button onClick={() => refetch()} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-010)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>
-          Actualizar
+        <button onClick={() => refetch()} style={{ ...btnBordered('neutral'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, padding: '0.45rem 0.875rem' }}>
+          <IconRefresh size={14} />Actualizar
         </button>
       </div>
 
@@ -112,7 +115,7 @@ export default function Cartera() {
 
       {/* Tabla cartera */}
       <div style={{ ...CARD, overflow: 'hidden', marginBottom: '2.5rem' }}>
-        {isLoading && <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.7)', fontFamily: FM, fontSize: '0.82rem' }}>Cargando cartera…</div>}
+        {isLoading && <SkeletonRows rows={6} />}
         {error && <div style={{ padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar la cartera.</div>}
         {cheques && cheques.length === 0 && <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>La cartera está vacía</div>}
         {sorted.length > 0 && (

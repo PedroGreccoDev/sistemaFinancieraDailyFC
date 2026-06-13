@@ -3,6 +3,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getPasivos, createPasivo, cancelarPasivoEfectivo, cancelarPasivoConCheque } from '../api/pasivos'
 import { getChequeCartera } from '../api/cheques'
 import { fmtARS, fmtUSD, fmtDate } from '../lib/fmt'
+import { chip, btnSolid, btnBordered, btnFlat } from '../lib/ui'
+import { useToast } from '../lib/toast'
+import { IconPlus, IconRefresh } from '../components/icons'
+import { SkeletonRows } from '../components/Skeleton'
 import type { Cheque, Moneda, Pasivo, PasivoEstado } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
 
@@ -10,7 +14,7 @@ type Filtro = 'todos' | PasivoEstado
 
 const FM = "'Manrope', sans-serif"
 const FN = "'Bebas Neue', sans-serif"
-const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)' }
+const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)', borderRadius: 'var(--r-lg)' }
 const MODAL_BG = 'var(--modal)'
 const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
 const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
@@ -20,7 +24,7 @@ const TD: React.CSSProperties = { fontFamily: FM, fontSize: '0.82rem', padding: 
 function EstadoBadge({ estado }: { estado: PasivoEstado }) {
   const isPending = estado === 'PENDIENTE'
   return (
-    <span style={{ fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, color: isPending ? '#fbbf24' : '#4ade80', background: isPending ? 'rgba(251,191,36,0.12)' : 'rgba(74,222,128,0.12)', border: `1px solid ${isPending ? 'rgba(251,191,36,0.3)' : 'rgba(74,222,128,0.3)'}`, padding: '2px 8px' }}>
+    <span style={chip(isPending ? 'warning' : 'success')}>
       {isPending ? 'Pendiente' : 'Cancelada'}
     </span>
   )
@@ -41,6 +45,7 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
   const [observaciones, setObservaciones] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -48,14 +53,15 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
     setLoading(true)
     try {
       await createPasivo({ acreedor: acreedor.trim(), concepto: concepto.trim(), monto: parseFloat(monto), moneda, fecha_vencimiento: fechaVenc || null, observaciones: observaciones.trim() || null })
+      toast('success', 'Deuda registrada')
       onSuccess()
     } catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Nueva deuda</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Registrar una deuda del negocio</p>
@@ -71,8 +77,8 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
           <div><label style={LABEL_STYLE}>Observaciones <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-012)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Cancelar</button>
-            <button type="submit" disabled={loading} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>{loading ? 'Guardando…' : 'Registrar'}</button>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="submit" disabled={loading} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: loading ? 0.6 : 1 }}>{loading ? 'Guardando…' : 'Registrar'}</button>
           </div>
         </form>
       </div>
@@ -89,25 +95,26 @@ function ModalCancelarEfectivo({ pasivo, onClose, onSuccess }: { pasivo: Pasivo;
   const [error, setError] = useState<string | null>(null)
   const montoNum = parseFloat(montoCobrado) || 0
   const cancelaTotal = montoNum === saldo && saldo > 0
+  const toast = useToast()
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     setLoading(true)
-    try { await cancelarPasivoEfectivo(pasivo.id, { monto_cobrado: montoNum }); onSuccess() }
+    try { await cancelarPasivoEfectivo(pasivo.id, { monto_cobrado: montoNum }); toast('success', cancelaTotal ? 'Deuda cancelada' : 'Pago registrado'); onSuccess() }
     catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', width: '100%', maxWidth: '380px' }}>
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '380px' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)' }}>
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Pagar con efectivo</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{pasivo.acreedor}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-          <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+          <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', borderRadius: 'var(--r-md)', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
             {[
               { label: 'Deuda original', value: fmtMoneda(pasivo.monto, pasivo.moneda), color: 'var(--text-1)' },
               { label: 'Saldo pendiente', value: fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda), color: '#f87171' },
@@ -130,8 +137,8 @@ function ModalCancelarEfectivo({ pasivo, onClose, onSuccess }: { pasivo: Pasivo;
           </div>
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-012)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Volver</button>
-            <button type="submit" disabled={loading || montoNum <= 0 || montoNum > saldo} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#16a34a', border: 'none', color: '#fff', cursor: 'pointer', opacity: (loading || montoNum <= 0 || montoNum > saldo) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar pago'}</button>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Volver</button>
+            <button type="submit" disabled={loading || montoNum <= 0 || montoNum > saldo} style={{ ...btnSolid('success'), flex: 1, padding: '0.55rem', opacity: (loading || montoNum <= 0 || montoNum > saldo) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar pago'}</button>
           </div>
         </form>
       </div>
@@ -149,6 +156,7 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
   const [motivo, setMotivo] = useState(`Cancelación de deuda con ${pasivo.acreedor}`)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
 
   const { data: cheques, isLoading: loadingCheques } = useQuery({ queryKey: ['cheques', 'cartera'], queryFn: getChequeCartera })
 
@@ -168,20 +176,20 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
     if (!chequeSeleccionado) return
     setError(null)
     setLoading(true)
-    try { await cancelarPasivoConCheque(pasivo.id, { nro_cheque: chequeSeleccionado.nro_cheque, porcentaje_venta: pctNum, operador_id: operadorId.trim(), motivo: motivo.trim() }); onSuccess() }
+    try { await cancelarPasivoConCheque(pasivo.id, { nro_cheque: chequeSeleccionado.nro_cheque, porcentaje_venta: pctNum, operador_id: operadorId.trim(), motivo: motivo.trim() }); toast('success', 'Deuda pagada con cheque'); onSuccess() }
     catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.7)', padding: '1rem' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92vh', overflowY: 'auto' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Pagar con cheque</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Entregar un cheque de cartera al acreedor</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-          <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+          <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', borderRadius: 'var(--r-md)', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
             {[
               { label: 'Acreedor', value: pasivo.acreedor, color: 'var(--text-1)' },
               { label: 'Saldo pendiente', value: fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda), color: '#f87171' },
@@ -210,7 +218,7 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
           </div>
 
           {chequeSeleccionado && valorNeto !== null && diferencia !== null && (
-            <div style={{ background: diferencia >= 0 ? 'rgba(74,222,128,0.06)' : 'rgba(251,191,36,0.06)', border: `1px solid ${diferencia >= 0 ? 'rgba(74,222,128,0.2)' : 'rgba(251,191,36,0.2)'}`, padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            <div style={{ background: diferencia >= 0 ? 'rgba(74,222,128,0.06)' : 'rgba(251,191,36,0.06)', border: `1px solid ${diferencia >= 0 ? 'rgba(74,222,128,0.2)' : 'rgba(251,191,36,0.2)'}`, padding: '0.75rem 1rem', borderRadius: 'var(--r-md)', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
               {[
                 { label: 'Nominal cheque', value: fmtARS(chequeSeleccionado.monto) },
                 { label: `Valor neto (${pctNum}%)`, value: fmtARS(valorNeto) },
@@ -232,8 +240,8 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
 
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-012)', color: 'rgba(148,163,184,0.8)', cursor: 'pointer' }}>Volver</button>
-            <button type="submit" disabled={loading || !chequeSeleccionado || !cheques || cheques.length === 0} style={{ flex: 1, padding: '0.55rem', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', cursor: 'pointer', opacity: (loading || !chequeSeleccionado) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar'}</button>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Volver</button>
+            <button type="submit" disabled={loading || !chequeSeleccionado || !cheques || cheques.length === 0} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: (loading || !chequeSeleccionado) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar'}</button>
           </div>
         </form>
       </div>
@@ -276,8 +284,8 @@ export default function Pasivos() {
           <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Deudas del negocio con clientes y proveedores</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button onClick={() => setMostrarNueva(true)} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 700, background: '#6366f1', border: 'none', color: '#fff', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>+ Nueva deuda</button>
-          <button onClick={() => refetch()} style={{ fontFamily: FM, fontSize: '0.75rem', fontWeight: 600, background: 'transparent', border: '1px solid var(--bd-010)', color: 'rgba(148,163,184,0.7)', padding: '0.45rem 0.875rem', cursor: 'pointer' }}>Actualizar</button>
+          <button onClick={() => setMostrarNueva(true)} style={{ ...btnSolid('primary'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', padding: '0.45rem 0.875rem' }}><IconPlus size={15} />Nueva deuda</button>
+          <button onClick={() => refetch()} style={{ ...btnBordered('neutral'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, padding: '0.45rem 0.875rem' }}><IconRefresh size={14} />Actualizar</button>
         </div>
       </div>
 
@@ -313,7 +321,7 @@ export default function Pasivos() {
 
       {/* Lista */}
       <div style={{ ...CARD, overflow: 'hidden' }}>
-        {isLoading && <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>Cargando deudas…</div>}
+        {isLoading && <SkeletonRows rows={6} />}
         {error && <div style={{ padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar las deudas.</div>}
         {pasivos && pasivos.length === 0 && (
           <div style={{ padding: '3rem', textAlign: 'center' }}>
@@ -343,8 +351,8 @@ export default function Pasivos() {
                 </div>
                 {pasivo.estado === 'PENDIENTE' && (
                   <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
-                    <button onClick={() => setPasivoEfectivo(pasivo)} style={{ flex: 1, fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)', padding: '0.4rem', cursor: 'pointer' }}>Efectivo</button>
-                    <button onClick={() => setPasivoCheque(pasivo)} style={{ flex: 1, fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, color: '#818cf8', background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)', padding: '0.4rem', cursor: 'pointer' }}>Con cheque</button>
+                    <button onClick={() => setPasivoEfectivo(pasivo)} style={{ ...btnFlat('success'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Efectivo</button>
+                    <button onClick={() => setPasivoCheque(pasivo)} style={{ ...btnFlat('primary'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Con cheque</button>
                   </div>
                 )}
               </div>
@@ -378,8 +386,8 @@ export default function Pasivos() {
                     <td style={{ ...TD, textAlign: 'right' }}>
                       {pasivo.estado === 'PENDIENTE' && (
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                          <button onClick={() => setPasivoEfectivo(pasivo)} style={{ fontFamily: FM, fontSize: '0.68rem', fontWeight: 700, color: '#4ade80', background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)', padding: '2px 8px', cursor: 'pointer' }}>Efectivo</button>
-                          <button onClick={() => setPasivoCheque(pasivo)} style={{ fontFamily: FM, fontSize: '0.68rem', fontWeight: 700, color: '#818cf8', background: 'rgba(129,140,248,0.08)', border: '1px solid rgba(129,140,248,0.2)', padding: '2px 8px', cursor: 'pointer' }}>Con cheque</button>
+                          <button onClick={() => setPasivoEfectivo(pasivo)} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Efectivo</button>
+                          <button onClick={() => setPasivoCheque(pasivo)} style={{ ...btnFlat('primary'), fontSize: '0.68rem', padding: '2px 8px' }}>Con cheque</button>
                         </div>
                       )}
                     </td>

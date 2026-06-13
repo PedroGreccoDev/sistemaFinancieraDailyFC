@@ -9,7 +9,7 @@ type Preset = 'hoy' | 'semana' | 'mes' | 'custom'
 
 const FN = "'Bebas Neue', sans-serif"
 const FM = "'Manrope', sans-serif"
-const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)' }
+const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)', borderRadius: 'var(--r-lg)' }
 
 function getRangeForPreset(preset: Preset, customDesde: string | null, customHasta: string | null) {
   const hoy = todayISO()
@@ -158,6 +158,31 @@ export default function Reportes() {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          {/* Gráfico de barras */}
+          <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Distribución del período</p>
+          <div style={{ ...CARD, padding: '1.2rem 1.3rem', marginBottom: '1.5rem' }}>
+            {(() => {
+              const rows = [
+                { label: 'Cheques', value: parseFloat(data.ganancia_cheques), color: 'var(--success)' },
+                { label: 'Préstamos', value: parseFloat(data.ganancia_prestamos), color: 'var(--success)' },
+                { label: 'Divisas', value: parseFloat(data.ganancia_movimientos_efectivo), color: 'var(--success)' },
+                { label: 'Gastos', value: parseFloat(data.gastos_operativos), color: 'var(--danger)' },
+              ]
+              const max = Math.max(1, ...rows.map((r) => Math.abs(r.value)))
+              return rows.map((r, i) => (
+                <div key={r.label} style={{ marginBottom: i === rows.length - 1 ? 0 : '0.85rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.74rem', marginBottom: '0.35rem' }}>
+                    <span style={{ color: 'rgba(100,116,139,0.85)' }}>{r.label}</span>
+                    <span style={{ color: 'var(--text-1)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{r.color === 'var(--danger)' ? '−' : ''}{fmtARS(r.value)}</span>
+                  </div>
+                  <div style={{ height: '9px', background: 'var(--ov-004)', borderRadius: 999, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${(Math.abs(r.value) / max) * 100}%`, background: r.color, borderRadius: 999, transition: 'width 0.5s cubic-bezier(0.16,1,0.3,1)' }} />
+                  </div>
+                </div>
+              ))
+            })()}
           </div>
 
           {/* Pasivos snapshot */}

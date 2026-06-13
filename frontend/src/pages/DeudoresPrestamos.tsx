@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getPrestamos } from '../api/prestamos'
 import { getClientes } from '../api/clientes'
 import { fmtMonto, fmtDate, daysUntil } from '../lib/fmt'
+import { Skeleton } from '../components/Skeleton'
 import type { Prestamo, Cuota } from '../types'
 
 type Semaforo = 'mora' | 'proximo' | 'ok' | 'cancelado'
@@ -28,10 +29,10 @@ function proximaCuota(prestamo: Prestamo): Cuota | null {
 }
 
 const semaforoConfig: Record<Semaforo, { accent: string; borderColor: string; badgeBg: string; label: string }> = {
-  mora:     { accent: '#f87171', borderColor: 'rgba(248,113,113,0.5)',  badgeBg: 'rgba(248,113,113,0.12)', label: 'En mora' },
-  proximo:  { accent: '#fbbf24', borderColor: 'rgba(251,191,36,0.5)',  badgeBg: 'rgba(251,191,36,0.12)',  label: 'Vence pronto' },
-  ok:       { accent: '#4ade80', borderColor: 'rgba(74,222,128,0.4)',  badgeBg: 'rgba(74,222,128,0.12)',  label: 'Al día' },
-  cancelado:{ accent: 'rgba(100,116,139,0.5)', borderColor: 'var(--bd-008)', badgeBg: 'var(--bd-006)', label: 'Cancelado' },
+  mora:     { accent: 'var(--danger)',  borderColor: 'color-mix(in srgb, var(--danger) 50%, transparent)',  badgeBg: 'color-mix(in srgb, var(--danger) 12%, transparent)',  label: 'En mora' },
+  proximo:  { accent: 'var(--warning)', borderColor: 'color-mix(in srgb, var(--warning) 50%, transparent)', badgeBg: 'color-mix(in srgb, var(--warning) 12%, transparent)', label: 'Vence pronto' },
+  ok:       { accent: 'var(--success)', borderColor: 'color-mix(in srgb, var(--success) 45%, transparent)', badgeBg: 'color-mix(in srgb, var(--success) 12%, transparent)', label: 'Al día' },
+  cancelado:{ accent: 'var(--text-2)', borderColor: 'var(--bd-008)', badgeBg: 'var(--bd-006)', label: 'Cancelado' },
 }
 
 export default function DeudoresPrestamos() {
@@ -76,7 +77,18 @@ export default function DeudoresPrestamos() {
         </div>
       </div>
 
-      {loadingP && <div style={{ textAlign: 'center', color: 'rgba(100,116,139,0.6)', padding: '3rem', fontFamily: FM, fontSize: '0.82rem' }}>Cargando deudores…</div>}
+      {loadingP && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" style={{ marginBottom: '2rem' }}>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} style={{ background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-card)', padding: '1.1rem 1.2rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><Skeleton w="50%" h={14} /><Skeleton w={64} h={16} /></div>
+              <Skeleton w="40%" h={11} style={{ marginTop: '1rem' }} />
+              <Skeleton w="65%" h={11} style={{ marginTop: '0.5rem' }} />
+              <Skeleton w="100%" h={4} r={999} style={{ marginTop: '1.1rem' }} />
+            </div>
+          ))}
+        </div>
+      )}
       {errP && <div style={{ textAlign: 'center', color: '#f87171', padding: '3rem', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar préstamos.</div>}
 
       {activos.length === 0 && !loadingP && (
@@ -96,7 +108,7 @@ export default function DeudoresPrestamos() {
           const pct = (cobradas / p.cuotas) * 100
 
           return (
-            <div key={p.id} style={{ background: 'var(--surface-grad)', border: `1px solid ${cfg.borderColor}`, boxShadow: `var(--shadow-card), 0 0 0 1px ${cfg.borderColor}`, padding: '1.1rem 1.2rem' }}>
+            <div key={p.id} style={{ background: 'var(--surface-grad)', border: `1px solid ${cfg.borderColor}`, borderRadius: 'var(--r-lg)', boxShadow: `var(--shadow-card), 0 0 0 1px ${cfg.borderColor}`, padding: '1.1rem 1.2rem' }}>
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
                 <h3 style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word', maxWidth: '70%' }}>{nombre}</h3>
@@ -152,7 +164,7 @@ export default function DeudoresPrestamos() {
             {cancelados.map((p) => {
               const nombre = clienteMap.get(p.cliente_id) ?? '…'
               return (
-                <div key={p.id} style={{ background: 'var(--ov-002)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', opacity: 0.55 }}>
+                <div key={p.id} style={{ background: 'var(--ov-002)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.75rem 1rem', opacity: 0.55 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-1)' }}>{nombre}</span>
                     <span style={{ fontFamily: FM, fontSize: '0.62rem', fontWeight: 700, color: 'rgba(100,116,139,0.6)', background: 'var(--ov-004)', padding: '1px 7px' }}>{p.estado}</span>

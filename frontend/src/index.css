@@ -20,8 +20,29 @@
   --text-strong: #2a2418;  /* títulos / números grandes */
   --num-prefix: rgba(120,108,82,0.55);
 
-  --shadow-card: 0 1px 3px rgba(70,58,34,0.08);
-  --shadow-card-hover: 0 4px 14px rgba(70,58,34,0.13);
+  /* Sombras suaves en capas (estilo HeroUI): varias capas low-alpha */
+  --shadow-card: 0 1px 2px rgba(70,58,34,0.06), 0 2px 8px rgba(70,58,34,0.05);
+  --shadow-card-hover: 0 2px 6px rgba(70,58,34,0.08), 0 10px 24px rgba(70,58,34,0.12);
+
+  /* Escala de radios (estilo HeroUI). Igual en ambos temas (no se redefine en dark). */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 14px;
+  --focus: #6366f1;
+
+  /* Texto secundario (muted) */
+  --text-2: rgba(74,66,48,0.7);
+  /* Items inactivos del navbar (legibles sobre el crema claro) */
+  --nav-inactive: rgba(60,53,38,0.82);
+
+  /* Colores semánticos (estilo HeroUI). En claro: tonos -600/700 para
+     contraste sobre el crema. on-accent = texto sobre fondo sólido. */
+  --primary:   #4f46e5;
+  --secondary: #7c3aed;
+  --success:   #16a34a;
+  --warning:   #c2700a;
+  --danger:    #dc2626;
+  --on-accent: #ffffff;
 
   --ov-002:  rgba(15,23,42,0.03);
   --ov-0025: rgba(15,23,42,0.04);
@@ -45,6 +66,16 @@ html.dark {
   --text-1: #e2e8f0;
   --text-strong: #f8fafc;
   --num-prefix: rgba(203,213,225,0.5);
+  --text-2: rgba(148,163,184,0.7);
+  --nav-inactive: rgba(148,163,184,0.6);
+
+  /* Semánticos en oscuro: tonos más brillantes (-400/500) */
+  --primary:   #6366f1;
+  --secondary: #a78bfa;
+  --success:   #4ade80;
+  --warning:   #fbbf24;
+  --danger:    #f87171;
+  --on-accent: #ffffff;
 
   --shadow-card: 0 4px 24px rgba(0,0,0,0.4);
   --shadow-card-hover: 0 8px 48px rgba(0,0,0,0.6);
@@ -63,6 +94,110 @@ html.dark {
 
 * {
   box-sizing: border-box;
+}
+
+/* Redondeo por defecto (estilo HeroUI) para controles que no fijan su
+   propio radio. Los estilos inline (ej. el widget del dólar pill) ganan. */
+button:not([class*="rounded"]) {
+  border-radius: var(--r-md);
+}
+input,
+select,
+textarea {
+  border-radius: var(--r-sm);
+}
+
+/* Micro-interacción de "press" (estilo HeroUI): leve hundido al click */
+button {
+  transition: transform 0.08s ease, opacity 0.15s ease;
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+/* Modales: fondo con blur + animación de entrada (fade + pop) */
+@keyframes modalFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modalPop {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+.modal-overlay {
+  animation: modalFade 0.18s ease both;
+}
+.modal-overlay > div {
+  animation: modalPop 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Scrollbar fino acorde al tema */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bd-012) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bd-012);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--bd-010);
+  background-clip: padding-box;
+}
+
+/* Skeletons con shimmer */
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--ov-003) 25%, var(--ov-005) 37%, var(--ov-003) 63%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--r-sm);
+}
+
+/* Toasts: entrada desde arriba */
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: none; }
+}
+.toast-item {
+  animation: toastIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Accesibilidad: respetar usuarios que prefieren menos movimiento */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+  .modal-overlay,
+  .modal-overlay > div,
+  .toast-item { animation: none; }
+  button:active:not(:disabled) { transform: none; }
+}
+
+/* Anillo de foco visible por teclado (no rompe el outline:none inline) */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 30%, transparent);
 }
 
 /* El fondo del body sigue al tema para evitar franjas blancas/negras
