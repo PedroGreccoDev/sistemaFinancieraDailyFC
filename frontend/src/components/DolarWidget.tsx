@@ -27,7 +27,7 @@ function useDraggable() {
   const [pos, setPos] = useState<Pos | null>(() => {
     try { const s = localStorage.getItem(POS_KEY); return s ? JSON.parse(s) : null } catch { return null }
   })
-  const drag = useRef<{ startX: number; startY: number; origX: number; origY: number; moved: boolean } | null>(null)
+  const drag = useRef<{ pointerId: number; startX: number; startY: number; origX: number; origY: number; moved: boolean } | null>(null)
   const didDragRef = useRef(false)
 
   function clamp(p: Pos): Pos {
@@ -53,23 +53,29 @@ function useDraggable() {
       const el = nodeRef.current
       if (!el) return
       const rect = el.getBoundingClientRect()
-      drag.current = { startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top, moved: false }
+      drag.current = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, origX: rect.left, origY: rect.top, moved: false }
       didDragRef.current = false
-      el.setPointerCapture(e.pointerId)
+      // OJO: no capturamos el puntero acá; si lo hiciéramos, un click simple
+      // quedaría capturado y los botones (abrir/cerrar) dejarían de funcionar.
     },
     onPointerMove(e: React.PointerEvent) {
       const d = drag.current
       if (!d) return
       const dx = e.clientX - d.startX
       const dy = e.clientY - d.startY
-      if (!d.moved && Math.hypot(dx, dy) < 4) return
-      d.moved = true
+      if (!d.moved) {
+        if (Math.hypot(dx, dy) < 4) return
+        d.moved = true
+        // Recién ahora que es un arrastre real capturamos el puntero
+        try { nodeRef.current?.setPointerCapture(d.pointerId) } catch { /* ignore */ }
+      }
       setPos(clamp({ x: d.origX + dx, y: d.origY + dy }))
     },
     onPointerUp() {
       const d = drag.current
       drag.current = null
       if (d?.moved) {
+        try { nodeRef.current?.releasePointerCapture(d.pointerId) } catch { /* ignore */ }
         didDragRef.current = true
         setPos((p) => {
           if (p) { try { localStorage.setItem(POS_KEY, JSON.stringify(p)) } catch { /* ignore */ } }
