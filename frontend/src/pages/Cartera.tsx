@@ -224,16 +224,12 @@ export default function Cartera() {
           {/* Mobile: tarjetas */}
           <div className="sm:hidden">
             {filteredVendidos.map((c) => {
-              const spread = c.porcentaje_venta !== null
-                ? (parseFloat(c.porcentaje_compra) - parseFloat(c.porcentaje_venta)).toFixed(2)
-                : null
               return (
                 <div key={c.nro_cheque} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{c.nro_cheque}</p>
                     <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>
                       {fmtARS(c.monto)} · {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
-                      {spread !== null && <span style={{ color: '#818cf8' }}> · spread {spread}%</span>}
                     </p>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -257,16 +253,12 @@ export default function Cartera() {
                   <th style={{ ...TH, textAlign: 'right' }}>Monto</th>
                   <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">% Compra</th>
                   <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">% Venta</th>
-                  <th style={{ ...TH, textAlign: 'right' }}>Spread</th>
                   <th style={{ ...TH, textAlign: 'right' }}>Ganancia</th>
                   <th style={{ ...TH, textAlign: 'center' }}>Fecha venta</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredVendidos.map(c => {
-                  const spread = c.porcentaje_venta !== null
-                    ? (parseFloat(c.porcentaje_compra) - parseFloat(c.porcentaje_venta)).toFixed(2)
-                    : null
                   return (
                     <tr key={c.nro_cheque}
                       onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
@@ -277,7 +269,6 @@ export default function Cartera() {
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">
                         {c.porcentaje_venta !== null ? `${parseFloat(c.porcentaje_venta).toFixed(2)}%` : '—'}
                       </td>
-                      <td style={{ ...TD, textAlign: 'right', fontWeight: 600, color: '#818cf8' }}>{spread !== null ? `${spread}%` : '—'}</td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600, color: '#4ade80' }}>{fmtARS(c.ganancia)}</td>
                       <td style={{ ...TD, textAlign: 'center', color: 'rgba(148,163,184,0.65)', fontSize: '0.72rem' }}>
                         {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
@@ -288,8 +279,8 @@ export default function Cartera() {
               </tbody>
               <tfoot>
                 <tr style={{ borderTop: '1px solid var(--bd-010)', background: 'var(--ov-0025)' }}>
-                  <td colSpan={5} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="hidden sm:table-cell">Total</td>
-                  <td colSpan={5} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="sm:hidden">Total</td>
+                  <td colSpan={4} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="hidden sm:table-cell">Total</td>
+                  <td colSpan={4} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="sm:hidden">Total</td>
                   <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#4ade80', borderBottom: 'none' }}>{fmtARS(totalGanancia)}</td>
                   <td style={{ ...TD, borderBottom: 'none' }} />
                 </tr>
