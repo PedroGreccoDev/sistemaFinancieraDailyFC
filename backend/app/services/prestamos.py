@@ -147,10 +147,11 @@ def cobrar_cuota(
 
     try:
         db.flush()
+        # Cualquier cuota no cobrada (PENDIENTE o EN_MORA) mantiene vivo el préstamo.
         pendientes_restantes = db.scalar(
             select(func.count()).select_from(Cuota).where(
                 Cuota.prestamo_id == prestamo_id,
-                Cuota.estado == CuotaEstado.PENDIENTE,
+                Cuota.estado != CuotaEstado.COBRADA,
             )
         )
         if pendientes_restantes == 0:

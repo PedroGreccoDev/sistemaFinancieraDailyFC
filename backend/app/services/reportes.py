@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -17,6 +18,12 @@ from app.db.models import (
     Prestamo,
 )
 from app.schemas.reportes import ReporteGananciasRead, SaldoPasivos
+from app.services.exceptions import ValidationError
+
+# Los eventos se persisten en UTC, pero el operador elige fechas en hora local
+# (Argentina). Convertimos los límites del día local a UTC para no traspapelar
+# operaciones nocturnas al día equivocado en el cierre de caja.
+_TZ_LOCAL = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
 def _money(value: object) -> Decimal:
@@ -28,8 +35,15 @@ def _money(value: object) -> Decimal:
 
 
 def get_reporte_ganancias(db: Session, desde: date, hasta: date) -> ReporteGananciasRead:
-    desde_dt = datetime.combine(desde, time.min, tzinfo=UTC)
-    hasta_dt = datetime.combine(hasta, time.max, tzinfo=UTC)
+    if desde > hasta:
+        raise ValidationError(
+            f"El rango es inválido: 'desde' ({desde}) es posterior a 'hasta' ({hasta})."
+        )
+
+    # Día local completo [00:00 .. 23:59:59.999999] convertido a UTC para filtrar
+    # las columnas datetime, que se guardan en UTC.
+    desde_dt = datetime.combine(desde, time.min, tzinfo=_TZ_LOCAL).astimezone(UTC)
+    hasta_dt = datetime.combine(hasta, time.max, tzinfo=_TZ_LOCAL).astimezone(UTC)
 
     ganancia_cheques = _money(
         db.scalar(

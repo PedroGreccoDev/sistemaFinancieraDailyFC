@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -305,12 +305,20 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
         return False, f"ℹ️ {cliente.nombre} no tiene cuotas pendientes."
 
     if numero_cuota is not None:
-        cuota = next((c for c in pendientes if c.numero_cuota == numero_cuota), None)
-        if cuota is None:
+        matches = [c for c in pendientes if c.numero_cuota == numero_cuota]
+        if not matches:
             return False, (
                 f"❓ No encontré la cuota #{numero_cuota} pendiente de {cliente.nombre}.\n"
                 f"Cuotas pendientes: {', '.join(f'#{c.numero_cuota}' for c in pendientes)}"
             )
+        if len(matches) > 1:
+            # El cliente tiene varios préstamos activos con esa misma cuota.
+            return False, (
+                f"❓ {cliente.nombre} tiene {len(matches)} préstamos activos con una "
+                f"cuota #{numero_cuota} pendiente. No puedo saber cuál cobrar; "
+                "resolvelo desde el panel web."
+            )
+        cuota = matches[0]
     else:
         # Cobrar la primera (más próxima a vencer)
         cuota = pendientes[0]
@@ -320,9 +328,13 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
 
     cobrada = svc_prestamos.cobrar_cuota(db, cuota.prestamo_id, cuota.id, fecha_cobro=msg_at.date() if msg_at else date.today())
 
-    # Si todas las cuotas están cobradas, informarlo
-    restantes = len(pendientes) - 1
-    extra = f"\n✨ Préstamo *cancelado* — todas las cuotas cobradas." if restantes == 0 else f"\nQuedan {restantes} cuota(s) pendiente(s)."
+    # Restantes del MISMO préstamo (no de todos los del cliente).
+    restantes = sum(1 for c in pendientes if c.prestamo_id == cuota.prestamo_id) - 1
+    extra = (
+        "\n✨ Préstamo *cancelado* — todas las cuotas cobradas."
+        if restantes == 0
+        else f"\nQuedan {restantes} cuota(s) pendiente(s) en este préstamo."
+    )
 
     return True, (
         f"✅ Cuota #{cobrada.numero_cuota} de {cliente.nombre} cobrada.\n"
@@ -928,7 +940,7 @@ def _consulta_prestamos(db: Session) -> DispatchResult:
 # ────────────────────────────────────────────────────────────────────────────
 
 def _find_or_create_cliente(db: Session, nombre: str) -> Cliente:
-    """Busca el cliente por nombre. Si no existe, lo crea automáticamente."""
+    """Busca el cliente por nombre exacto. Si no existe, lo crea automáticamente."""
     nombre = nombre.strip().title()
     cliente = _buscar_cliente_exacto(db, nombre)
     if cliente:
@@ -938,18 +950,16 @@ def _find_or_create_cliente(db: Session, nombre: str) -> Cliente:
 
 
 def _buscar_cliente_exacto(db: Session, nombre: str) -> Cliente | None:
-    """Búsqueda case-insensitive. Devuelve None si no existe o si hay ambigüedad sin match exacto."""
+    """Match exacto case-insensitive. Devuelve None si no existe.
+
+    A diferencia de una búsqueda por substring, NO reutiliza un cliente cuyo
+    nombre apenas *contenga* el texto: registrar para "Juan" no debe vincularse
+    silenciosamente al cliente existente "Juan Pérez".
+    """
     nombre = nombre.strip()
-    resultados: list[Cliente] = list(
-        db.scalars(
-            select(Cliente).where(Cliente.nombre.ilike(f"%{nombre}%"))
-        ).all()
+    return db.scalar(
+        select(Cliente).where(func.lower(Cliente.nombre) == nombre.lower())
     )
-    if len(resultados) == 1:
-        return resultados[0]
-    # Si hay varios, intentar match exacto primero
-    exacto = next((c for c in resultados if c.nombre.lower() == nombre.lower()), None)
-    return exacto
 
 
 def _buscar_cliente_o_error(db: Session, nombre: str) -> Cliente:
@@ -1088,10 +1098,11 @@ def _fmt_num(n: Decimal | float | int) -> str:
     n = Decimal(str(n))
     # Redondear a 2 decimales
     n = n.quantize(Decimal("0.01"))
-    # Separar parte entera y decimal
-    parts = f"{n:f}".split(".")
+    # El signo se maneja aparte: int("-0") == 0 perdería el menos en (-1, 0).
+    signo = "-" if n < 0 else ""
+    parts = f"{abs(n):f}".split(".")
     int_part = f"{int(parts[0]):,}".replace(",", ".")
-    return f"{int_part},{parts[1]}"
+    return f"{signo}{int_part},{parts[1]}"
 
 
 def _ars(n: Decimal) -> str:
