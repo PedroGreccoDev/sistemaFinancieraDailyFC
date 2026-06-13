@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 
 const NAV_LINKS = [
@@ -111,6 +111,46 @@ function CloseIcon() {
 
 export default function Navbar() {
   const [open, setOpen] = useState(false)
+
+  // Gestos táctiles: deslizar desde el borde izquierdo abre el drawer,
+  // deslizar hacia la izquierda lo cierra. Solo en mobile.
+  useEffect(() => {
+    const EDGE = 28      // px desde el borde para iniciar el gesto de apertura
+    const THRESHOLD = 55 // px de desplazamiento para disparar
+    let startX = 0, startY = 0, tracking = false, swiping = false
+
+    function onStart(e: TouchEvent) {
+      if (window.innerWidth >= 768) return // md+: hay sidebar fijo
+      const t = e.touches[0]
+      startX = t.clientX
+      startY = t.clientY
+      tracking = open || startX <= EDGE
+      swiping = false
+    }
+    function onMove(e: TouchEvent) {
+      if (!tracking) return
+      const t = e.touches[0]
+      const dx = t.clientX - startX
+      const dy = t.clientY - startY
+      if (!swiping) {
+        if (Math.abs(dy) > Math.abs(dx)) { tracking = false; return } // scroll vertical
+        if (Math.abs(dx) < 10) return
+        swiping = true
+      }
+      if (!open && dx > THRESHOLD) { setOpen(true); tracking = false }
+      else if (open && dx < -THRESHOLD) { setOpen(false); tracking = false }
+    }
+    function onEnd() { tracking = false; swiping = false }
+
+    window.addEventListener('touchstart', onStart, { passive: true })
+    window.addEventListener('touchmove', onMove, { passive: true })
+    window.addEventListener('touchend', onEnd)
+    return () => {
+      window.removeEventListener('touchstart', onStart)
+      window.removeEventListener('touchmove', onMove)
+      window.removeEventListener('touchend', onEnd)
+    }
+  }, [open])
 
   return (
     <>
