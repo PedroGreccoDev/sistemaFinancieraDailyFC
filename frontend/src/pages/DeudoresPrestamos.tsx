@@ -108,7 +108,7 @@ export default function DeudoresPrestamos() {
           const pct = (cobradas / p.cuotas) * 100
 
           return (
-            <div key={p.id} style={{ background: 'var(--surface-grad)', border: `1px solid ${cfg.borderColor}`, borderRadius: 'var(--r-lg)', boxShadow: `var(--shadow-card), 0 0 0 1px ${cfg.borderColor}`, padding: '1.1rem 1.2rem' }}>
+            <div key={p.id} className="lift" style={{ background: 'var(--surface-grad)', border: `1px solid ${cfg.borderColor}`, borderRadius: 'var(--r-lg)', boxShadow: `var(--shadow-card), 0 0 0 1px ${cfg.borderColor}`, padding: '1.1rem 1.2rem' }}>
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
                 <h3 style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word', maxWidth: '70%' }}>{nombre}</h3>

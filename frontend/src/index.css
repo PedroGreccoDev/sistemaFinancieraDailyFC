@@ -157,6 +157,15 @@ button:hover:not(:disabled) {
   background-clip: padding-box;
 }
 
+/* Hover-lift para tarjetas: se elevan apenas + sombra mayor al pasar el mouse */
+.lift {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.lift:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-card-hover);
+}
+
 /* Skeletons con shimmer */
 @keyframes shimmer {
   0%   { background-position: 200% 0; }
@@ -185,6 +194,7 @@ button:hover:not(:disabled) {
   .modal-overlay > div,
   .toast-item { animation: none; }
   button:active:not(:disabled) { transform: none; }
+  .lift:hover { transform: none; }
 }
 
 /* Anillo de foco visible por teclado (no rompe el outline:none inline) */

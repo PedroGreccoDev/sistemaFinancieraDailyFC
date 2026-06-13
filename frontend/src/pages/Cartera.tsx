@@ -105,7 +105,7 @@ export default function Cartera() {
             { label: 'En cartera', value: String(cheques.length), color: 'var(--text-strong)' },
             { label: 'Total', value: fmtARS(totalCartera(cheques)), color: 'var(--text-strong)' },
           ].map(({ label, value, color }) => (
-            <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
+            <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
               <p style={{ fontFamily: FN, fontSize: '2rem', color, letterSpacing: '0.03em', lineHeight: 1 }}>{value}</p>
             </div>
@@ -209,7 +209,7 @@ export default function Cartera() {
           { label: 'Cheques vendidos', value: String(filteredVendidos.length), color: 'var(--text-strong)' },
           { label: 'Ganancia del período', value: fmtARS(totalGanancia), color: '#4ade80' },
         ].map(({ label, value, color }) => (
-          <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
+          <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
             <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
             <p style={{ fontFamily: FN, fontSize: '2rem', color, letterSpacing: '0.03em', lineHeight: 1 }}>{value}</p>
           </div>

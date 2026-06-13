@@ -374,7 +374,7 @@ export default function Fiados() {
             { label: 'Saldo total a cobrar', value: fmtARS(totalSaldo), color: '#fbbf24', sub: `${abiertos.length} fiado(s) abierto(s)` },
             { label: 'Clientes con deuda', value: String(clientesDistintos), color: 'var(--text-1)', sub: 'cliente(s) distintos' },
           ].map(({ label, value, color, sub }) => (
-            <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
+            <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
               <p style={{ fontFamily: FN, fontSize: '1.75rem', color, letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{value}</p>
               <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>

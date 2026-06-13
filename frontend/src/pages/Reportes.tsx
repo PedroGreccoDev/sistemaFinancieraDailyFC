@@ -24,7 +24,7 @@ function MetricCard({ label, value, sub, color = 'default' }: {
 }) {
   const numColor = { default: 'var(--text-1)', green: '#4ade80', red: '#f87171', indigo: '#818cf8' }[color]
   return (
-    <div style={{ ...CARD, padding: '1rem 1.2rem' }}>
+    <div className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
       <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
       <p style={{ fontFamily: FN, fontSize: '1.75rem', color: numColor, letterSpacing: '0.03em', lineHeight: 1, marginBottom: sub ? '0.25rem' : 0 }}>{value}</p>
       {sub && <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.55)' }}>{sub}</p>}
@@ -103,12 +103,12 @@ export default function Reportes() {
 
           {/* Totales destacados */}
           <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.5rem' }}>
-            <div style={{ ...CARD, padding: '1.1rem 1.2rem' }}>
+            <div className="lift" style={{ ...CARD, padding: '1.1rem 1.2rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>Total bruto</p>
               <p style={{ fontFamily: FN, fontSize: '2.2rem', color: 'var(--text-1)', letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{fmtARS(data.total_ganancias)}</p>
               <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>Sin descontar gastos</p>
             </div>
-            <div style={{ background: 'linear-gradient(145deg, #3730a3, #4338ca)', border: '1px solid rgba(99,102,241,0.4)', boxShadow: '0 4px 24px rgba(99,102,241,0.2)', padding: '1.1rem 1.2rem' }}>
+            <div className="lift" style={{ background: 'linear-gradient(145deg, #3730a3, #4338ca)', border: '1px solid rgba(99,102,241,0.4)', boxShadow: '0 4px 24px rgba(99,102,241,0.2)', padding: '1.1rem 1.2rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.7)', marginBottom: '0.3rem' }}>Neto del período</p>
               <p style={{ fontFamily: FN, fontSize: '2.2rem', color: '#fff', letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{fmtARS(data.neto)}</p>
               <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(199,210,254,0.55)' }}>Ganancias − gastos</p>
@@ -192,7 +192,7 @@ export default function Reportes() {
               { label: 'Deudas pendientes ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars), sub: 'Lo que el negocio debe (en $)' },
               { label: 'Deudas pendientes USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd), sub: 'Lo que el negocio debe (en U$D)' },
             ].map(({ label, value, sub }) => (
-              <div key={label} style={{ ...CARD, padding: '1rem 1.2rem' }}>
+              <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
                 <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
                 <p style={{ fontFamily: FN, fontSize: '1.75rem', color: '#f87171', letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{value}</p>
                 <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
