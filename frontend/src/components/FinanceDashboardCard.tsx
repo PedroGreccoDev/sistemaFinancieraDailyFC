@@ -41,7 +41,7 @@ interface FinanceDashboardCardProps {
   subtitle?: string;
 }
 
-function useCountUp(target: number, duration = 600) {
+function useCountUp(target: number, duration = 300) {
   const [current, setCurrent] = useState(0);
   const raf = useRef<number>(0);
 
