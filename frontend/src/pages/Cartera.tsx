@@ -52,7 +52,7 @@ function totalCartera(cheques: Cheque[]): number {
 }
 
 /** Miniatura clickeable de la foto del cheque (solo si tiene_foto). */
-function FotoThumb({ cheque, onOpen, size = 38 }: { cheque: Cheque; onOpen: (c: Cheque) => void; size?: number }) {
+function FotoThumb({ cheque, onOpen, size = 52 }: { cheque: Cheque; onOpen: (c: Cheque) => void; size?: number }) {
   if (!cheque.tiene_foto) {
     return <span style={{ display: 'inline-block', width: size, height: size, flexShrink: 0 }} />
   }
@@ -125,7 +125,7 @@ export default function Cartera() {
           ].map(({ label, value, color }) => (
             <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
-              <p style={{ fontFamily: FN, fontSize: '2rem', color, letterSpacing: '0.03em', lineHeight: 1 }}>{value}</p>
+              <p style={{ fontFamily: FN, fontSize: 'clamp(1.3rem, 7vw, 2rem)', color, letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere' }}>{value}</p>
             </div>
           ))}
         </div>
@@ -145,7 +145,7 @@ export default function Cartera() {
               return (
                 <div key={cheque.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', minWidth: 0 }}>
-                    {cheque.tiene_foto && <FotoThumb cheque={cheque} onOpen={setFotoCheque} size={44} />}
+                    {cheque.tiene_foto && <FotoThumb cheque={cheque} onOpen={setFotoCheque} size={60} />}
                     <div style={{ minWidth: 0 }}>
                       <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{cheque.nro_cheque}</p>
                       <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>Pago {fmtDate(cheque.fecha_pago)}</p>
@@ -164,7 +164,7 @@ export default function Cartera() {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '540px' }}>
               <thead>
                 <tr>
-                  <th style={{ ...TH, width: '56px', textAlign: 'center' }} aria-label="Foto">
+                  <th style={{ ...TH, width: '76px', textAlign: 'center' }} aria-label="Foto">
                     <span style={{ display: 'inline-flex', color: 'rgba(100,116,139,0.7)' }}><IconCamera size={14} /></span>
                   </th>
                   <th style={TH}>Nº Cheque</th>
@@ -182,7 +182,7 @@ export default function Cartera() {
                     <tr key={cheque.id} style={{ transition: 'background 0.1s' }}
                       onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
-                      <td style={{ ...TD, width: '56px' }}>
+                      <td style={{ ...TD, width: '76px', padding: '0.5rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'center' }}><FotoThumb cheque={cheque} onOpen={setFotoCheque} /></div>
                       </td>
                       <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{cheque.nro_cheque}</td>
@@ -238,7 +238,7 @@ export default function Cartera() {
         ].map(({ label, value, color }) => (
           <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
             <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
-            <p style={{ fontFamily: FN, fontSize: '2rem', color, letterSpacing: '0.03em', lineHeight: 1 }}>{value}</p>
+            <p style={{ fontFamily: FN, fontSize: 'clamp(1.3rem, 7vw, 2rem)', color, letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere' }}>{value}</p>
           </div>
         ))}
       </div>

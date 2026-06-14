@@ -61,7 +61,7 @@ function ModalEfectivo({ fiado, clienteNombre, onClose, onSuccess }: { fiado: Fi
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
           <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', borderRadius: 'var(--r-md)' }}>
             <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.3rem' }}>Saldo pendiente</p>
-            <p style={{ fontFamily: FN, fontSize: '1.5rem', color: '#fbbf24', letterSpacing: '0.03em', lineHeight: 1 }}>{fmtARS(saldo)}</p>
+            <p style={{ fontFamily: FN, fontSize: 'clamp(1.1rem, 5.5vw, 1.5rem)', color: '#fbbf24', letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere' }}>{fmtARS(saldo)}</p>
           </div>
           <div>
             <label style={LABEL_STYLE}>Monto cobrado</label>
@@ -376,7 +376,7 @@ export default function Fiados() {
           ].map(({ label, value, color, sub }) => (
             <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
-              <p style={{ fontFamily: FN, fontSize: '1.75rem', color, letterSpacing: '0.03em', lineHeight: 1, marginBottom: '0.2rem' }}>{value}</p>
+              <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color, letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{value}</p>
               <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
             </div>
           ))}

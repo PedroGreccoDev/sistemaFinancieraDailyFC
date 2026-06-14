@@ -81,7 +81,7 @@ export default function ChequeFotoModal({ cheque, onClose }: { cheque: Cheque; o
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '480px', maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '860px', maxHeight: '94vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
       >
         <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--bd-006)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
           <div style={{ minWidth: 0 }}>
@@ -93,13 +93,13 @@ export default function ChequeFotoModal({ cheque, onClose }: { cheque: Cheque; o
           </button>
         </div>
 
-        <div style={{ flex: 1, minHeight: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', background: 'var(--ov-0025)', overflow: 'auto' }}>
+        <div style={{ flex: 1, minHeight: '260px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', background: 'var(--ov-0025)', overflow: 'auto' }}>
           {error ? (
             <p style={{ fontFamily: FM, fontSize: '0.82rem', color: '#f87171' }}>No se pudo cargar la foto.</p>
           ) : !objUrl ? (
             <p style={{ fontFamily: FM, fontSize: '0.82rem', color: 'rgba(100,116,139,0.6)' }}>Cargando foto…</p>
           ) : (
-            <img src={objUrl} alt={`Cheque ${cheque.nro_cheque}`} style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', borderRadius: 'var(--r-md)' }} />
+            <img src={objUrl} alt={`Cheque ${cheque.nro_cheque}`} style={{ maxWidth: '100%', maxHeight: '78vh', objectFit: 'contain', borderRadius: 'var(--r-md)' }} />
           )}
         </div>
 

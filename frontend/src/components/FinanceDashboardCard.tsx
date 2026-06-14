@@ -17,7 +17,8 @@ if (typeof document !== "undefined" && !document.getElementById(RESPONSIVE_STYLE
   style.textContent = `
     @media (max-width: 639px) {
       .fc-card-body        { padding: 0.75rem 0.9rem !important; }
-      .fc-card-num         { font-size: 2.4rem !important; }
+      .fc-card-num         { font-size: clamp(1.5rem, 8.5vw, 2.4rem) !important; overflow-wrap: anywhere; min-width: 0; }
+      .fc-card-numrow      { min-width: 0; }
       .fc-card-prefix      { font-size: 1rem !important; margin-bottom: 0.3rem !important; }
       .fc-card-title       { font-size: 0.62rem !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; max-width: none !important; }
       .fc-card-subtitle    { font-size: 0.7rem !important; }
