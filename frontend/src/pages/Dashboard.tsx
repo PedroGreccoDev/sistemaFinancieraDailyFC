@@ -126,16 +126,25 @@ function AlertCard({ dot, label, count, children }: AlertCardProps) {
 }
 
 function RowItem({
-  primary, secondary, value, valueColor,
-}: { primary: string; secondary: string; value: string; valueColor?: string }) {
+  primary, secondary, value, valueColor, onClick,
+}: { primary: string; secondary: string; value: string; valueColor?: string; onClick?: () => void }) {
   return (
-    <div style={{
+    <div
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+      onMouseEnter={onClick ? (e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--ov-004)" } : undefined}
+      onMouseLeave={onClick ? (e) => { (e.currentTarget as HTMLDivElement).style.background = "transparent" } : undefined}
+      style={{
       padding: "0.7rem 1.1rem",
       display: "flex",
       alignItems: "center",
       justifyContent: "space-between",
       gap: "0.75rem",
       borderBottom: DIVIDER,
+      cursor: onClick ? "pointer" : undefined,
+      transition: "background 0.15s ease",
     }}>
       <div style={{ minWidth: 0 }}>
         <p style={{
@@ -311,6 +320,7 @@ export default function Dashboard() {
                 secondary={`Venció ${fmtDate(c.fecha_vencimiento)} · hace ${Math.abs(daysUntil(c.fecha_vencimiento))}d`}
                 value={fmtMonto(c.monto, c.moneda)}
                 valueColor="#f87171"
+                onClick={() => navigate('/deudores')}
               />
             ))}
             {vencidas.length > 4 && (
@@ -331,6 +341,7 @@ export default function Dashboard() {
                   secondary={f.cheque_nro}
                   value={fmtARS(f.saldo_pendiente)}
                   valueColor="#fbbf24"
+                  onClick={() => navigate('/deudores/cheques-fiados')}
                 />
               ))}
               {fiados && fiados.length > 4 && (
@@ -354,6 +365,7 @@ export default function Dashboard() {
                   secondary={dias === 0 ? 'Vence hoy' : `Vence en ${dias}d · ${fmtDate(c.fecha_pago)}`}
                   value={fmtARS(c.monto)}
                   valueColor="#fde047"
+                  onClick={() => navigate('/cartera')}
                 />
               )
             })}
@@ -374,12 +386,22 @@ export default function Dashboard() {
               !cheques && !prestamos ? <LoadingRows /> : <EmptyRow text="Sin actividad registrada" />
             )}
             {actividad.map((item) => (
-              <div key={item.id} style={{
+              <div
+                key={item.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(item.tipo === 'cheque' ? '/cartera' : '/deudores')}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(item.tipo === 'cheque' ? '/cartera' : '/deudores') } }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--ov-004)" }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "transparent" }}
+                style={{
                 padding: "0.625rem 1rem",
                 display: "flex",
                 alignItems: "center",
                 gap: "0.75rem",
                 borderBottom: DIVIDER,
+                cursor: "pointer",
+                transition: "background 0.15s ease",
               }}>
                 <div style={{
                   width: "2rem",
