@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import date
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.fechas import hoy_local
 from app.db.models import GastoOperativo
 from app.schemas.gastos_operativos import GastoOperativoCreate
 
@@ -14,7 +13,7 @@ def create_gasto(db: Session, payload: GastoOperativoCreate) -> GastoOperativo:
         concepto=payload.concepto.strip(),
         monto=payload.monto,
         moneda=payload.moneda,
-        fecha_operacion=payload.fecha_operacion or date.today(),
+        fecha_operacion=payload.fecha_operacion or hoy_local(),
         observaciones=payload.observaciones,
     )
     db.add(gasto)

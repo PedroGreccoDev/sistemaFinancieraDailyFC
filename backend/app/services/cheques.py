@@ -16,6 +16,7 @@ from app.db.models import (
     InvalidChequeStateTransition,
     ManualOperationRequired,
 )
+from app.core.fechas import hoy_local
 from app.schemas.cheques import ChequeCreate, ChequeFiarRequest, ChequeManualTransition
 from app.services.exceptions import (
     ConflictError,
@@ -127,7 +128,7 @@ def fiar_cheque(
         porcentaje_venta=payload.porcentaje_venta,
         saldo_pendiente=saldo_pendiente,
         estado=FiadoEstado.ABIERTO,
-        fecha_fiado=fecha_fiado or date.today(),
+        fecha_fiado=fecha_fiado or hoy_local(),
     )
 
     try:

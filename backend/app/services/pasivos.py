@@ -16,6 +16,7 @@ from app.db.models import (
     Pasivo,
     PasivoEstado,
 )
+from app.core.fechas import hoy_local
 from app.schemas.pasivos import (
     PasivoCancelarConChequeRequest,
     PasivoCancelarEfectivoRequest,
@@ -76,7 +77,7 @@ def cancelar_pasivo(
         raise ConflictError("El pasivo ya está cancelado.")
     pasivo.estado = PasivoEstado.CANCELADA
     pasivo.saldo_pendiente = Decimal("0.00")
-    pasivo.fecha_cancelacion = payload.fecha_cancelacion or date.today()
+    pasivo.fecha_cancelacion = payload.fecha_cancelacion or hoy_local()
     db.commit()
     db.refresh(pasivo)
     return pasivo
@@ -101,7 +102,7 @@ def cancelar_con_efectivo(
     )
     if pasivo.saldo_pendiente == Decimal("0.00"):
         pasivo.estado = PasivoEstado.CANCELADA
-        pasivo.fecha_cancelacion = payload.fecha_cancelacion or date.today()
+        pasivo.fecha_cancelacion = payload.fecha_cancelacion or hoy_local()
 
     db.commit()
     db.refresh(pasivo)
@@ -145,7 +146,7 @@ def cancelar_con_cheque(
         if diferencia >= Decimal("0.00"):
             pasivo.saldo_pendiente = Decimal("0.00")
             pasivo.estado = PasivoEstado.CANCELADA
-            pasivo.fecha_cancelacion = payload.fecha_cancelacion or date.today()
+            pasivo.fecha_cancelacion = payload.fecha_cancelacion or hoy_local()
         else:
             pasivo.saldo_pendiente = (-diferencia).quantize(Decimal("0.01"))
 

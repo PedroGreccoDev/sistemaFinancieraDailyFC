@@ -41,6 +41,7 @@ from app.services import clientes as svc_clientes
 from app.services import fiados as svc_fiados
 from app.services import movimientos as svc_movimientos
 from app.services import prestamos as svc_prestamos
+from app.core.fechas import fecha_local, hoy_local
 from app.services.exceptions import ServiceError
 from app.services.ia.claude import IntentResult
 
@@ -215,7 +216,7 @@ def _fiar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime
     )
     cheque, fiado = svc_cheques.fiar_cheque(
         db, nro, request,
-        fecha_fiado=msg_at.date() if msg_at else None,
+        fecha_fiado=fecha_local(msg_at),
         event_at=msg_at,
     )
 
@@ -267,7 +268,7 @@ def _nuevo_prestamo(db: Session, data: dict[str, Any], msg_at: datetime | None =
         cuotas=cuotas,
         frecuencia=frecuencia,
         total_a_cobrar=total,
-        fecha_inicio=msg_at.date() if msg_at else date.today(),
+        fecha_inicio=fecha_local(msg_at),
     )
     prestamo = svc_prestamos.create_prestamo(db, payload)
 
@@ -336,7 +337,7 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
     idx_inicial = del_prestamo.index(cuota_inicial)
     a_cobrar = del_prestamo[idx_inicial : idx_inicial + cantidad]
 
-    fecha_cobro = msg_at.date() if msg_at else date.today()
+    fecha_cobro = fecha_local(msg_at)
     cobradas = [
         svc_prestamos.cobrar_cuota(db, prestamo_id, c.id, fecha_cobro=fecha_cobro)
         for c in a_cobrar
@@ -440,7 +441,7 @@ def _registrar_gasto(db: Session, data: dict[str, Any], msg_at: datetime | None 
     if not isinstance(items, list) or not items:
         items = [data]
 
-    fecha = msg_at.date() if msg_at else None
+    fecha = fecha_local(msg_at)
     registrados = []
     for item in items:
         concepto = _req_str(item, "concepto")
@@ -1186,7 +1187,7 @@ _PLAZO_PRESENTACION_DIAS = 30
 
 def _advertencias_cheque(fecha_emision: date | None, fecha_pago: date | None) -> list[str]:
     """Avisos al registrar un cheque. Nunca bloquea: el operador decide."""
-    hoy = date.today()
+    hoy = hoy_local()
     avisos: list[str] = []
 
     if fecha_pago is not None and fecha_pago < hoy:

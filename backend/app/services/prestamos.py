@@ -17,6 +17,7 @@ from app.db.models import (
     Prestamo,
     PrestamoEstado,
 )
+from app.core.fechas import hoy_local
 from app.schemas.prestamos import PrestamoCreate
 from app.services.exceptions import ConflictError, DatabaseWriteError, NotFoundError
 
@@ -77,7 +78,7 @@ def create_prestamo(db: Session, payload: PrestamoCreate) -> Prestamo:
     if cliente is None:
         raise NotFoundError("Cliente no encontrado.")
 
-    fecha_inicio = payload.fecha_inicio or date.today()
+    fecha_inicio = payload.fecha_inicio or hoy_local()
     prestamo = Prestamo(
         cliente_id=payload.cliente_id,
         cheque_origen_nro=payload.cheque_origen_nro,
@@ -143,7 +144,7 @@ def cobrar_cuota(
         raise ConflictError("La cuota ya fue cobrada.")
 
     cuota.estado = CuotaEstado.COBRADA
-    cuota.fecha_cobro = fecha_cobro or date.today()
+    cuota.fecha_cobro = fecha_cobro or hoy_local()
 
     try:
         db.flush()
