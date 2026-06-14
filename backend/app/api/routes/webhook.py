@@ -234,6 +234,14 @@ async def _ejecutar_y_responder(
     db = SessionLocal()
     try:
         limpiar_sesion, respuesta = wa_dispatcher.dispatch(db, phone, intent_result, msg_at=msg_at)
+    except wa_dispatcher.ConfirmacionRequerida as exc:
+        # Un handler pide confirmar antes de impactar (ej: gasto duplicado).
+        # Guardamos el mismo intent como pendiente, marcado para no re-preguntar.
+        intent_result.data["_dup_confirmado"] = True
+        wa_session.set_pending_intent(phone, intent_result)
+        wa_session.add_assistant_message(phone, exc.mensaje)
+        await wa_client.send_text(phone, exc.mensaje)
+        return
     finally:
         db.close()
 

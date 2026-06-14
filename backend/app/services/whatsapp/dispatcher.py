@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import logging
 import uuid
 from datetime import date, datetime, timedelta
@@ -41,7 +42,7 @@ from app.services import clientes as svc_clientes
 from app.services import fiados as svc_fiados
 from app.services import movimientos as svc_movimientos
 from app.services import prestamos as svc_prestamos
-from app.core.fechas import fecha_local, hoy_local
+from app.core.fechas import fecha_local, hora_local, hoy_local
 from app.services.exceptions import ServiceError
 from app.services.ia.claude import IntentResult
 
@@ -50,6 +51,19 @@ logger = logging.getLogger(__name__)
 # ── Tipos de retorno ─────────────────────────────────────────────────────────
 # (limpiar_sesion, texto_respuesta_whatsapp)
 DispatchResult = tuple[bool, str]
+
+
+class ConfirmacionRequerida(Exception):
+    """Señal de control: el handler necesita que el operador confirme antes de impactar la BD.
+
+    La levanta un handler (ej: gasto sospechoso de duplicado) y la captura el webhook,
+    que guarda el intent como pendiente y le manda el aviso al operador. Si confirma,
+    se re-despacha el mismo intent con la marca de confirmado y se ejecuta.
+    """
+
+    def __init__(self, mensaje: str) -> None:
+        super().__init__(mensaje)
+        self.mensaje = mensaje
 
 _FRECUENCIA_PLURAL: dict[FrecuenciaCuotas, str] = {
     FrecuenciaCuotas.DIARIA:    "diarias",
@@ -115,6 +129,8 @@ def dispatch(
         # ACLARACION_REQUERIDA y DESCONOCIDO no tocan la BD
         return False, result.respuesta_usuario or "❓ No entendí. ¿Podés repetirlo?"
 
+    except ConfirmacionRequerida:
+        raise  # señal de control: la maneja el webhook, no es un error
     except ServiceError as exc:
         return False, f"⚠️ {exc.message}"
     except ValueError as exc:
@@ -435,6 +451,48 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any], msg_at: datetime | N
     return True, "\n".join(lines)
 
 
+# Umbral de similitud de concepto (0..1) para considerar dos gastos "parecidos".
+_GASTO_CONCEPTO_RATIO = 0.82
+
+
+def _concepto_similar(a: str, b: str) -> bool:
+    """True si dos conceptos son iguales, uno contiene al otro, o difieren por tipeo."""
+    a, b = a.strip().lower(), b.strip().lower()
+    if not a or not b:
+        return False
+    if a == b or a in b or b in a:
+        return True
+    return difflib.SequenceMatcher(None, a, b).ratio() >= _GASTO_CONCEPTO_RATIO
+
+
+def _monto_similar(m1: Decimal, m2: Decimal) -> bool:
+    """True si dos montos son cercanos: difieren ≤ max($2.000, 20%) — cubre el típico
+    error de tipeo de mil pesos. Montos muy distintos se asumen gastos legítimos."""
+    if m1 == m2:
+        return True
+    mayor = max(m1, m2)
+    tolerancia = max(Decimal("2000"), mayor * Decimal("0.20"))
+    return abs(m1 - m2) <= tolerancia
+
+
+def _gastos_parecidos_hoy(
+    db: Session, concepto: str, monto: Decimal, moneda: Moneda, fecha: date
+) -> list[GastoOperativo]:
+    """Gastos ya registrados ESE día con concepto parecido y monto cercano."""
+    deldia = list(
+        db.scalars(
+            select(GastoOperativo).where(
+                GastoOperativo.fecha_operacion == fecha,
+                GastoOperativo.moneda == moneda,
+            )
+        ).all()
+    )
+    return [
+        g for g in deldia
+        if _concepto_similar(concepto, g.concepto) and _monto_similar(monto, g.monto)
+    ]
+
+
 def _registrar_gasto(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     # Acepta un gasto suelto (concepto/monto en la raíz) o varios en data["gastos"].
     items = data.get("gastos")
@@ -442,11 +500,38 @@ def _registrar_gasto(db: Session, data: dict[str, Any], msg_at: datetime | None 
         items = [data]
 
     fecha = fecha_local(msg_at)
-    registrados = []
+    hora = hora_local(msg_at)
+
+    # Parsear y validar TODO antes de tocar la BD.
+    parsed: list[tuple[str, Decimal, Moneda]] = []
     for item in items:
         concepto = _req_str(item, "concepto")
         monto = _req_decimal(item, "monto")
         moneda = _req_enum(item, "moneda", Moneda) if item.get("moneda") else Moneda.ARS
+        parsed.append((concepto, monto, moneda))
+
+    # Detección de posible duplicado del día (salvo que el operador ya haya confirmado).
+    if not data.get("_dup_confirmado"):
+        avisos: list[str] = []
+        for concepto, monto, moneda in parsed:
+            similares = _gastos_parecidos_hoy(db, concepto, monto, moneda, fecha)
+            for g in similares:
+                simbolo = "U$D" if g.moneda == Moneda.USD else "$"
+                hr = f" {g.hora_operacion.strftime('%H:%M')}" if g.hora_operacion else ""
+                nuevo_simbolo = "U$D" if moneda == Moneda.USD else "$"
+                avisos.append(
+                    f"  • Ya hay «{g.concepto}» {simbolo}{_fmt_num(g.monto)}{hr} "
+                    f"→ estás por cargar «{concepto}» {nuevo_simbolo}{_fmt_num(monto)}"
+                )
+        if avisos:
+            raise ConfirmacionRequerida(
+                "⚠️ *Posible gasto duplicado* (hoy ya cargaste algo parecido):\n"
+                + "\n".join(avisos)
+                + "\n\n¿Lo registro igual? Respondé *sí* para confirmar o *no* para descartar."
+            )
+
+    registrados = []
+    for concepto, monto, moneda in parsed:
         gasto = svc_gastos.create_gasto(
             db,
             GastoOperativoCreate(
@@ -454,20 +539,22 @@ def _registrar_gasto(db: Session, data: dict[str, Any], msg_at: datetime | None 
                 monto=monto,
                 moneda=moneda,
                 fecha_operacion=fecha,
+                hora_operacion=hora,
             ),
         )
         registrados.append(gasto)
 
+    hora_txt = hora.strftime("%H:%M")
     if len(registrados) == 1:
         g = registrados[0]
         simbolo = "U$D" if g.moneda == Moneda.USD else "$"
         return True, (
-            f"💸 *Gasto registrado*\n"
+            f"💸 *Gasto registrado* ({hora_txt})\n"
             f"Concepto: {g.concepto}\n"
             f"Monto: {simbolo}{_fmt_num(g.monto)}"
         )
 
-    lines = [f"💸 *{len(registrados)} gastos registrados*"]
+    lines = [f"💸 *{len(registrados)} gastos registrados* ({hora_txt})"]
     total_por_moneda: dict[Moneda, Decimal] = {}
     for g in registrados:
         simbolo = "U$D" if g.moneda == Moneda.USD else "$"

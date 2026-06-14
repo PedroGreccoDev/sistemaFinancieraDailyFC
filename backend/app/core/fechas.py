@@ -8,10 +8,22 @@ fuera del cierre de caja. Estos helpers calculan SIEMPRE la fecha en hora local.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 TZ_LOCAL = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def datetime_local(dt: datetime | None) -> datetime:
+    """Convierte un datetime (UTC u otro) a hora local de Argentina (aware).
+
+    Si `dt` es None devuelve el ahora local. Si es naive, se asume UTC.
+    """
+    if dt is None:
+        return datetime.now(TZ_LOCAL)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(TZ_LOCAL)
 
 
 def hoy_local() -> date:
@@ -20,14 +32,10 @@ def hoy_local() -> date:
 
 
 def fecha_local(dt: datetime | None) -> date:
-    """Convierte un datetime (UTC u otro) a la fecha calendario local de Argentina.
+    """Fecha calendario local de Argentina para `dt` (hoy local si es None)."""
+    return datetime_local(dt).date()
 
-    Si `dt` es None devuelve la fecha local de hoy. Si es naive, se asume UTC.
-    """
-    if dt is None:
-        return hoy_local()
-    if dt.tzinfo is None:
-        from datetime import timezone
 
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(TZ_LOCAL).date()
+def hora_local(dt: datetime | None) -> time:
+    """Hora local de Argentina para `dt` (ahora local si es None)."""
+    return datetime_local(dt).time().replace(microsecond=0)

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 import sqlalchemy as sa
@@ -491,6 +491,7 @@ class GastoOperativo(Base):
         default=Moneda.ARS,
     )
     fecha_operacion: Mapped[date]     = mapped_column(sa.Date(), index=True)
+    hora_operacion:  Mapped[time | None] = mapped_column(sa.Time(), nullable=True)
     observaciones:   Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())

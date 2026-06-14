@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
 
@@ -14,6 +14,7 @@ class GastoOperativoCreate(BaseModel):
     monto: Decimal = Field(gt=0)
     moneda: Moneda = Moneda.ARS
     fecha_operacion: date | None = None
+    hora_operacion: time | None = None
     observaciones: str | None = None
 
 
@@ -23,6 +24,7 @@ class GastoOperativoRead(BaseModel):
     monto: Decimal
     moneda: Moneda
     fecha_operacion: date
+    hora_operacion: time | None
     observaciones: str | None
     created_at: datetime
     updated_at: datetime

@@ -14,6 +14,7 @@ def create_gasto(db: Session, payload: GastoOperativoCreate) -> GastoOperativo:
         monto=payload.monto,
         moneda=payload.moneda,
         fecha_operacion=payload.fecha_operacion or hoy_local(),
+        hora_operacion=payload.hora_operacion,
         observaciones=payload.observaciones,
     )
     db.add(gasto)

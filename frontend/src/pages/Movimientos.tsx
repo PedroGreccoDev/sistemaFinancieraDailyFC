@@ -57,9 +57,11 @@ function normalizar(
   }
 
   for (const g of gastos) {
+    const hora = g.hora_operacion ? g.hora_operacion.slice(0, 5) : ''
+    const detalle = [hora, g.observaciones ?? ''].filter(Boolean).join(' · ')
     items.push({
       id: g.id, seccion: 'GASTOS', fecha: g.fecha_operacion,
-      descripcion: g.concepto, detalle: g.observaciones ?? '',
+      descripcion: g.concepto, detalle,
       monto: g.monto, moneda: g.moneda, esGasto: true,
     })
   }

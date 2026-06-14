@@ -116,6 +116,7 @@ export interface GastoOperativo {
   monto: string
   moneda: Moneda
   fecha_operacion: string
+  hora_operacion: string | null
   observaciones: string | null
   created_at: string
   updated_at: string
