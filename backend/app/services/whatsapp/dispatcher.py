@@ -828,16 +828,63 @@ def _editar_movimiento(db: Session, identificador: str, campo: str, nuevo_valor:
     )
 
 
-def _editar_gasto(db: Session, identificador: str, campo: str, nuevo_valor: Any) -> DispatchResult:
-    if identificador.lower() == "ultimo":
+_GASTO_ULTIMO_ALIASES = {"ultimo", "último", "el ultimo", "el último", "lo de recien", "lo de recién", ""}
+
+
+def _resolver_gasto_a_editar(
+    db: Session, identificador: str
+) -> tuple[GastoOperativo | None, str | None]:
+    """Resuelve qué gasto editar. Devuelve (gasto, mensaje_de_error).
+
+    - "ultimo"/"el último" → el más reciente.
+    - cualquier otra cosa → se interpreta como CONCEPTO y se busca entre los gastos
+      de HOY con concepto parecido. Si hay varios, devuelve un error pidiendo aclarar.
+    """
+    ident = identificador.strip().lower()
+    if ident in _GASTO_ULTIMO_ALIASES:
         gasto = db.scalars(
             select(GastoOperativo).order_by(GastoOperativo.created_at.desc()).limit(1)
         ).first()
-    else:
-        return False, "❓ Para gastos indicá 'el último' o usá el panel web."
+        if gasto is None:
+            return None, "❓ No encontré ningún gasto registrado."
+        return gasto, None
 
-    if gasto is None:
-        return False, "❓ No encontré ningún gasto registrado."
+    # Buscar por concepto entre los gastos del día.
+    deldia = list(
+        db.scalars(
+            select(GastoOperativo)
+            .where(GastoOperativo.fecha_operacion == hoy_local())
+            .order_by(GastoOperativo.created_at.desc())
+        ).all()
+    )
+    candidatos = [g for g in deldia if _concepto_similar(identificador, g.concepto)]
+
+    if not candidatos:
+        return None, (
+            f"❓ No encontré un gasto de «{identificador}» hoy. "
+            "Probá con 'el último' o corregilo desde el panel web."
+        )
+    if len(candidatos) == 1:
+        return candidatos[0], None
+
+    # Varios del mismo concepto hoy: listar para que el operador desambigüe.
+    lineas = []
+    for g in candidatos:
+        simbolo = "U$D" if g.moneda == Moneda.USD else "$"
+        hr = f" ({g.hora_operacion.strftime('%H:%M')})" if g.hora_operacion else ""
+        lineas.append(f"  • {g.concepto}: {simbolo}{_fmt_num(g.monto)}{hr}")
+    return None, (
+        f"❓ Hoy tenés {len(candidatos)} gastos de «{identificador}»:\n"
+        + "\n".join(lineas)
+        + "\n\nDecime 'el último' para editar el más reciente, o corregilo desde el panel."
+    )
+
+
+def _editar_gasto(db: Session, identificador: str, campo: str, nuevo_valor: Any) -> DispatchResult:
+    gasto, error = _resolver_gasto_a_editar(db, identificador)
+    if error is not None:
+        return False, error
+    assert gasto is not None  # garantizado por el contrato de _resolver_gasto_a_editar
 
     campos_validos = {"concepto", "monto", "moneda"}
     if campo not in campos_validos:

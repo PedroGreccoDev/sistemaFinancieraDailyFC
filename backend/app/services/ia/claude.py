@@ -201,12 +201,16 @@ OPERACIONES DISPONIBLES
     Ej: "El cheque 12345 tiene mal el porcentaje, era 3% no 2%",
         "Corregí el monto del último movimiento, era 1500 USD",
         "El último gasto era $8000 no $5000",
+        "El gasto de nafta estaba mal, eran $5000",
+        "Cambiá el kiosco a 12 mil",
         "La deuda con Fernando tiene mal el monto, son $6000"
     data:
       - tipo_operacion: "CHEQUE" | "MOVIMIENTO" | "GASTO" | "PASIVO"
       - identificador: string
           * CHEQUE → el nro_cheque (puede ser parcial, ej: "681"; el sistema lo resuelve)
-          * MOVIMIENTO / GASTO → "ultimo" (el más reciente registrado)
+          * MOVIMIENTO → "ultimo" (el más reciente registrado)
+          * GASTO → "ultimo" (si dice "el último"/"lo de recién") o el CONCEPTO del gasto
+            a corregir (ej: "nafta", "kiosco"); el sistema lo busca entre los del día
           * PASIVO → "ultimo" o el nombre del acreedor si se menciona
       - campo: string (qué campo corregir)
           * CHEQUE EN_CARTERA: "monto" | "porcentaje_compra" | "fecha_emision" | "fecha_pago" | "cliente_origen"
