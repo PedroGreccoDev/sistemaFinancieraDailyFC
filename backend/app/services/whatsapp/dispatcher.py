@@ -435,24 +435,48 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any], msg_at: datetime | N
 
 
 def _registrar_gasto(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
-    concepto = _req_str(data, "concepto")
-    monto = _req_decimal(data, "monto")
-    moneda = _req_enum(data, "moneda", Moneda) if data.get("moneda") else Moneda.ARS
+    # Acepta un gasto suelto (concepto/monto en la raíz) o varios en data["gastos"].
+    items = data.get("gastos")
+    if not isinstance(items, list) or not items:
+        items = [data]
 
-    payload = GastoOperativoCreate(
-        concepto=concepto,
-        monto=monto,
-        moneda=moneda,
-        fecha_operacion=msg_at.date() if msg_at else None,
-    )
-    gasto = svc_gastos.create_gasto(db, payload)
+    fecha = msg_at.date() if msg_at else None
+    registrados = []
+    for item in items:
+        concepto = _req_str(item, "concepto")
+        monto = _req_decimal(item, "monto")
+        moneda = _req_enum(item, "moneda", Moneda) if item.get("moneda") else Moneda.ARS
+        gasto = svc_gastos.create_gasto(
+            db,
+            GastoOperativoCreate(
+                concepto=concepto,
+                monto=monto,
+                moneda=moneda,
+                fecha_operacion=fecha,
+            ),
+        )
+        registrados.append(gasto)
 
-    simbolo = "U$D" if gasto.moneda == Moneda.USD else "$"
-    return True, (
-        f"💸 *Gasto registrado*\n"
-        f"Concepto: {gasto.concepto}\n"
-        f"Monto: {simbolo}{_fmt_num(gasto.monto)}"
+    if len(registrados) == 1:
+        g = registrados[0]
+        simbolo = "U$D" if g.moneda == Moneda.USD else "$"
+        return True, (
+            f"💸 *Gasto registrado*\n"
+            f"Concepto: {g.concepto}\n"
+            f"Monto: {simbolo}{_fmt_num(g.monto)}"
+        )
+
+    lines = [f"💸 *{len(registrados)} gastos registrados*"]
+    total_por_moneda: dict[Moneda, Decimal] = {}
+    for g in registrados:
+        simbolo = "U$D" if g.moneda == Moneda.USD else "$"
+        lines.append(f"  • {g.concepto}: {simbolo}{_fmt_num(g.monto)}")
+        total_por_moneda[g.moneda] = total_por_moneda.get(g.moneda, Decimal("0.00")) + g.monto
+    totales = " | ".join(
+        f"{'U$D' if m == Moneda.USD else '$'}{_fmt_num(t)}" for m, t in total_por_moneda.items()
     )
+    lines.append(f"*Total:* {totales}")
+    return True, "\n".join(lines)
 
 
 def _cobrar_fiado_efectivo(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:

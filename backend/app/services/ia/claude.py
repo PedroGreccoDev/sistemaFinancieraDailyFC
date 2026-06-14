@@ -163,12 +163,17 @@ OPERACIONES DISPONIBLES
      - cliente_nombre: string o null
 
 12. REGISTRAR_GASTO
-    Cuándo: El operador cargó un gasto operativo del negocio (nafta, comida, parking, insumos, etc.)
-    Ej: "Cargué 10.000 de nafta", "Gasté 5000 en almuerzo", "Pagué 3500 de estacionamiento"
+    Cuándo: El operador cargó uno o varios gastos operativos del negocio (nafta, comida, parking, insumos, etc.)
+    Ej: "Cargué 10.000 de nafta", "Gasté 5000 en almuerzo", "Pagué 3500 de estacionamiento",
+        "Gasté milqui en YPF y 12 mil en el kiosco" (DOS gastos en un solo mensaje)
+    Si el operador menciona VARIOS gastos en el mismo mensaje, devolvé TODOS en la lista
+    "gastos" (uno por ítem). NUNCA pidas elegir cuál cargar primero: cargá todos.
     data:
-      - concepto: string (descripción del gasto, ej: "nafta", "almuerzo")
-      - monto: number (en ARS salvo que especifiquen USD)
-      - moneda: "ARS" o "USD" (default ARS)
+      - gastos: array de objetos, cada uno con:
+          * concepto: string (descripción del gasto, ej: "nafta", "almuerzo")
+          * monto: number (en ARS salvo que especifiquen USD)
+          * moneda: "ARS" o "USD" (default ARS)
+      (Si es un solo gasto, igual usá la lista con un único elemento.)
 
 13. CONSULTA_CARTERA
     Cuándo: El operador pregunta qué cheques tiene.
@@ -242,6 +247,14 @@ REGLAS CRÍTICAS
 4. Moneda default: ARS, salvo que digan "dólares", "USD", "verdes", "cables".
 5. Fechas → ISO 8601. "15/8/25" → "2025-08-15".
 6. Montos → número puro sin símbolos. "$50.000,50" → 50000.50.
+   Lunfardo/jerga de plata argentina (interpretar SIEMPRE así):
+     - "luca"/"luka" = 1.000 ("dos lucas" = 2000, "luca y media" = 1500).
+     - "milqui" = 1.500 (mil quinientos). "dosqui" = 2.500, "tresqui" = 3.500, etc.
+     - "gamba" = 100. "ponja"/"papota" no son montos.
+     - "palo" = 1.000.000 ("medio palo" = 500.000). "palo verde" = 1.000.000 USD.
+     - "mango"/"mangos"/"peso(s)" = unidad ("5 lucas" → 5000).
+     - "diez mil"/"10 mil"/"10mil"/"10k" = 10.000. "12 mil" = 12000.
+   Ante duda con un modismo de monto, NO inventes: pedí ACLARACION_REQUERIDA.
 7. Nombres → normalizar con mayúsculas. "juan perez" → "Juan Perez".
 8. Si hay imagen de cheque → extraer nro_cheque, monto, fecha_emision, fecha_pago con OCR.
    El porcentaje_compra NUNCA está en el cheque: debe venir del mensaje verbal del operador.
