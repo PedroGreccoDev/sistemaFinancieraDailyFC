@@ -9,12 +9,13 @@ _TTL_MINUTES = 30        # Tiempo de inactividad antes de expirar la sesión
 
 
 class _SessionData:
-    __slots__ = ("history", "last_active", "pending_intent")
+    __slots__ = ("history", "last_active", "pending_intent", "pending_foto")
 
     def __init__(self) -> None:
         self.history: list[dict[str, Any]] = []
         self.last_active: datetime = datetime.now(UTC)
         self.pending_intent: Any = None  # IntentResult | None
+        self.pending_foto: tuple[bytes, str] | None = None  # (bytes, mime) | None
 
     def touch(self) -> None:
         self.last_active = datetime.now(UTC)
@@ -66,6 +67,21 @@ def clear_pending_intent(phone: str) -> None:
     session = _sessions.get(phone)
     if session is not None:
         session.pending_intent = None
+        session.pending_foto = None
+
+
+def set_pending_foto(phone: str, foto: tuple[bytes, str] | None) -> None:
+    """Guarda la foto asociada a un intent pendiente de confirmación."""
+    if foto is None:
+        return
+    session = _get_or_create(phone)
+    session.pending_foto = foto
+
+
+def get_pending_foto(phone: str) -> tuple[bytes, str] | None:
+    """Devuelve la foto del intent pendiente, o None si no hay."""
+    session = _sessions.get(phone)
+    return session.pending_foto if session is not None else None
 
 
 def clear_session(phone: str) -> None:

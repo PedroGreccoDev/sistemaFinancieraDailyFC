@@ -62,6 +62,7 @@ class ChequeRead(BaseModel):
     ultimo_motivo_manual: str | None
     cliente_origen_id: UUID | None
     cliente_destino_id: UUID | None
+    tiene_foto: bool
     created_at: datetime
     updated_at: datetime
 

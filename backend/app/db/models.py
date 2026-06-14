@@ -11,7 +11,7 @@ from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, relationship
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -180,6 +180,15 @@ class Cheque(Base):
     ultimo_evento_manual_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     ultimo_operador_id:      Mapped[str | None]      = mapped_column(sa.String(80), nullable=True)
     ultimo_motivo_manual:    Mapped[str | None]      = mapped_column(sa.Text(),     nullable=True)
+
+    # Foto del cheque (cargado por WhatsApp/OCR). Diferida: los listados nunca
+    # cargan los bytes; solo se leen vía GET /cheques/{nro}/foto.
+    foto:      Mapped[bytes | None] = mapped_column(sa.LargeBinary(), nullable=True, deferred=True)
+    foto_mime: Mapped[str | None]   = mapped_column(sa.String(64),    nullable=True)
+    # Expresión SQL barata: indica si hay foto sin traer los bytes a memoria.
+    tiene_foto = column_property(
+        sa.literal_column("(cheques.foto IS NOT NULL)", type_=sa.Boolean())
+    )
 
     cliente_origen_id:  Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),

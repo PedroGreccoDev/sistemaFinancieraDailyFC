@@ -182,9 +182,12 @@ async def _procesar_mensaje(
             clasificacion = veredicto if veredicto in ("confirm", "reject") else None
         if clasificacion == "confirm":
             logger.info("Operación confirmada por %s (intent=%s)", phone, pending.intent)
+            pending_foto = wa_session.get_pending_foto(phone)
             wa_session.clear_pending_intent(phone)
             wa_session.add_user_message(phone, text_content)
-            await _ejecutar_y_responder(phone=phone, intent_result=pending, msg_at=msg.timestamp)
+            await _ejecutar_y_responder(
+                phone=phone, intent_result=pending, msg_at=msg.timestamp, foto=pending_foto
+            )
             return
         if clasificacion == "reject":
             logger.info("Operación cancelada por %s", phone)
@@ -207,6 +210,12 @@ async def _procesar_mensaje(
 
     # ── 3e. Llamar a Claude ──────────────────────────────────────────────────
     image_bytes = msg.media_bytes if msg.message_type == "image" else None
+    # Foto a persistir si el cheque se carga por imagen (bytes, mime).
+    foto = (
+        (image_bytes, msg.media_mime_type or "image/jpeg")
+        if image_bytes is not None
+        else None
+    )
     intent_result = await ia_claude.extraer_intencion(
         text=text_content,
         image_bytes=image_bytes,
@@ -218,27 +227,34 @@ async def _procesar_mensaje(
     # ── 3f. Dispatch ─────────────────────────────────────────────────────────
     if intent_result.confirmacion_requerida:
         wa_session.set_pending_intent(phone, intent_result)
+        wa_session.set_pending_foto(phone, foto)
         wa_session.add_assistant_message(phone, intent_result.respuesta_usuario)
         await wa_client.send_text(phone, intent_result.respuesta_usuario)
         return
 
-    await _ejecutar_y_responder(phone=phone, intent_result=intent_result, msg_at=msg.timestamp)
+    await _ejecutar_y_responder(
+        phone=phone, intent_result=intent_result, msg_at=msg.timestamp, foto=foto
+    )
 
 
 async def _ejecutar_y_responder(
     phone: str,
     intent_result: ia_claude.IntentResult,
     msg_at: datetime | None = None,
+    foto: tuple[bytes, str] | None = None,
 ) -> None:
     """Ejecuta el dispatch en BD y envía la respuesta al operador."""
     db = SessionLocal()
     try:
-        limpiar_sesion, respuesta = wa_dispatcher.dispatch(db, phone, intent_result, msg_at=msg_at)
+        limpiar_sesion, respuesta = wa_dispatcher.dispatch(
+            db, phone, intent_result, msg_at=msg_at, foto=foto
+        )
     except wa_dispatcher.ConfirmacionRequerida as exc:
         # Un handler pide confirmar antes de impactar (ej: gasto duplicado).
         # Guardamos el mismo intent como pendiente, marcado para no re-preguntar.
         intent_result.data["_dup_confirmado"] = True
         wa_session.set_pending_intent(phone, intent_result)
+        wa_session.set_pending_foto(phone, foto)
         wa_session.add_assistant_message(phone, exc.mensaje)
         await wa_client.send_text(phone, exc.mensaje)
         return

@@ -83,6 +83,7 @@ def dispatch(
     phone: str,
     result: IntentResult,
     msg_at: datetime | None = None,
+    foto: tuple[bytes, str] | None = None,
 ) -> DispatchResult:
     """Ejecuta la operación correspondiente al intent y devuelve la respuesta.
 
@@ -95,7 +96,7 @@ def dispatch(
 
     try:
         if intent == "REGISTRAR_CHEQUE":
-            return _registrar_cheque(db, phone, data, msg_at)
+            return _registrar_cheque(db, phone, data, msg_at, foto)
         if intent == "VENDER_CHEQUE":
             return _vender_cheque(db, phone, data, msg_at)
         if intent == "FIAR_CHEQUE":
@@ -144,7 +145,13 @@ def dispatch(
 # Handlers por intent
 # ────────────────────────────────────────────────────────────────────────────
 
-def _registrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
+def _registrar_cheque(
+    db: Session,
+    phone: str,
+    data: dict[str, Any],
+    msg_at: datetime | None = None,
+    foto: tuple[bytes, str] | None = None,
+) -> DispatchResult:
     nro = _req_str(data, "nro_cheque")
     monto = _req_decimal(data, "monto")
     pct_compra = _req_decimal(data, "porcentaje_compra")
@@ -164,7 +171,10 @@ def _registrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dat
         porcentaje_compra=pct_compra,
         cliente_origen_id=cliente_id,
     )
-    cheque = svc_cheques.create_cheque(db, payload, created_at=msg_at)
+    foto_bytes, foto_mime = foto if foto else (None, None)
+    cheque = svc_cheques.create_cheque(
+        db, payload, created_at=msg_at, foto=foto_bytes, foto_mime=foto_mime
+    )
 
     lines = [
         f"✅ *Cheque registrado en cartera*",

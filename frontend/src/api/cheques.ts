@@ -1,5 +1,9 @@
-import { apiFetch } from './client'
+import { apiFetch, API_BASE } from './client'
 import type { Cheque, Fiado } from '../types'
+
+/** URL directa a la foto del cheque (misma-origen: sirve para <img>, descarga y compartir). */
+export const chequeFotoUrl = (nro_cheque: string): string =>
+  `${API_BASE}/cheques/${encodeURIComponent(nro_cheque)}/foto`
 
 export const getChequeCartera = (): Promise<Cheque[]> =>
   apiFetch<Cheque[]>('/cheques/cartera')

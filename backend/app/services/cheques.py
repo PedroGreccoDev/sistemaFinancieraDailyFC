@@ -30,10 +30,14 @@ def create_cheque(
     db: Session,
     payload: ChequeCreate,
     created_at: datetime | None = None,
+    foto: bytes | None = None,
+    foto_mime: str | None = None,
 ) -> Cheque:
     cheque = Cheque(
         **payload.model_dump(),
         estado=ChequeEstado.EN_CARTERA,
+        foto=foto,
+        foto_mime=foto_mime,
     )
     if created_at is not None:
         cheque.created_at = created_at
@@ -55,6 +59,20 @@ def get_cheque(db: Session, nro_cheque: str) -> Cheque:
     if cheque is None:
         raise NotFoundError("Cheque no encontrado.")
     return cheque
+
+
+def get_cheque_foto(db: Session, nro_cheque: str) -> tuple[bytes, str]:
+    """Devuelve (bytes, mime) de la foto del cheque.
+
+    La columna `foto` es diferida: este acceso dispara la carga del binario solo
+    para este cheque puntual (no para los listados).
+    """
+    cheque = db.get(Cheque, nro_cheque)
+    if cheque is None:
+        raise NotFoundError("Cheque no encontrado.")
+    if cheque.foto is None:
+        raise NotFoundError("El cheque no tiene foto.")
+    return cheque.foto, cheque.foto_mime or "image/jpeg"
 
 
 def list_cheques(db: Session, estado: ChequeEstado | None = None) -> list[Cheque]:

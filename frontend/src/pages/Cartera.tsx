@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getChequeCartera, getCheques } from '../api/cheques'
+import { getChequeCartera, getCheques, chequeFotoUrl } from '../api/cheques'
 import { fmtARS, fmtDate, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
 import { btnBordered } from '../lib/ui'
-import { IconRefresh } from '../components/icons'
+import { IconRefresh, IconCamera } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
+import ChequeFotoModal from '../components/ChequeFotoModal'
 import type { Cheque } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
 import DateRangePicker from '../components/DateRangePicker'
@@ -50,11 +51,28 @@ function totalCartera(cheques: Cheque[]): number {
   return cheques.reduce((acc, c) => acc + parseFloat(c.monto), 0)
 }
 
+/** Miniatura clickeable de la foto del cheque (solo si tiene_foto). */
+function FotoThumb({ cheque, onOpen, size = 38 }: { cheque: Cheque; onOpen: (c: Cheque) => void; size?: number }) {
+  if (!cheque.tiene_foto) {
+    return <span style={{ display: 'inline-block', width: size, height: size, flexShrink: 0 }} />
+  }
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onOpen(cheque) }}
+      title="Ver foto del cheque"
+      style={{ padding: 0, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', overflow: 'hidden', cursor: 'pointer', width: size, height: size, flexShrink: 0, background: 'var(--ov-0025)', display: 'block' }}
+    >
+      <img src={chequeFotoUrl(cheque.nro_cheque)} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+    </button>
+  )
+}
+
 export default function Cartera() {
   const [preset, setPreset] = useState<FilterPreset>('mes')
   const [customDesde, setCustomDesde] = useState<string | null>(null)
   const [customHasta, setCustomHasta] = useState<string | null>(null)
   const [showPicker, setShowPicker] = useState(false)
+  const [fotoCheque, setFotoCheque] = useState<Cheque | null>(null)
 
   function handlePreset(p: FilterPreset) {
     setPreset(p)
@@ -126,9 +144,12 @@ export default function Cartera() {
               const dias = cheque.fecha_pago ? daysUntil(cheque.fecha_pago) : null
               return (
                 <div key={cheque.nro_cheque} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{cheque.nro_cheque}</p>
-                    <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>Pago {fmtDate(cheque.fecha_pago)}</p>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', minWidth: 0 }}>
+                    {cheque.tiene_foto && <FotoThumb cheque={cheque} onOpen={setFotoCheque} size={44} />}
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{cheque.nro_cheque}</p>
+                      <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>Pago {fmtDate(cheque.fecha_pago)}</p>
+                    </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <p style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(cheque.monto)}</p>
@@ -143,6 +164,9 @@ export default function Cartera() {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '540px' }}>
               <thead>
                 <tr>
+                  <th style={{ ...TH, width: '56px', textAlign: 'center' }} aria-label="Foto">
+                    <span style={{ display: 'inline-flex', color: 'rgba(100,116,139,0.7)' }}><IconCamera size={14} /></span>
+                  </th>
                   <th style={TH}>Nº Cheque</th>
                   <th style={{ ...TH, textAlign: 'right' }}>Monto</th>
                   <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">Compra %</th>
@@ -158,6 +182,9 @@ export default function Cartera() {
                     <tr key={cheque.nro_cheque} style={{ transition: 'background 0.1s' }}
                       onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
+                      <td style={{ ...TD, width: '56px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}><FotoThumb cheque={cheque} onOpen={setFotoCheque} /></div>
+                      </td>
                       <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{cheque.nro_cheque}</td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(cheque.monto)}</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.7)' }} className="hidden sm:table-cell">{parseFloat(cheque.porcentaje_compra).toFixed(2)}%</td>
@@ -290,6 +317,8 @@ export default function Cartera() {
           </>
         )}
       </div>
+
+      {fotoCheque && <ChequeFotoModal cheque={fotoCheque} onClose={() => setFotoCheque(null)} />}
     </div>
   )
 }

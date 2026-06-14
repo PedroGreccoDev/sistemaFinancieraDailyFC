@@ -20,6 +20,7 @@ export interface Cheque {
   ultimo_motivo_manual: string | null
   cliente_origen_id: string | null
   cliente_destino_id: string | null
+  tiene_foto: boolean
   created_at: string
   updated_at: string
 }

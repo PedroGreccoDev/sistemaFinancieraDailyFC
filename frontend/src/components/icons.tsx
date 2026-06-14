@@ -39,3 +39,15 @@ export function IconCheck({ size = 18, style, strokeWidth = 2.4 }: P) {
 export function IconAlert({ size = 18, style, strokeWidth = 2.2 }: P) {
   return (<svg {...base(size, strokeWidth)} style={style}><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16.5v.01" /></svg>)
 }
+export function IconCamera({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" /><circle cx="12" cy="13" r="3.2" /></svg>)
+}
+export function IconDownload({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M12 3v12" /><path d="m7 11 5 5 5-5" /><path d="M5 21h14" /></svg>)
+}
+export function IconShare({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="m8.2 10.8 7.6-3.6M8.2 13.2l7.6 3.6" /></svg>)
+}
+export function IconClose({ size = 18, style, strokeWidth = 2.2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M6 6l12 12M18 6 6 18" /></svg>)
+}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.db.models import ChequeEstado
@@ -40,6 +40,16 @@ def list_cartera(db: DbSession) -> list[ChequeRead]:
 @router.get("/{nro_cheque}", response_model=ChequeRead)
 def get_cheque(nro_cheque: str, db: DbSession) -> ChequeRead:
     return service.get_cheque(db, nro_cheque)
+
+
+@router.get("/{nro_cheque}/foto")
+def get_cheque_foto(nro_cheque: str, db: DbSession) -> Response:
+    foto, mime = service.get_cheque_foto(db, nro_cheque)
+    return Response(
+        content=foto,
+        media_type=mime,
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.post("/{nro_cheque}/transiciones", response_model=ChequeRead)
