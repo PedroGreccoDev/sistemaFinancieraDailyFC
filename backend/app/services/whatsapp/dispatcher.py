@@ -678,7 +678,11 @@ def _editar_operacion(db: Session, data: dict[str, Any]) -> DispatchResult:
     if tipo == "MOVIMIENTO":
         return _editar_movimiento(db, identificador, campo, nuevo_valor)
     if tipo == "GASTO":
-        return _editar_gasto(db, identificador, campo, nuevo_valor)
+        return _editar_gasto(
+            db, identificador, campo, nuevo_valor,
+            monto_ref=data.get("monto_referencia"),
+            hora_ref=data.get("hora_referencia"),
+        )
     if tipo == "PASIVO":
         return _editar_pasivo(db, identificador, campo, nuevo_valor)
     return False, f"⚠️ Tipo de operación no reconocido: '{tipo}'."
@@ -831,57 +835,109 @@ def _editar_movimiento(db: Session, identificador: str, campo: str, nuevo_valor:
 _GASTO_ULTIMO_ALIASES = {"ultimo", "último", "el ultimo", "el último", "lo de recien", "lo de recién", ""}
 
 
-def _resolver_gasto_a_editar(
-    db: Session, identificador: str
-) -> tuple[GastoOperativo | None, str | None]:
-    """Resuelve qué gasto editar. Devuelve (gasto, mensaje_de_error).
+def _parse_hora_ref(ref: Any) -> tuple[int, int | None] | None:
+    """Interpreta una referencia de hora ('21:17', '21', '9 hs') → (hora, minuto|None)."""
+    if ref is None:
+        return None
+    texto = str(ref).strip().lower().replace("hs", "").replace("h", "").replace(".", ":")
+    partes = [p.strip() for p in texto.split(":") if p.strip()]
+    if not partes or not partes[0].isdigit():
+        return None
+    hora = int(partes[0])
+    minuto = int(partes[1]) if len(partes) > 1 and partes[1].isdigit() else None
+    if not (0 <= hora <= 23):
+        return None
+    return hora, minuto
 
-    - "ultimo"/"el último" → el más reciente.
-    - cualquier otra cosa → se interpreta como CONCEPTO y se busca entre los gastos
-      de HOY con concepto parecido. Si hay varios, devuelve un error pidiendo aclarar.
+
+def _hora_coincide(hora_op: Any, ref: tuple[int, int | None]) -> bool:
+    """True si la hora del gasto coincide con la referencia. Si la ref no trae minuto,
+    coincide por hora; si lo trae, exige hora y minuto exactos."""
+    if hora_op is None:
+        return False
+    hora, minuto = ref
+    if hora_op.hour != hora:
+        return False
+    return minuto is None or hora_op.minute == minuto
+
+
+def _resolver_gasto_a_editar(
+    db: Session, identificador: str, monto_ref: Any = None, hora_ref: Any = None
+) -> tuple[GastoOperativo | None, str | None]:
+    """Resuelve qué gasto (de HOY) editar. Devuelve (gasto, mensaje_de_error).
+
+    - "ultimo"/"el último" sin selectores → el más reciente.
+    - concepto → gastos de hoy con concepto parecido.
+    - monto_referencia / hora_referencia → afinan la selección ("el de 5000",
+      "el de las 21:17"). Si igual quedan varios, pide desambiguar.
     """
     ident = identificador.strip().lower()
-    if ident in _GASTO_ULTIMO_ALIASES:
+    usar_ultimo = ident in _GASTO_ULTIMO_ALIASES
+    hora_parsed = _parse_hora_ref(hora_ref)
+    monto_parsed: Decimal | None = None
+    if monto_ref is not None:
+        try:
+            monto_parsed = _parse_decimal_val(monto_ref)
+        except (ValueError, InvalidOperation):
+            monto_parsed = None
+
+    # Atajo: "el último" sin ningún selector adicional.
+    if usar_ultimo and monto_parsed is None and hora_parsed is None:
         gasto = db.scalars(
             select(GastoOperativo).order_by(GastoOperativo.created_at.desc()).limit(1)
         ).first()
         if gasto is None:
             return None, "❓ No encontré ningún gasto registrado."
+        if gasto.fecha_operacion != hoy_local():
+            return None, "❓ El último gasto no es de hoy. Editá días anteriores desde el panel web."
         return gasto, None
 
-    # Buscar por concepto entre los gastos del día.
-    deldia = list(
+    # Universo: gastos de HOY (días anteriores solo se editan desde el panel).
+    candidatos = list(
         db.scalars(
             select(GastoOperativo)
             .where(GastoOperativo.fecha_operacion == hoy_local())
             .order_by(GastoOperativo.created_at.desc())
         ).all()
     )
-    candidatos = [g for g in deldia if _concepto_similar(identificador, g.concepto)]
+    if not usar_ultimo and ident:
+        candidatos = [g for g in candidatos if _concepto_similar(identificador, g.concepto)]
+    if monto_parsed is not None:
+        candidatos = [g for g in candidatos if g.monto == monto_parsed]
+    if hora_parsed is not None:
+        candidatos = [g for g in candidatos if _hora_coincide(g.hora_operacion, hora_parsed)]
 
+    referencia = identificador if not usar_ultimo and ident else "ese gasto"
     if not candidatos:
         return None, (
-            f"❓ No encontré un gasto de «{identificador}» hoy. "
-            "Probá con 'el último' o corregilo desde el panel web."
+            f"❓ No encontré un gasto de «{referencia}» hoy con esos datos. "
+            "Revisá la hora/monto o corregilo desde el panel web."
         )
     if len(candidatos) == 1:
         return candidatos[0], None
 
-    # Varios del mismo concepto hoy: listar para que el operador desambigüe.
+    # Siguen siendo varios: listar para que el operador desambigüe por hora o monto.
     lineas = []
     for g in candidatos:
         simbolo = "U$D" if g.moneda == Moneda.USD else "$"
-        hr = f" ({g.hora_operacion.strftime('%H:%M')})" if g.hora_operacion else ""
+        hr = f" a las {g.hora_operacion.strftime('%H:%M')}" if g.hora_operacion else ""
         lineas.append(f"  • {g.concepto}: {simbolo}{_fmt_num(g.monto)}{hr}")
     return None, (
-        f"❓ Hoy tenés {len(candidatos)} gastos de «{identificador}»:\n"
+        f"❓ Hoy tenés {len(candidatos)} gastos parecidos:\n"
         + "\n".join(lineas)
-        + "\n\nDecime 'el último' para editar el más reciente, o corregilo desde el panel."
+        + "\n\nDecime cuál: por la hora (\"el de las 21:17\") o por el monto (\"el de 5000\")."
     )
 
 
-def _editar_gasto(db: Session, identificador: str, campo: str, nuevo_valor: Any) -> DispatchResult:
-    gasto, error = _resolver_gasto_a_editar(db, identificador)
+def _editar_gasto(
+    db: Session,
+    identificador: str,
+    campo: str,
+    nuevo_valor: Any,
+    monto_ref: Any = None,
+    hora_ref: Any = None,
+) -> DispatchResult:
+    gasto, error = _resolver_gasto_a_editar(db, identificador, monto_ref, hora_ref)
     if error is not None:
         return False, error
     assert gasto is not None  # garantizado por el contrato de _resolver_gasto_a_editar

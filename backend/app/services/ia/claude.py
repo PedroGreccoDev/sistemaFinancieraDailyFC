@@ -203,6 +203,8 @@ OPERACIONES DISPONIBLES
         "El último gasto era $8000 no $5000",
         "El gasto de nafta estaba mal, eran $5000",
         "Cambiá el kiosco a 12 mil",
+        "El gasto de nafta de las 21:17 cambialo a 6000",
+        "El de 5000 estaba mal, eran 6000",
         "La deuda con Fernando tiene mal el monto, son $6000"
     data:
       - tipo_operacion: "CHEQUE" | "MOVIMIENTO" | "GASTO" | "PASIVO"
@@ -210,8 +212,16 @@ OPERACIONES DISPONIBLES
           * CHEQUE → el nro_cheque (puede ser parcial, ej: "681"; el sistema lo resuelve)
           * MOVIMIENTO → "ultimo" (el más reciente registrado)
           * GASTO → "ultimo" (si dice "el último"/"lo de recién") o el CONCEPTO del gasto
-            a corregir (ej: "nafta", "kiosco"); el sistema lo busca entre los del día
+            a corregir (ej: "nafta", "kiosco"); el sistema lo busca entre los del día.
+            Solo se pueden editar gastos de HOY desde el chat.
           * PASIVO → "ultimo" o el nombre del acreedor si se menciona
+      - hora_referencia: SOLO para GASTO. "HH:MM" o "HH" si el operador identifica el
+        gasto por su hora ("el de las 21:17", "el de las 9"). null si no la menciona.
+      - monto_referencia: SOLO para GASTO. El monto ACTUAL del gasto, cuando el operador
+        lo identifica por su importe ("el de 5000", "el gasto de nafta de 5000"). null si no.
+        ⚠️ OJO: monto_referencia es el valor VIEJO para encontrar el gasto; nuevo_valor es
+        el valor corregido. En "el de 5000 cambialo a 6000": monto_referencia=5000,
+        campo="monto", nuevo_valor=6000.
       - campo: string (qué campo corregir)
           * CHEQUE EN_CARTERA: "monto" | "porcentaje_compra" | "fecha_emision" | "fecha_pago" | "cliente_origen"
           * CHEQUE VENDIDO o FIADO: todo lo anterior + "porcentaje_venta" | "cliente_destino"
