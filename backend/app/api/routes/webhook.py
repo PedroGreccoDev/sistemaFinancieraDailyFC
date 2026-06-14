@@ -21,15 +21,34 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
-# Palabras que el operador usa para confirmar o cancelar una operación pendiente
+# Palabras y modismos (rioplatenses) que el operador usa para confirmar o cancelar.
+# Lo que no caiga acá se resuelve con el clasificador de Claude (clasificar_confirmacion).
 _CONFIRM_WORDS = frozenset({
-    "sí", "si", "ok", "oka", "okey", "okay", "dale", "confirmar", "confirmo",
-    "confirmado", "yes", "ya", "va", "vamos", "s", "👍", "correcto", "perfecto",
-    "exacto", "tal cual", "obvio", "claro", "listo", "joya",
+    # afirmaciones básicas
+    "sí", "si", "ok", "okk", "oka", "okey", "okay", "yes", "yep", "sip", "sipi",
+    "s", "ya", "va", "vamos", "vale", "bueno", "buenas",
+    # confirmaciones explícitas
+    "confirmar", "confirmo", "confirmado", "confirmá", "afirmativo",
+    # modismos argentinos
+    "dale", "de una", "deuna", "obvio", "obviamente", "tal cual", "talcual",
+    "claro", "correcto", "perfecto", "exacto", "listo", "joya", "barbaro",
+    "bárbaro", "buenisimo", "buenísimo", "genial", "mandale", "mandalé", "metele",
+    "metelé", "sale", "hacelo", "andá", "anda", "y dale", "es asi", "es así",
+    "asi es", "así es", "de diez", "de10", "todo bien",
+    # emojis
+    "👍", "👌", "✅", "🤝",
 })
 _REJECT_WORDS = frozenset({
-    "no", "cancelar", "cancelá", "cancela", "cancel", "nop", "nope", "n",
-    "negativo", "para", "pará", "frená", "frena", "mejor no", "no no",
+    # negaciones básicas
+    "no", "nop", "nope", "naa", "nah", "nahh", "n", "negativo", "nones",
+    # cancelaciones explícitas
+    "cancelar", "cancelá", "cancela", "cancel", "anular", "anulá",
+    # modismos argentinos
+    "para", "pará", "frená", "frena", "olvidate", "olvidalo", "dejá", "deja",
+    "dejalo", "borra", "borralo", "borrá", "mejor no", "no no", "ni ahí",
+    "ni ahi", "ni en pedo", "ni a palos", "ni loco", "minga", "no va", "nada",
+    # emojis
+    "👎", "❌", "🚫",
 })
 
 
@@ -156,6 +175,11 @@ async def _procesar_mensaje(
     pending = wa_session.get_pending_intent(phone)
     if pending is not None and msg.message_type == "text":
         clasificacion = _clasificar_respuesta(text_content)
+        # La lista rápida no reconoció el modismo: que Claude lo interprete antes de cancelar
+        if clasificacion is None:
+            logger.info("Confirmación ambigua de %s — consultando a Claude: %r", phone, text_content)
+            veredicto = await ia_claude.clasificar_confirmacion(text_content)
+            clasificacion = veredicto if veredicto in ("confirm", "reject") else None
         if clasificacion == "confirm":
             logger.info("Operación confirmada por %s (intent=%s)", phone, pending.intent)
             wa_session.clear_pending_intent(phone)

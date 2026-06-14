@@ -338,6 +338,61 @@ def _parse_json_object(raw_text: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Clasificador de confirmación (modismos argentinos)
+# ---------------------------------------------------------------------------
+_CONFIRM_CLASSIFIER_PROMPT = """
+Sos un clasificador. El operador de un sistema financiero argentino respondió a un
+pedido de confirmación de una operación (el bot le preguntó "¿Confirmar?").
+
+Tu tarea: decidir si la respuesta es una CONFIRMACIÓN (sí, dale, adelante) o un
+RECHAZO (no, cancelar, frená), interpretando jerga y modismos rioplatenses.
+
+Ejemplos de confirmación: "dale", "de una", "obvio", "tal cual", "mandale",
+"metele", "joya", "de diez", "y dale", "afirmativo", "sí obvio", "está perfecto",
+"sale", "andá", "hacelo", "listo el pollo".
+Ejemplos de rechazo: "ni en pedo", "ni a palos", "ni ahí", "olvidate", "dejá",
+"frená", "pará", "mejor no", "borralo", "negativo", "minga", "nones", "naa".
+
+Respondé con UNA sola palabra, sin puntuación ni nada más:
+- "confirm" si es confirmación.
+- "reject" si es rechazo.
+- "unclear" si es ambiguo, una pregunta, o no se entiende como sí/no.
+""".strip()
+
+
+async def clasificar_confirmacion(text: str) -> str:
+    """Clasifica una respuesta corta del operador a un pedido de confirmación.
+
+    Pensado como fallback cuando la lista rápida local no reconoce el modismo.
+    Usa Haiku (barato y veloz) porque es una tarea de clasificación trivial.
+
+    Returns:
+        'confirm', 'reject' o 'unclear' (este último también ante cualquier error).
+    """
+    text = (text or "").strip()
+    if not text:
+        return "unclear"
+
+    try:
+        client = _get_client()
+        response = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=8,
+            system=_CONFIRM_CLASSIFIER_PROMPT,
+            messages=[{"role": "user", "content": text}],
+        )
+        veredicto = response.content[0].text.strip().lower()
+        if "confirm" in veredicto:
+            return "confirm"
+        if "reject" in veredicto:
+            return "reject"
+        return "unclear"
+    except Exception as exc:
+        logger.error("Error clasificando confirmación con Claude: %s", exc)
+        return "unclear"
+
+
+# ---------------------------------------------------------------------------
 # Cliente Claude
 # ---------------------------------------------------------------------------
 async def extraer_intencion(
