@@ -200,7 +200,7 @@ function ModalResultado({ result, onClose }: { result: CobrarConChequeResult; on
 
 function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const queryClient = useQueryClient()
-  const [chequeNro, setChequeNro] = useState('')
+  const [chequeId, setChequeId] = useState('')
   const [clienteId, setClienteId] = useState('')
   const [pct, setPct] = useState('')
   const [motivo, setMotivo] = useState('')
@@ -217,7 +217,7 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
   const { data: cartera } = useQuery({ queryKey: ['cartera'], queryFn: getChequeCartera })
   const { data: clientes } = useQuery({ queryKey: ['clientes'], queryFn: getClientes, staleTime: 60_000 })
 
-  const chequeSeleccionado = cartera?.find((c) => c.nro_cheque === chequeNro)
+  const chequeSeleccionado = cartera?.find((c) => c.id === chequeId)
   const pctNum = parseFloat(pct) || 0
   const montoNominal = chequeSeleccionado ? parseFloat(chequeSeleccionado.monto) : 0
   const saldoInicial = montoNominal * (100 - pctNum) / 100
@@ -236,7 +236,7 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault(); setError(null); setLoading(true)
-    try { await fiarCheque(chequeNro, { cliente_destino_id: clienteId, porcentaje_venta: pctNum, motivo: motivo.trim(), operador_id: 'panel-web' }); toast('success', 'Cheque fiado'); onSuccess() }
+    try { await fiarCheque(chequeId, { cliente_destino_id: clienteId, porcentaje_venta: pctNum, motivo: motivo.trim(), operador_id: 'panel-web' }); toast('success', 'Cheque fiado'); onSuccess() }
     catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
   }
@@ -251,9 +251,9 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
           <div>
             <label style={LABEL_STYLE}>Cheque</label>
-            <select value={chequeNro} onChange={(e) => setChequeNro(e.target.value)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+            <select value={chequeId} onChange={(e) => setChequeId(e.target.value)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
               <option value="">Seleccionar cheque…</option>
-              {cartera?.map((c) => <option key={c.nro_cheque} value={c.nro_cheque}>{c.nro_cheque} · {fmtARS(parseFloat(c.monto))}</option>)}
+              {cartera?.map((c) => <option key={c.id} value={c.id}>{c.nro_cheque}{c.banco ? ` · ${c.banco}` : ''} · {fmtARS(parseFloat(c.monto))}</option>)}
             </select>
           </div>
 

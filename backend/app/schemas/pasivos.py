@@ -28,7 +28,7 @@ class PasivoCancelarEfectivoRequest(BaseModel):
 
 
 class PasivoCancelarConChequeRequest(BaseModel):
-    nro_cheque: str = Field(min_length=1, max_length=64)
+    cheque_id: UUID
     porcentaje_venta: Decimal = Field(ge=Decimal("0"), le=Decimal("100"))
     operador_id: str = Field(min_length=1, max_length=80)
     motivo: str = Field(min_length=1)

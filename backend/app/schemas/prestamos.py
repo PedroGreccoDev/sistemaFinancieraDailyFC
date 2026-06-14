@@ -26,7 +26,6 @@ class PrestamoBase(BaseModel):
 
 class PrestamoCreate(PrestamoBase):
     cliente_id: UUID
-    cheque_origen_nro: str | None = Field(default=None, max_length=64)
 
 
 class PrestamoCreateFromCheque(PrestamoBase):
@@ -52,7 +51,6 @@ class PrestamoRead(BaseModel):
 
     id: UUID
     cliente_id: UUID
-    cheque_origen_nro: str | None
     credito: Decimal
     moneda: Moneda
     cuotas: int

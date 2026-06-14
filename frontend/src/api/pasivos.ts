@@ -31,7 +31,7 @@ export const cancelarPasivoEfectivo = (
   })
 
 export interface CancelarConChequePayload {
-  nro_cheque: string
+  cheque_id: string
   porcentaje_venta: number
   operador_id: string
   motivo: string

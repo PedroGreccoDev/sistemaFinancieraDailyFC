@@ -7,7 +7,9 @@ export type PasivoEstado = 'PENDIENTE' | 'CANCELADA'
 export type FiadoEstado = 'ABIERTO' | 'CANCELADO'
 
 export interface Cheque {
+  id: string
   nro_cheque: string
+  banco: string | null
   monto: string
   fecha_emision: string | null
   fecha_pago: string | null
@@ -40,7 +42,6 @@ export interface Cuota {
 export interface Prestamo {
   id: string
   cliente_id: string
-  cheque_origen_nro: string | null
   credito: string
   moneda: Moneda
   cuotas: number

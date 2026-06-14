@@ -165,9 +165,17 @@ class Cheque(Base):
             "fecha_pago IS NULL OR fecha_emision IS NULL OR fecha_pago >= fecha_emision",
             name="ck_cheques_fecha_pago_after_emision",
         ),
+        # El número de cheque NO es único globalmente: solo lo es dentro de un mismo
+        # banco. Dos cheques de bancos distintos pueden compartir número. Por eso la
+        # identidad es la PK subrogada `id` y la unicidad es (banco, nro_cheque).
+        # Nota: en Postgres NULL es distinto de NULL, así que cheques sin banco
+        # detectado no chocan entre sí (se permiten cargar igual).
+        sa.UniqueConstraint("banco", "nro_cheque", name="uq_cheques_banco_nro"),
     )
 
-    nro_cheque:        Mapped[str]           = mapped_column(sa.String(64), primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    nro_cheque:        Mapped[str]           = mapped_column(sa.String(64), nullable=False, index=True)
+    banco:             Mapped[str | None]    = mapped_column(sa.String(120), nullable=True)
     monto:             Mapped[Decimal]        = mapped_column(sa.Numeric(18, 2))
     fecha_emision:     Mapped[date | None]    = mapped_column(sa.Date(),        nullable=True)
     fecha_pago:        Mapped[date | None]    = mapped_column(sa.Date(),        nullable=True)
@@ -210,9 +218,6 @@ class Cheque(Base):
     )
     cliente_destino: Mapped[Cliente | None] = relationship(
         "Cliente", foreign_keys=[cliente_destino_id], back_populates="cheques_destino"
-    )
-    prestamo_originado: Mapped[Prestamo | None] = relationship(
-        "Prestamo", back_populates="cheque_origen", uselist=False
     )
     fiado_originado: Mapped[Fiado | None] = relationship(
         "Fiado", back_populates="cheque", uselist=False
@@ -293,12 +298,6 @@ class Prestamo(Base):
         sa.ForeignKey("clientes.id", ondelete="RESTRICT"),
         index=True,
     )
-    cheque_origen_nro: Mapped[str | None] = mapped_column(
-        sa.String(64),
-        sa.ForeignKey("cheques.nro_cheque", ondelete="SET NULL"),
-        nullable=True,
-    )
-
     credito:        Mapped[Decimal]          = mapped_column(sa.Numeric(18, 2))
     moneda:         Mapped[Moneda]           = mapped_column(sa.Enum(Moneda,           name="moneda",           create_type=False))
     cuotas:         Mapped[int]              = mapped_column(sa.Integer())
@@ -317,7 +316,6 @@ class Prestamo(Base):
     )
 
     cliente:        Mapped[Cliente]       = relationship("Cliente", back_populates="prestamos")
-    cheque_origen:  Mapped[Cheque | None] = relationship("Cheque",  back_populates="prestamo_originado")
     cuotas_detalle: Mapped[list[Cuota]]   = relationship(
         "Cuota",
         back_populates="prestamo",
@@ -419,9 +417,9 @@ class Fiado(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
-    cheque_nro: Mapped[str] = mapped_column(
-        sa.String(64),
-        sa.ForeignKey("cheques.nro_cheque", ondelete="RESTRICT"),
+    cheque_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        sa.ForeignKey("cheques.id", ondelete="RESTRICT"),
         unique=True, index=True,
     )
     cliente_id: Mapped[uuid.UUID] = mapped_column(
@@ -446,6 +444,12 @@ class Fiado(Base):
 
     cheque:  Mapped[Cheque]  = relationship("Cheque",  back_populates="fiado_originado")
     cliente: Mapped[Cliente] = relationship("Cliente", back_populates="fiados")
+
+    @property
+    def cheque_nro(self) -> str | None:
+        """Número del cheque originante. Atajo de lectura sobre la relación, para
+        seguir exponiendo `cheque_nro` en la API y el bot sin guardarlo duplicado."""
+        return self.cheque.nro_cheque if self.cheque else None
 
 
 # ══════════════════════════════════════════════════════════════════════

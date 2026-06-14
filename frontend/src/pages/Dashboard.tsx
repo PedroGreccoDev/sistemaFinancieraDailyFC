@@ -230,7 +230,7 @@ export default function Dashboard() {
   const proximos         = chequesPorVencer(cheques ?? [], 7)
 
   const actividad = [
-    ...(cheques  ?? []).map((c) => ({ tipo: 'cheque'   as const, id: c.nro_cheque,  label: `Cheque ${c.nro_cheque}`,                           sub: fmtARS(c.monto),              date: c.created_at })),
+    ...(cheques  ?? []).map((c) => ({ tipo: 'cheque'   as const, id: c.id,          label: `Cheque ${c.nro_cheque}`,                           sub: fmtARS(c.monto),              date: c.created_at })),
     ...(prestamos ?? []).map((p) => ({ tipo: 'prestamo' as const, id: p.id,          label: `Préstamo — ${clienteMap.get(p.cliente_id) ?? '…'}`, sub: fmtMonto(p.credito, p.moneda), date: p.created_at })),
   ]
     .sort((a, b) => b.date.localeCompare(a.date))
@@ -360,7 +360,7 @@ export default function Dashboard() {
               const dias = daysUntil(c.fecha_pago!)
               return (
                 <RowItem
-                  key={c.nro_cheque}
+                  key={c.id}
                   primary={c.nro_cheque}
                   secondary={dias === 0 ? 'Vence hoy' : `Vence en ${dias}d · ${fmtDate(c.fecha_pago)}`}
                   value={fmtARS(c.monto)}

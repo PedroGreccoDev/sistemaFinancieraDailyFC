@@ -68,8 +68,8 @@ function normalizar(
 
   for (const c of cheques) {
     items.push({
-      id: c.nro_cheque, seccion: 'CHEQUES', fecha: c.created_at.slice(0, 10),
-      descripcion: `Nº ${c.nro_cheque}`,
+      id: c.id, seccion: 'CHEQUES', fecha: c.created_at.slice(0, 10),
+      descripcion: `Nº ${c.nro_cheque}${c.banco ? ` · ${c.banco}` : ''}`,
       detalle: `${c.estado.replace('_', ' ')} · compra ${parseFloat(c.porcentaje_compra.toString()).toLocaleString('es-AR', { maximumFractionDigits: 2 })}%`,
       monto: c.monto, moneda: 'ARS', esGasto: false,
     })

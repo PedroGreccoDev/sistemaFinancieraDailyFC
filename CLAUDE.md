@@ -23,6 +23,12 @@ Guía de referencia rápida para el asistente de IA. Lee esto antes de tocar cua
 
 ### 1. Chequera Virtual
 
+- **Identidad:** la PK de `cheques` es la subrogada `id` (UUID). El `nro_cheque` **no es
+  único globalmente** (solo lo es dentro de un banco); por eso la unicidad real es
+  `(banco, nro_cheque)`. El operador/OCR registra el `banco`; si no se detecta queda
+  `NULL` y la unicidad no bloquea (en Postgres NULL ≠ NULL). Las referencias del bot por
+  número se resuelven con `svc_cheques.resolve_cheque`, que pide desambiguar por banco si
+  hay varios candidatos. La API identifica cheques por `id`, no por número.
 - Un cheque nuevo **siempre** entra en estado `EN_CARTERA`.
 - La máquina de estados es **estricta**: `EN_CARTERA` → `VENDIDO | FIADO | COBRADO | RECHAZADO`.
 - Los estados `VENDIDO`, `FIADO`, `COBRADO` y `RECHAZADO` son **terminales**: no admiten más cambios.

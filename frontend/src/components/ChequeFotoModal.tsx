@@ -33,7 +33,7 @@ export default function ChequeFotoModal({ cheque, onClose }: { cheque: Cheque; o
   useEffect(() => {
     let revoked: string | null = null
     let cancelled = false
-    fetch(chequeFotoUrl(cheque.nro_cheque))
+    fetch(chequeFotoUrl(cheque.id))
       .then((r) => { if (!r.ok) throw new Error('fetch'); return r.blob() })
       .then((b) => {
         if (cancelled) return
@@ -44,7 +44,7 @@ export default function ChequeFotoModal({ cheque, onClose }: { cheque: Cheque; o
       })
       .catch(() => { if (!cancelled) setError(true) })
     return () => { cancelled = true; if (revoked) URL.revokeObjectURL(revoked) }
-  }, [cheque.nro_cheque])
+  }, [cheque.id])
 
   const filename = `cheque-${cheque.nro_cheque}.${blob ? extFromMime(blob.type) : 'jpg'}`
 

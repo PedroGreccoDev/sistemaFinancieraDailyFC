@@ -31,6 +31,7 @@ class FiadoCobrarEfectivoRequest(BaseModel):
 
 class FiadoCobrarConChequeRequest(BaseModel):
     nro_cheque_pago: str = Field(min_length=1, max_length=64)
+    banco_pago: str | None = Field(default=None, max_length=120)
     monto_cheque: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     porcentaje_compra_cheque: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
     fecha_emision: date | None = None

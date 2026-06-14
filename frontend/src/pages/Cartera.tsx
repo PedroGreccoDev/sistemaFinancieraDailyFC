@@ -62,7 +62,7 @@ function FotoThumb({ cheque, onOpen, size = 38 }: { cheque: Cheque; onOpen: (c: 
       title="Ver foto del cheque"
       style={{ padding: 0, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', overflow: 'hidden', cursor: 'pointer', width: size, height: size, flexShrink: 0, background: 'var(--ov-0025)', display: 'block' }}
     >
-      <img src={chequeFotoUrl(cheque.nro_cheque)} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      <img src={chequeFotoUrl(cheque.id)} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
     </button>
   )
 }
@@ -143,7 +143,7 @@ export default function Cartera() {
             {sorted.map((cheque) => {
               const dias = cheque.fecha_pago ? daysUntil(cheque.fecha_pago) : null
               return (
-                <div key={cheque.nro_cheque} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
+                <div key={cheque.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', minWidth: 0 }}>
                     {cheque.tiene_foto && <FotoThumb cheque={cheque} onOpen={setFotoCheque} size={44} />}
                     <div style={{ minWidth: 0 }}>
@@ -179,7 +179,7 @@ export default function Cartera() {
                 {sorted.map((cheque) => {
                   const dias = cheque.fecha_pago ? daysUntil(cheque.fecha_pago) : null
                   return (
-                    <tr key={cheque.nro_cheque} style={{ transition: 'background 0.1s' }}
+                    <tr key={cheque.id} style={{ transition: 'background 0.1s' }}
                       onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                       <td style={{ ...TD, width: '56px' }}>
@@ -252,7 +252,7 @@ export default function Cartera() {
           <div className="sm:hidden">
             {filteredVendidos.map((c) => {
               return (
-                <div key={c.nro_cheque} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
+                <div key={c.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{c.nro_cheque}</p>
                     <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>
@@ -287,7 +287,7 @@ export default function Cartera() {
               <tbody>
                 {filteredVendidos.map(c => {
                   return (
-                    <tr key={c.nro_cheque}
+                    <tr key={c.id}
                       onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                       <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{c.nro_cheque}</td>

@@ -12,6 +12,7 @@ from app.schemas.fiados import FiadoRead
 
 class ChequeCreate(BaseModel):
     nro_cheque: str = Field(min_length=1, max_length=64)
+    banco: str | None = Field(default=None, max_length=120)
     monto: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     fecha_emision: date | None = None
     fecha_pago: date | None = None
@@ -49,7 +50,9 @@ class ChequeFiarRequest(BaseModel):
 class ChequeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: UUID
     nro_cheque: str
+    banco: str | None
     monto: Decimal
     fecha_emision: date | None
     fecha_pago: date | None

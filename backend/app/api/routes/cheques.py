@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
@@ -37,14 +38,14 @@ def list_cartera(db: DbSession) -> list[ChequeRead]:
     return service.list_cheques(db, ChequeEstado.EN_CARTERA)
 
 
-@router.get("/{nro_cheque}", response_model=ChequeRead)
-def get_cheque(nro_cheque: str, db: DbSession) -> ChequeRead:
-    return service.get_cheque(db, nro_cheque)
+@router.get("/{cheque_id}", response_model=ChequeRead)
+def get_cheque(cheque_id: UUID, db: DbSession) -> ChequeRead:
+    return service.get_cheque(db, cheque_id)
 
 
-@router.get("/{nro_cheque}/foto")
-def get_cheque_foto(nro_cheque: str, db: DbSession) -> Response:
-    foto, mime = service.get_cheque_foto(db, nro_cheque)
+@router.get("/{cheque_id}/foto")
+def get_cheque_foto(cheque_id: UUID, db: DbSession) -> Response:
+    foto, mime = service.get_cheque_foto(db, cheque_id)
     return Response(
         content=foto,
         media_type=mime,
@@ -52,21 +53,21 @@ def get_cheque_foto(nro_cheque: str, db: DbSession) -> Response:
     )
 
 
-@router.post("/{nro_cheque}/transiciones", response_model=ChequeRead)
+@router.post("/{cheque_id}/transiciones", response_model=ChequeRead)
 def transition_cheque(
-    nro_cheque: str,
+    cheque_id: UUID,
     payload: ChequeManualTransition,
     db: DbSession,
 ) -> ChequeRead:
-    return service.transition_cheque(db, nro_cheque, payload)
+    return service.transition_cheque(db, cheque_id, payload)
 
 
-@router.post("/{nro_cheque}/fiar", response_model=ChequeFiarResponse)
+@router.post("/{cheque_id}/fiar", response_model=ChequeFiarResponse)
 def fiar_cheque(
-    nro_cheque: str,
+    cheque_id: UUID,
     payload: ChequeFiarRequest,
     db: DbSession,
 ) -> ChequeFiarResponse:
-    cheque, fiado = service.fiar_cheque(db, nro_cheque, payload)
+    cheque, fiado = service.fiar_cheque(db, cheque_id, payload)
     return ChequeFiarResponse(cheque=cheque, fiado=fiado)
 

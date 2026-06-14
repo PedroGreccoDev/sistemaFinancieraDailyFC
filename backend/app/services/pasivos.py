@@ -119,13 +119,13 @@ def cancelar_con_cheque(
         raise ConflictError("El pasivo ya está cancelado.")
 
     cheque = db.scalar(
-        select(Cheque).where(Cheque.nro_cheque == payload.nro_cheque).with_for_update()
+        select(Cheque).where(Cheque.id == payload.cheque_id).with_for_update()
     )
     if cheque is None:
-        raise NotFoundError(f"Cheque '{payload.nro_cheque}' no encontrado.")
+        raise NotFoundError(f"Cheque '{payload.cheque_id}' no encontrado.")
     if cheque.estado != ChequeEstado.EN_CARTERA:
         raise ConflictError(
-            f"El cheque '{payload.nro_cheque}' no está en cartera "
+            f"El cheque Nº {cheque.nro_cheque} no está en cartera "
             f"(estado: {cheque.estado.value})."
         )
 

@@ -65,6 +65,8 @@ OPERACIONES DISPONIBLES
    Cuándo: El operador manda foto de cheque o dicta datos de uno nuevo.
    data:
      - nro_cheque: string (número del cheque, sin espacios ni guiones)
+     - banco: string o null (nombre del banco emisor; leerlo del cheque o del mensaje.
+       Es CLAVE: el número de cheque solo es único dentro de un banco.)
      - monto: number ("$50.000,50" → 50000.50)
      - porcentaje_compra: number (% que pagó para comprarlo)
      - fecha_emision: "YYYY-MM-DD" o null
@@ -76,6 +78,8 @@ OPERACIONES DISPONIBLES
    Ej: "Vendí el 12345 al 3%", "Lo vendí al 2.5% a Juan"
    data:
      - nro_cheque: string
+     - banco: string o null (si lo menciona; sirve para desambiguar si hay varios
+       cheques con el mismo número de bancos distintos)
      - porcentaje_venta: number
      - cliente_nombre: string o null (a quién se vendió)
 
@@ -85,6 +89,7 @@ OPERACIONES DISPONIBLES
    La deuda queda abierta: el cliente pagará en efectivo o con otro cheque cuando pueda.
    data:
      - nro_cheque: string
+     - banco: string o null (si lo menciona; para desambiguar números repetidos entre bancos)
      - cliente_nombre: string
      - porcentaje_venta: number (% de descuento pactado; el cliente deberá el monto menos ese %)
 
@@ -93,12 +98,14 @@ OPERACIONES DISPONIBLES
    Ej: "Cobré el cheque 12345", "Pasé el 12345 por ventanilla"
    data:
      - nro_cheque: string
+     - banco: string o null (si lo menciona; para desambiguar números repetidos entre bancos)
 
 5. RECHAZAR_CHEQUE
    Cuándo: El cheque rebotó o fue rechazado por el banco.
    Ej: "Rebotó el 12345", "Me rechazaron el cheque"
    data:
      - nro_cheque: string
+     - banco: string o null (si lo menciona; para desambiguar números repetidos entre bancos)
 
 6. NUEVO_PRESTAMO
    Cuándo: El operador prestó dinero directamente (sin cheque).
@@ -134,6 +141,7 @@ OPERACIONES DISPONIBLES
    data:
      - cliente_nombre: string
      - nro_cheque_pago: string (número del cheque que entrega como pago)
+     - banco_pago: string o null (banco del cheque que entrega; leerlo del cheque o del mensaje)
      - monto_cheque: number (valor nominal del cheque)
      - porcentaje_compra_cheque: number (% de compra de ese cheque)
      - fecha_emision: "YYYY-MM-DD" o null
@@ -270,10 +278,14 @@ REGLAS CRÍTICAS
      - "diez mil"/"10 mil"/"10mil"/"10k" = 10.000. "12 mil" = 12000.
    Ante duda con un modismo de monto, NO inventes: pedí ACLARACION_REQUERIDA.
 7. Nombres → normalizar con mayúsculas. "juan perez" → "Juan Perez".
-8. Si hay imagen de cheque → extraer nro_cheque, monto, fecha_emision, fecha_pago con OCR.
+8. Si hay imagen de cheque → extraer nro_cheque, banco, monto, fecha_emision, fecha_pago con OCR.
+   El banco es el nombre de la entidad emisora impreso en el cheque (ej: "Banco Nación",
+   "Santander", "Galicia", "BBVA"). Es importante porque el número de cheque se repite
+   entre bancos: sin banco, dos cheques distintos pueden parecer el mismo.
    El porcentaje_compra NUNCA está en el cheque: debe venir del mensaje verbal del operador.
    Si no lo menciona → ACLARACION_REQUERIDA.
-9. Si el cheque tiene CUIT o número de cuenta, ignorarlo (no es parte del modelo).
+9. Si el cheque tiene CUIT o número de cuenta, ignorarlo (no es parte del modelo). El
+   banco SÍ se registra (no confundir el banco con el CUIT/cuenta).
 10. Si el monto supera $500.000 ARS o 500 USD, o la operación es RECHAZAR_CHEQUE,
     pon confirmacion_requerida: true y describí la operación completa en respuesta_usuario.
     FIAR_CHEQUE solo requiere confirmación si el monto nominal del cheque supera $500.000 ARS.
@@ -285,6 +297,8 @@ REGLAS CRÍTICAS
     (ej: "03789681"), usá SIEMPRE el número completo del historial como nro_cheque.
     Si hay ambigüedad o no hay historial con ese cheque → ponés el parcial igual y el
     sistema lo resuelve en la BD. Solo usá ACLARACION_REQUERIDA si hay ambigüedad real.
+    Si el operador aclara el banco para distinguir cheques con el mismo número
+    (ej: "el del Santander"), incluilo en data.banco para que el sistema lo resuelva.
 13. Reconstrucción multi-turno: si el mensaje actual parece ser la respuesta a una
     pregunta de aclaración del asistente (ej: el asistente preguntó qué cheque o qué
     dato, y el operador ahora responde con un número, un nombre o un valor), reconstruí

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -48,26 +49,80 @@ def create_cheque(
         return cheque
     except IntegrityError as exc:
         db.rollback()
-        raise ConflictError("Ya existe un cheque con ese numero.") from exc
+        raise ConflictError(_msg_duplicado(db, payload.nro_cheque, payload.banco)) from exc
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("No se pudo crear el cheque.") from exc
 
 
-def get_cheque(db: Session, nro_cheque: str) -> Cheque:
-    cheque = db.get(Cheque, nro_cheque)
+def _msg_duplicado(db: Session, nro_cheque: str, banco: str | None) -> str:
+    """Mensaje informativo cuando choca la unicidad (banco, nro_cheque).
+
+    En vez de un escueto "ya existe", devolvemos los datos del cheque que ya estaba
+    cargado para que el operador distinga un duplicado real de un cheque homónimo de
+    otro banco o de data vieja."""
+    existente = db.scalar(
+        select(Cheque).where(Cheque.nro_cheque == nro_cheque, Cheque.banco == banco)
+    )
+    if existente is None:
+        return "Ya existe un cheque con ese número y banco."
+    banco_txt = f" del banco {existente.banco}" if existente.banco else ""
+    fecha = existente.created_at.strftime("%d/%m/%y") if existente.created_at else "—"
+    return (
+        f"Ya existe el cheque Nº {existente.nro_cheque}{banco_txt}: "
+        f"${existente.monto:,.2f}, estado {existente.estado.value}, cargado el {fecha}. "
+        "Si es otro cheque distinto, indicá el banco para diferenciarlo."
+    )
+
+
+def get_cheque(db: Session, cheque_id: uuid.UUID) -> Cheque:
+    cheque = db.get(Cheque, cheque_id)
     if cheque is None:
         raise NotFoundError("Cheque no encontrado.")
     return cheque
 
 
-def get_cheque_foto(db: Session, nro_cheque: str) -> tuple[bytes, str]:
+def resolve_cheque(db: Session, nro: str, banco: str | None = None) -> Cheque:
+    """Resuelve una referencia a un cheque (número, posiblemente parcial) a una fila.
+
+    El operador suele nombrar el cheque por su número (a veces solo los últimos
+    dígitos). Como el número ya NO es único entre bancos, esta función:
+      1. Busca por número exacto; si no hay, por sufijo ("el 681" → "…03789681").
+      2. Si se indicó banco, filtra por él.
+      3. Si queda exactamente uno, lo devuelve; si hay varios, pide desambiguar por banco.
+    """
+    nro = (nro or "").strip()
+    if not nro:
+        raise ValidationError("Indicá el número de cheque.")
+
+    matches = list(db.scalars(select(Cheque).where(Cheque.nro_cheque == nro)))
+    if not matches:
+        matches = list(db.scalars(select(Cheque).where(Cheque.nro_cheque.endswith(nro))))
+    if not matches:
+        raise NotFoundError(f"No encontré ningún cheque con el número '{nro}'.")
+
+    if banco:
+        filtrados = [c for c in matches if c.banco and banco.lower() in c.banco.lower()]
+        if filtrados:
+            matches = filtrados
+
+    if len(matches) == 1:
+        return matches[0]
+
+    detalle = ", ".join(f"{c.nro_cheque} ({c.banco or 'sin banco'})" for c in matches[:5])
+    raise ValidationError(
+        f"Hay {len(matches)} cheques con ese número: {detalle}. "
+        "Indicá el banco para distinguirlos."
+    )
+
+
+def get_cheque_foto(db: Session, cheque_id: uuid.UUID) -> tuple[bytes, str]:
     """Devuelve (bytes, mime) de la foto del cheque.
 
     La columna `foto` es diferida: este acceso dispara la carga del binario solo
     para este cheque puntual (no para los listados).
     """
-    cheque = db.get(Cheque, nro_cheque)
+    cheque = db.get(Cheque, cheque_id)
     if cheque is None:
         raise NotFoundError("Cheque no encontrado.")
     if cheque.foto is None:
@@ -84,18 +139,18 @@ def list_cheques(db: Session, estado: ChequeEstado | None = None) -> list[Cheque
 
 def transition_cheque(
     db: Session,
-    nro_cheque: str,
+    cheque_id: uuid.UUID,
     payload: ChequeManualTransition,
     event_at: datetime | None = None,
 ) -> Cheque:
     if payload.target_state == ChequeEstado.FIADO:
         raise ValidationError(
-            "Para fiar un cheque use /cheques/{nro_cheque}/fiar, "
+            "Para fiar un cheque use /cheques/{cheque_id}/fiar, "
             "que crea la deuda asociada en la misma transaccion."
         )
 
     cheque = db.scalar(
-        select(Cheque).where(Cheque.nro_cheque == nro_cheque).with_for_update()
+        select(Cheque).where(Cheque.id == cheque_id).with_for_update()
     )
     if cheque is None:
         raise NotFoundError("Cheque no encontrado.")
@@ -122,13 +177,13 @@ def transition_cheque(
 
 def fiar_cheque(
     db: Session,
-    nro_cheque: str,
+    cheque_id: uuid.UUID,
     payload: ChequeFiarRequest,
     fecha_fiado: date | None = None,
     event_at: datetime | None = None,
 ) -> tuple[Cheque, Fiado]:
     cheque = db.scalar(
-        select(Cheque).where(Cheque.nro_cheque == nro_cheque).with_for_update()
+        select(Cheque).where(Cheque.id == cheque_id).with_for_update()
     )
     if cheque is None:
         raise NotFoundError("Cheque no encontrado.")
@@ -140,7 +195,7 @@ def fiar_cheque(
     ).quantize(Decimal("0.01"))
 
     fiado = Fiado(
-        cheque_nro=nro_cheque,
+        cheque_id=cheque.id,
         cliente_id=payload.cliente_destino_id,
         monto_original=cheque.monto,
         porcentaje_venta=payload.porcentaje_venta,

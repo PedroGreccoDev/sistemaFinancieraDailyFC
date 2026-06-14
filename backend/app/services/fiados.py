@@ -77,8 +77,17 @@ def cobrar_con_cheque(
         raise NotFoundError("Fiado no encontrado.")
     if fiado.estado == FiadoEstado.CANCELADO:
         raise ConflictError("El fiado ya está cancelado.")
-    if db.get(Cheque, payload.nro_cheque_pago) is not None:
-        raise ConflictError(f"Ya existe un cheque con el número '{payload.nro_cheque_pago}'.")
+    ya_existe = db.scalar(
+        select(Cheque).where(
+            Cheque.nro_cheque == payload.nro_cheque_pago,
+            Cheque.banco == payload.banco_pago,
+        )
+    )
+    if ya_existe is not None:
+        banco_txt = f" del banco {payload.banco_pago}" if payload.banco_pago else ""
+        raise ConflictError(
+            f"Ya existe un cheque Nº '{payload.nro_cheque_pago}'{banco_txt}."
+        )
 
     valor_neto = (
         payload.monto_cheque * (Decimal("100") - payload.porcentaje_compra_cheque) / Decimal("100")
@@ -89,6 +98,7 @@ def cobrar_con_cheque(
 
     cheque_nuevo = Cheque(
         nro_cheque=payload.nro_cheque_pago,
+        banco=payload.banco_pago,
         monto=payload.monto_cheque,
         porcentaje_compra=payload.porcentaje_compra_cheque,
         fecha_emision=payload.fecha_emision,

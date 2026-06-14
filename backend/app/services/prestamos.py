@@ -81,7 +81,6 @@ def create_prestamo(db: Session, payload: PrestamoCreate) -> Prestamo:
     fecha_inicio = payload.fecha_inicio or hoy_local()
     prestamo = Prestamo(
         cliente_id=payload.cliente_id,
-        cheque_origen_nro=payload.cheque_origen_nro,
         credito=payload.credito,
         moneda=payload.moneda,
         cuotas=payload.cuotas,

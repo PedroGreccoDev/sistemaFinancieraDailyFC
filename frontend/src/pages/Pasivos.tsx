@@ -160,8 +160,8 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
 
   const { data: cheques, isLoading: loadingCheques } = useQuery({ queryKey: ['cheques', 'cartera'], queryFn: getChequeCartera })
 
-  function handleSelectCheque(nro: string) {
-    const found = cheques?.find((c) => c.nro_cheque === nro) ?? null
+  function handleSelectCheque(id: string) {
+    const found = cheques?.find((c) => c.id === id) ?? null
     setChequeSeleccionado(found)
     if (found) setPorcentajeVenta(found.porcentaje_compra)
   }
@@ -176,7 +176,7 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
     if (!chequeSeleccionado) return
     setError(null)
     setLoading(true)
-    try { await cancelarPasivoConCheque(pasivo.id, { nro_cheque: chequeSeleccionado.nro_cheque, porcentaje_venta: pctNum, operador_id: operadorId.trim(), motivo: motivo.trim() }); toast('success', 'Deuda pagada con cheque'); onSuccess() }
+    try { await cancelarPasivoConCheque(pasivo.id, { cheque_id: chequeSeleccionado.id, porcentaje_venta: pctNum, operador_id: operadorId.trim(), motivo: motivo.trim() }); toast('success', 'Deuda pagada con cheque'); onSuccess() }
     catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
   }
@@ -205,9 +205,9 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
             <label style={LABEL_STYLE}>Cheque a entregar</label>
             {loadingCheques ? <p style={{ fontFamily: FM, fontSize: '0.78rem', color: 'rgba(100,116,139,0.5)' }}>Cargando cheques…</p>
               : !cheques || cheques.length === 0 ? <p style={{ fontFamily: FM, fontSize: '0.78rem', color: '#fbbf24' }}>No hay cheques en cartera.</p>
-              : <select value={chequeSeleccionado?.nro_cheque ?? ''} onChange={(e) => handleSelectCheque(e.target.value)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+              : <select value={chequeSeleccionado?.id ?? ''} onChange={(e) => handleSelectCheque(e.target.value)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
                   <option value="">— Seleccioná un cheque —</option>
-                  {cheques.map((c) => <option key={c.nro_cheque} value={c.nro_cheque}>#{c.nro_cheque} — {fmtARS(c.monto)}{c.fecha_pago ? ` — vence ${fmtDate(c.fecha_pago)}` : ''}</option>)}
+                  {cheques.map((c) => <option key={c.id} value={c.id}>#{c.nro_cheque}{c.banco ? ` · ${c.banco}` : ''} — {fmtARS(c.monto)}{c.fecha_pago ? ` — vence ${fmtDate(c.fecha_pago)}` : ''}</option>)}
                 </select>}
           </div>
 

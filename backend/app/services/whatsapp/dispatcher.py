@@ -153,6 +153,7 @@ def _registrar_cheque(
     foto: tuple[bytes, str] | None = None,
 ) -> DispatchResult:
     nro = _req_str(data, "nro_cheque")
+    banco = (str(data["banco"]).strip() or None) if data.get("banco") else None
     monto = _req_decimal(data, "monto")
     pct_compra = _req_decimal(data, "porcentaje_compra")
     fecha_emision = _opt_date(data, "fecha_emision")
@@ -165,6 +166,7 @@ def _registrar_cheque(
 
     payload = ChequeCreate(
         nro_cheque=nro,
+        banco=banco,
         monto=monto,
         fecha_emision=fecha_emision,
         fecha_pago=fecha_pago,
@@ -178,7 +180,7 @@ def _registrar_cheque(
 
     lines = [
         f"✅ *Cheque registrado en cartera*",
-        f"Nº {cheque.nro_cheque}",
+        f"Nº {cheque.nro_cheque}" + (f" — {cheque.banco}" if cheque.banco else ""),
         f"Monto: {_ars(cheque.monto)}",
         f"Compra: {_pct(cheque.porcentaje_compra)}%",
     ]
@@ -194,7 +196,7 @@ def _registrar_cheque(
 
 
 def _vender_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
-    nro = _resolve_nro_cheque(db, _req_str(data, "nro_cheque"))
+    objetivo = _resolver_cheque(db, data)
     pct_venta = _req_decimal(data, "porcentaje_venta")
 
     cliente_destino_id: uuid.UUID | None = None
@@ -209,7 +211,7 @@ def _vender_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dateti
         porcentaje_venta=pct_venta,
         cliente_destino_id=cliente_destino_id,
     )
-    cheque = svc_cheques.transition_cheque(db, nro, payload, event_at=msg_at)
+    cheque = svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
 
     lines = [
         f"✅ *Cheque vendido*",
@@ -228,7 +230,7 @@ def _vender_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dateti
 
 
 def _fiar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
-    nro = _resolve_nro_cheque(db, _req_str(data, "nro_cheque"))
+    objetivo = _resolver_cheque(db, data)
     cliente_nombre = _req_str(data, "cliente_nombre")
     pct_venta = _req_decimal(data, "porcentaje_venta")
 
@@ -241,7 +243,7 @@ def _fiar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime
         porcentaje_venta=pct_venta,
     )
     cheque, fiado = svc_cheques.fiar_cheque(
-        db, nro, request,
+        db, objetivo.id, request,
         fecha_fiado=fecha_local(msg_at),
         event_at=msg_at,
     )
@@ -256,24 +258,24 @@ def _fiar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime
 
 
 def _cobrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
-    nro = _resolve_nro_cheque(db, _req_str(data, "nro_cheque"))
+    objetivo = _resolver_cheque(db, data)
     payload = ChequeManualTransition(
         target_state=ChequeEstado.COBRADO,
         operador_id=phone,
         motivo="Cobrado en ventanilla",
     )
-    cheque = svc_cheques.transition_cheque(db, nro, payload, event_at=msg_at)
+    cheque = svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
     return True, f"✅ Cheque Nº {cheque.nro_cheque} marcado como *COBRADO*."
 
 
 def _rechazar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
-    nro = _resolve_nro_cheque(db, _req_str(data, "nro_cheque"))
+    objetivo = _resolver_cheque(db, data)
     payload = ChequeManualTransition(
         target_state=ChequeEstado.RECHAZADO,
         operador_id=phone,
         motivo="Rechazado — informado por operador",
     )
-    cheque = svc_cheques.transition_cheque(db, nro, payload, event_at=msg_at)
+    cheque = svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
     return True, f"⛔ Cheque Nº {cheque.nro_cheque} marcado como *RECHAZADO*. Gestioná el recupero externamente."
 
 
@@ -607,6 +609,7 @@ def _cobrar_fiado_efectivo(db: Session, phone: str, data: dict[str, Any]) -> Dis
 def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     cliente_nombre = _req_str(data, "cliente_nombre")
     nro_cheque_pago = _req_str(data, "nro_cheque_pago")
+    banco_pago = (str(data["banco_pago"]).strip() or None) if data.get("banco_pago") else None
     monto_cheque = _req_decimal(data, "monto_cheque")
     pct_compra = _req_decimal(data, "porcentaje_compra_cheque")
     fecha_emision = _opt_date(data, "fecha_emision")
@@ -618,6 +621,7 @@ def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_
 
     payload = FiadoCobrarConChequeRequest(
         nro_cheque_pago=nro_cheque_pago,
+        banco_pago=banco_pago,
         monto_cheque=monto_cheque,
         porcentaje_compra_cheque=pct_compra,
         fecha_emision=fecha_emision,
@@ -700,13 +704,10 @@ def _editar_operacion(db: Session, data: dict[str, Any]) -> DispatchResult:
 
 def _editar_cheque(db: Session, nro: str, campo: str, nuevo_valor: Any) -> DispatchResult:
     try:
-        nro = _resolve_nro_cheque(db, nro)
-    except ValueError as exc:
-        return False, f"⚠️ {exc}"
-
-    cheque = db.get(Cheque, nro)
-    if cheque is None:
-        return False, f"❓ No encontré el cheque Nº {nro}."
+        cheque = svc_cheques.resolve_cheque(db, nro)
+    except ServiceError as exc:
+        return False, f"⚠️ {exc.message}"
+    nro = cheque.nro_cheque
 
     # Campos disponibles según el estado del cheque
     campos_base = {"monto", "porcentaje_compra", "fecha_emision", "fecha_pago", "cliente_origen"}
@@ -1325,25 +1326,13 @@ def _parse_date_val(val: Any) -> date | None:
         raise ValueError(f"Fecha inválida (usar YYYY-MM-DD): {val!r}")
 
 
-def _resolve_nro_cheque(db: Session, nro: str) -> str:
-    """Resuelve un número de cheque abreviado al número completo en la BD.
-
-    El operador suele referirse a los cheques por sus últimos dígitos (ej: "681"
-    en lugar de "03789681"). Intenta match exacto primero; si falla, busca por
-    sufijo. Si hay ambigüedad, lanza ValueError para que el operador aclare.
-    """
-    if not nro:
-        raise ValueError("Indicá el número de cheque.")
-    if db.get(Cheque, nro) is not None:
-        return nro
-    matches = list(db.scalars(select(Cheque.nro_cheque).where(Cheque.nro_cheque.endswith(nro))))
-    if len(matches) == 1:
-        return matches[0]
-    if not matches:
-        raise ValueError(f"No encontré ningún cheque terminado en '{nro}'.")
-    raise ValueError(
-        f"Número ambiguo: {len(matches)} cheques terminan en '{nro}'. Indicá el número completo."
-    )
+def _resolver_cheque(db: Session, data: dict[str, Any]) -> Cheque:
+    """Resuelve el cheque referido por el operador (número, posiblemente parcial,
+    y banco opcional) a una fila concreta. Como el número ya no es único entre
+    bancos, ante varios candidatos el servicio pide desambiguar por banco."""
+    nro = _req_str(data, "nro_cheque")
+    banco = (str(data["banco"]).strip() or None) if data.get("banco") else None
+    return svc_cheques.resolve_cheque(db, nro, banco)
 
 
 # ────────────────────────────────────────────────────────────────────────────

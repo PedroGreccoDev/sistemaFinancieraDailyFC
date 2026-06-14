@@ -2,8 +2,8 @@ import { apiFetch, API_BASE } from './client'
 import type { Cheque, Fiado } from '../types'
 
 /** URL directa a la foto del cheque (misma-origen: sirve para <img>, descarga y compartir). */
-export const chequeFotoUrl = (nro_cheque: string): string =>
-  `${API_BASE}/cheques/${encodeURIComponent(nro_cheque)}/foto`
+export const chequeFotoUrl = (cheque_id: string): string =>
+  `${API_BASE}/cheques/${encodeURIComponent(cheque_id)}/foto`
 
 export const getChequeCartera = (): Promise<Cheque[]> =>
   apiFetch<Cheque[]>('/cheques/cartera')
@@ -23,8 +23,8 @@ export interface FiarChequeResult {
   fiado: Fiado
 }
 
-export const fiarCheque = (nro_cheque: string, payload: FiarChequePayload): Promise<FiarChequeResult> =>
-  apiFetch<FiarChequeResult>(`/cheques/${encodeURIComponent(nro_cheque)}/fiar`, {
+export const fiarCheque = (cheque_id: string, payload: FiarChequePayload): Promise<FiarChequeResult> =>
+  apiFetch<FiarChequeResult>(`/cheques/${encodeURIComponent(cheque_id)}/fiar`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
