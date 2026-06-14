@@ -285,6 +285,10 @@ def _nuevo_prestamo(db: Session, data: dict[str, Any], msg_at: datetime | None =
 def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     cliente_nombre = _req_str(data, "cliente_nombre")
     numero_cuota: int | None = data.get("numero_cuota")
+    try:
+        cantidad = max(1, int(data.get("cantidad_cuotas") or 1))
+    except (TypeError, ValueError):
+        cantidad = 1
 
     cliente = _buscar_cliente_o_error(db, cliente_nombre)
 
@@ -318,27 +322,51 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
                 f"cuota #{numero_cuota} pendiente. No puedo saber cuál cobrar; "
                 "resolvelo desde el panel web."
             )
-        cuota = matches[0]
+        cuota_inicial = matches[0]
     else:
-        # Cobrar la primera (más próxima a vencer)
-        cuota = pendientes[0]
+        # Cobrar desde la primera (más próxima a vencer)
+        cuota_inicial = pendientes[0]
 
-    prestamo_obj = db.get(Prestamo, cuota.prestamo_id)
+    prestamo_id = cuota_inicial.prestamo_id
+    prestamo_obj = db.get(Prestamo, prestamo_id)
     simbolo = "U$D" if prestamo_obj and prestamo_obj.moneda == Moneda.USD else "$"
 
-    cobrada = svc_prestamos.cobrar_cuota(db, cuota.prestamo_id, cuota.id, fecha_cobro=msg_at.date() if msg_at else date.today())
+    # Cuotas pendientes del MISMO préstamo, en orden de vencimiento, desde la inicial.
+    del_prestamo = [c for c in pendientes if c.prestamo_id == prestamo_id]
+    idx_inicial = del_prestamo.index(cuota_inicial)
+    a_cobrar = del_prestamo[idx_inicial : idx_inicial + cantidad]
 
-    # Restantes del MISMO préstamo (no de todos los del cliente).
-    restantes = sum(1 for c in pendientes if c.prestamo_id == cuota.prestamo_id) - 1
+    fecha_cobro = msg_at.date() if msg_at else date.today()
+    cobradas = [
+        svc_prestamos.cobrar_cuota(db, prestamo_id, c.id, fecha_cobro=fecha_cobro)
+        for c in a_cobrar
+    ]
+
+    restantes = len(del_prestamo) - len(cobradas)
     extra = (
         "\n✨ Préstamo *cancelado* — todas las cuotas cobradas."
         if restantes == 0
         else f"\nQuedan {restantes} cuota(s) pendiente(s) en este préstamo."
     )
+    # Aviso si pidió más cuotas de las que había pendientes en este préstamo.
+    if cantidad > len(cobradas):
+        extra = (
+            f"\n⚠️ Pediste cobrar {cantidad} pero solo había {len(cobradas)} "
+            f"pendiente(s) en este préstamo." + extra
+        )
 
+    if len(cobradas) == 1:
+        c = cobradas[0]
+        return True, (
+            f"✅ Cuota #{c.numero_cuota} de {cliente.nombre} cobrada.\n"
+            f"Monto: {simbolo}{_fmt_num(c.monto)}{extra}"
+        )
+
+    nros = ", ".join(f"#{c.numero_cuota}" for c in cobradas)
+    total_cobrado = sum((c.monto for c in cobradas), Decimal("0.00"))
     return True, (
-        f"✅ Cuota #{cobrada.numero_cuota} de {cliente.nombre} cobrada.\n"
-        f"Monto: {simbolo}{_fmt_num(cobrada.monto)}{extra}"
+        f"✅ Cobré {len(cobradas)} cuotas de {cliente.nombre} ({nros}).\n"
+        f"Total: {simbolo}{_fmt_num(total_cobrado)}{extra}"
     )
 
 
@@ -978,11 +1006,14 @@ def _buscar_cliente_o_error(db: Session, nombre: str) -> Cliente:
         raise ValueError(f"No encontré ningún cliente llamado '{nombre}'. ¿Cómo se llama exactamente?")
     if len(resultados) == 1:
         return resultados[0]
-    exacto = next((c for c in resultados if c.nombre.lower() == nombre.lower()), None)
-    if exacto:
-        return exacto
-    nombres = ", ".join(c.nombre for c in resultados[:4])
-    raise ValueError(f"Nombre ambiguo '{nombre}' — coincide con varios: {nombres}. Indicá el nombre completo.")
+    # Varios candidatos: preguntá cuál, aunque uno coincida exacto. Un match exacto
+    # NO debe ganar en silencio si hay otros que también coinciden (ej: "Bono"
+    # coincide con "Bono" y "Juan Bono"); resolver solo puede cobrarle al equivocado.
+    nombres = ", ".join(c.nombre for c in resultados[:5])
+    raise ValueError(
+        f"Hay {len(resultados)} clientes que coinciden con '{nombre}': {nombres}. "
+        "¿A cuál te referís? Decime el nombre completo."
+    )
 
 
 # ────────────────────────────────────────────────────────────────────────────

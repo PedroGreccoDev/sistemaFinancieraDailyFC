@@ -112,11 +112,13 @@ OPERACIONES DISPONIBLES
      - total_a_cobrar: number
 
 7. COBRAR_CUOTA
-   Cuándo: Un deudor pagó una cuota de un préstamo.
-   Ej: "Juan pagó", "Cobré cuota de Pedro García", "Pedro pagó la 3"
+   Cuándo: Un deudor pagó una o varias cuotas de un préstamo.
+   Ej: "Juan pagó", "Cobré cuota de Pedro García", "Pedro pagó la 3",
+       "Bono me pagó dos cuotas", "María abonó 3 cuotas"
    data:
      - cliente_nombre: string
-     - numero_cuota: integer o null (null = primera pendiente)
+     - numero_cuota: integer o null (null = primera pendiente; si paga varias, la primera del lote)
+     - cantidad_cuotas: integer (cuántas cuotas pagó; default 1; "dos cuotas" → 2)
 
 8. COBRAR_FIADO_EFECTIVO
    Cuándo: Un cliente con fiado abierto paga parte o todo en efectivo.
