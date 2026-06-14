@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { getChequeCartera } from '../api/cheques'
 import { getFiados } from '../api/fiados'
 import { getPrestamos } from '../api/prestamos'
@@ -202,6 +203,7 @@ function EmptyRow({ text }: { text: string }) {
 // ── página ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const { data: cheques }   = useQuery({ queryKey: ['cartera'],             queryFn: getChequeCartera,              refetchInterval: 30_000 })
   const { data: prestamos } = useQuery({ queryKey: ['prestamos'],           queryFn: () => getPrestamos(),          refetchInterval: 30_000 })
   const { data: clientes }  = useQuery({ queryKey: ['clientes'],            queryFn: getClientes,                   staleTime: 60_000 })
@@ -261,6 +263,7 @@ export default function Dashboard() {
           value={cheques?.length ?? 0}
           subtitle={cheques ? fmtARS(totalCartera) : undefined}
           accentColor="#f59e0b"
+          onClick={() => navigate('/cartera')}
         />
         <FinanceDashboardCard
           title="Capital en calle"
@@ -269,12 +272,14 @@ export default function Dashboard() {
           subtitle={`${prestamosActivos.length} préstamo${prestamosActivos.length !== 1 ? 's' : ''} activo${prestamosActivos.length !== 1 ? 's' : ''}`}
           accentColor="#6366f1"
           formatValue={(v) => v.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
+          onClick={() => navigate('/deudores')}
         />
         <FinanceDashboardCard
           title="Cuotas vencidas"
           value={vencidas.length}
           subtitle={vencidas.length > 0 ? 'Requieren atención' : 'Todo al día'}
           accentColor={vencidas.length > 0 ? '#ef4444' : '#22c55e'}
+          onClick={() => navigate('/deudores')}
         />
         <FinanceDashboardCard
           title="Ganancia del mes"
@@ -283,6 +288,7 @@ export default function Dashboard() {
           subtitle="Todos los módulos"
           accentColor="#10b981"
           formatValue={(v) => v.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
+          onClick={() => navigate('/reportes')}
         />
       </div>
       )}

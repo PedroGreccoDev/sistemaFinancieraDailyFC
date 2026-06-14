@@ -39,6 +39,7 @@ interface FinanceDashboardCardProps {
   accentColor?: string;
   formatValue?: (v: number) => string;
   subtitle?: string;
+  onClick?: () => void;
 }
 
 function useCountUp(target: number, duration = 300) {
@@ -70,6 +71,7 @@ export function FinanceDashboardCard({
   accentColor = "#6366f1",
   formatValue,
   subtitle,
+  onClick,
 }: FinanceDashboardCardProps) {
   const animated = useCountUp(value);
   const display = formatValue
@@ -81,6 +83,10 @@ export function FinanceDashboardCard({
   return (
     <div
       className="relative overflow-hidden group"
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
       style={{
         background: "var(--surface-grad)",
         borderLeft: `2px solid ${accentColor}`,
@@ -88,6 +94,7 @@ export function FinanceDashboardCard({
         boxShadow: `var(--shadow-card), inset 0 1px 0 var(--ov-004)`,
         transition: "box-shadow 0.3s ease, transform 0.3s ease",
         fontFamily: "'Manrope', sans-serif",
+        cursor: onClick ? "pointer" : undefined,
       }}
       onMouseEnter={(e) => {
         (e.currentTarget as HTMLDivElement).style.boxShadow = `var(--shadow-card-hover), 0 0 0 1px ${accentColor}30, inset 0 1px 0 var(--bd-006)`;
