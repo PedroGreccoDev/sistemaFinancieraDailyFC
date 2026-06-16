@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import type { ComponentType } from 'react'
-import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange } from './icons'
+import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange, IconSettings } from './icons'
 
 const NAV_LINKS: { to: string; label: string; end: boolean; Icon: ComponentType<{ size?: number }> }[] = [
-  { to: '/',            label: 'Inicio',      end: true,  Icon: IconHome },
-  { to: '/cartera',     label: 'Cartera',     end: false, Icon: IconWallet },
-  { to: '/deudores',    label: 'Deudores',    end: false, Icon: IconUsers },
-  { to: '/pasivos',     label: 'Deudas',      end: false, Icon: IconReceipt },
-  { to: '/reportes',    label: 'Reportes',    end: false, Icon: IconChart },
-  { to: '/movimientos', label: 'Movimientos', end: false, Icon: IconExchange },
+  { to: '/',               label: 'Inicio',        end: true,  Icon: IconHome },
+  { to: '/cartera',        label: 'Cartera',        end: false, Icon: IconWallet },
+  { to: '/deudores',       label: 'Deudores',       end: false, Icon: IconUsers },
+  { to: '/pasivos',        label: 'Deudas',         end: false, Icon: IconReceipt },
+  { to: '/reportes',       label: 'Reportes',       end: false, Icon: IconChart },
+  { to: '/movimientos',    label: 'Movimientos',    end: false, Icon: IconExchange },
+  { to: '/configuracion',  label: 'Configuración',  end: false, Icon: IconSettings },
 ]
 
 const ACCENT = "#6366f1"
