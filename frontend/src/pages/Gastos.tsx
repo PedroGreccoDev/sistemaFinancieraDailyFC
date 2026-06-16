@@ -463,7 +463,7 @@ export default function Gastos() {
           position: 'fixed',
           bottom:   'calc(1.25rem + env(safe-area-inset-bottom))',
           right:    '1.25rem',
-          zIndex:   40,
+          zIndex:   51,
         }}
       >
         <button
