@@ -128,40 +128,31 @@ export default function Reportes() {
             <MetricCard
               label="Cheques (spread)"
               value={fmtARS(data.ganancia_cheques)}
-              sub="Compra-venta de cheques"
               color="default"
               borderTopColor="rgba(34,197,94,0.55)"
-              badge={BADGE_INGRESO}
             />
             <MetricCard
               label="Préstamos (intereses)"
               value={fmtARS(data.ganancia_prestamos)}
-              sub="Diferencia crédito / total"
               color="default"
               borderTopColor="rgba(34,197,94,0.55)"
-              badge={BADGE_INGRESO}
             />
             <MetricCard
               label="Divisas (efectivo)"
               value={fmtARS(data.ganancia_movimientos_efectivo)}
-              sub="Compra-venta de dólares"
               color="default"
               borderTopColor="rgba(34,197,94,0.55)"
-              badge={BADGE_INGRESO}
             />
             <MetricCard
               label="Gastos operativos"
               value={fmtARS(data.gastos_operativos)}
-              sub="Nafta, insumos, etc."
               color="red"
               borderTopColor="rgba(239,68,68,0.55)"
-              badge={BADGE_EGRESO}
               prefix="− "
             />
             <MetricCard
               label="Total bruto"
               value={fmtARS(data.total_ganancias)}
-              sub="Sin descontar gastos"
               color="green"
               borderTopColor="var(--bd-008)"
               bigNum
@@ -177,8 +168,7 @@ export default function Reportes() {
               minWidth: 0,
             }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.7)', marginBottom: '0.3rem' }}>Neto del período</p>
-              <p style={{ fontFamily: FN, fontSize: 'clamp(1.4rem, 7vw, 2.1rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.25rem', overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{fmtARS(data.neto)}</p>
-              <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(199,210,254,0.55)' }}>Ganancias − gastos</p>
+              <p style={{ fontFamily: FN, fontSize: 'clamp(1.4rem, 7vw, 2.1rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{fmtARS(data.neto)}</p>
             </div>
           </div>
 
