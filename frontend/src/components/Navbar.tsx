@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import type { ComponentType } from 'react'
-import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange, IconBanknote } from './icons'
+import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange } from './icons'
 
 const NAV_LINKS: { to: string; label: string; end: boolean; Icon: ComponentType<{ size?: number }> }[] = [
   { to: '/',            label: 'Inicio',      end: true,  Icon: IconHome },
@@ -9,7 +9,6 @@ const NAV_LINKS: { to: string; label: string; end: boolean; Icon: ComponentType<
   { to: '/deudores',    label: 'Deudores',    end: false, Icon: IconUsers },
   { to: '/pasivos',     label: 'Deudas',      end: false, Icon: IconReceipt },
   { to: '/reportes',    label: 'Reportes',    end: false, Icon: IconChart },
-  { to: '/gastos',      label: 'Gastos',      end: false, Icon: IconBanknote },
   { to: '/movimientos', label: 'Movimientos', end: false, Icon: IconExchange },
 ]
 
