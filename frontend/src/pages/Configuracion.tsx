@@ -1,19 +1,22 @@
 import { useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { exportarJSON, exportarExcel, importarJSON } from '../api/backup'
 import { useToast } from '../lib/toast'
 import { btnFlat, btnSolid, btnBordered, FM } from '../lib/ui'
 import { IconDownload, IconUpload, IconFileJson, IconTable, IconAlert, IconClose } from '../components/icons'
 
 const TABLA_LABELS: Record<string, string> = {
-  clientes: 'Clientes',
-  cheques: 'Cheques',
-  prestamos: 'Préstamos',
-  cuotas: 'Cuotas',
+  clientes:             'Clientes',
+  cheques:              'Cheques',
+  prestamos:            'Préstamos',
+  cuotas:               'Cuotas',
   movimientos_efectivo: 'Movimientos',
-  fiados: 'Fiados',
-  pasivos: 'Pasivos',
-  gastos_operativos: 'Gastos',
+  fiados:               'Fiados',
+  pasivos:              'Pasivos',
+  gastos_operativos:    'Gastos',
 }
+
+const ALL_TABLAS = Object.keys(TABLA_LABELS)
 
 function SectionCard({ children }: { children: React.ReactNode }) {
   return (
@@ -122,6 +125,29 @@ function ConfirmModal({
   )
 }
 
+// ── Estilos reutilizables ──────────────────────────────────────────────────
+
+const labelStyle: CSSProperties = {
+  fontFamily: FM,
+  fontSize: '0.72rem',
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: '0.1em',
+  color: 'var(--text-2)',
+  marginBottom: '0.5rem',
+}
+
+const dateInputStyle: CSSProperties = {
+  fontFamily: FM,
+  fontSize: '0.82rem',
+  padding: '0.4rem 0.6rem',
+  borderRadius: 'var(--r-sm)',
+  border: '1px solid var(--bd-006)',
+  background: 'var(--surface)',
+  color: 'var(--text-1)',
+  outline: 'none',
+}
+
 export default function Configuracion() {
   const push = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -131,6 +157,30 @@ export default function Configuracion() {
   const [importResult, setImportResult] = useState<Record<string, number> | null>(null)
   const [loadingJson, setLoadingJson] = useState(false)
   const [loadingExcel, setLoadingExcel] = useState(false)
+
+  // Filtros para Excel
+  const [showFilters, setShowFilters] = useState(false)
+  const [excelDesde, setExcelDesde] = useState('')
+  const [excelHasta, setExcelHasta] = useState('')
+  const [tablasSeleccionadas, setTablasSeleccionadas] = useState<Set<string>>(new Set(ALL_TABLAS))
+
+  const todasSeleccionadas = tablasSeleccionadas.size === ALL_TABLAS.length
+  const algunaSeleccionada = tablasSeleccionadas.size > 0
+
+  function toggleTabla(key: string) {
+    setTablasSeleccionadas(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    setTablasSeleccionadas(todasSeleccionadas ? new Set() : new Set(ALL_TABLAS))
+  }
+
+  const hayFiltrosActivos = excelDesde || excelHasta || !todasSeleccionadas
 
   async function handleExportJson() {
     setLoadingJson(true)
@@ -145,9 +195,17 @@ export default function Configuracion() {
   }
 
   async function handleExportExcel() {
+    if (!algunaSeleccionada) {
+      push('error', 'Seleccioná al menos una tabla para exportar')
+      return
+    }
     setLoadingExcel(true)
     try {
-      await exportarExcel()
+      await exportarExcel({
+        desde: excelDesde || null,
+        hasta: excelHasta || null,
+        tablas: todasSeleccionadas ? undefined : Array.from(tablasSeleccionadas),
+      })
       push('success', 'Excel descargado')
     } catch {
       push('error', 'Error al exportar Excel')
@@ -200,12 +258,12 @@ export default function Configuracion() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-        {/* ── Backup JSON ─────────────────────────────────────────── */}
+        {/* ── Backup JSON ──────────────────────────────────────────────── */}
         <SectionCard>
           <SectionTitle
             icon={<IconFileJson size={20} />}
             title="Backup completo (JSON)"
-            subtitle="Para restaurar el sistema ante un fallo. Incluye todos los datos: clientes, cheques, préstamos, fiados, pasivos y gastos."
+            subtitle="Exporta todos los datos para restaurar el sistema ante un fallo. La importación reemplaza toda la base de datos."
           />
 
           <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
@@ -264,22 +322,126 @@ export default function Configuracion() {
           )}
         </SectionCard>
 
-        {/* ── Excel ───────────────────────────────────────────────── */}
+        {/* ── Excel ────────────────────────────────────────────────────── */}
         <SectionCard>
           <SectionTitle
             icon={<IconTable size={20} />}
             title="Exportar a Excel"
-            subtitle="Archivo .xlsx legible con todas las tablas en hojas separadas. Útil para revisar datos o compartir con terceros."
+            subtitle="Archivo .xlsx legible con todas las tablas en hojas separadas, incluyendo fotos de cheques. Filtrá por período o elegí qué tablas incluir."
           />
 
-          <button
-            onClick={handleExportExcel}
-            style={{ ...btnSolid('success'), display: 'flex', alignItems: 'center', gap: '0.4rem', opacity: loadingExcel ? 0.7 : 1 }}
-            disabled={loadingExcel}
-          >
-            <IconDownload size={14} />
-            {loadingExcel ? 'Generando…' : 'Descargar Excel'}
-          </button>
+          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              onClick={handleExportExcel}
+              style={{ ...btnSolid('success'), display: 'flex', alignItems: 'center', gap: '0.4rem', opacity: loadingExcel ? 0.7 : 1 }}
+              disabled={loadingExcel}
+            >
+              <IconDownload size={14} />
+              {loadingExcel ? 'Generando…' : 'Descargar Excel'}
+            </button>
+
+            <button
+              onClick={() => setShowFilters(v => !v)}
+              style={{
+                ...btnBordered('neutral'),
+                display: 'flex', alignItems: 'center', gap: '0.35rem',
+                ...(hayFiltrosActivos ? { borderColor: 'var(--primary)', color: 'var(--primary)' } : {}),
+              }}
+            >
+              Filtros
+              {hayFiltrosActivos && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 16, height: 16, borderRadius: '50%',
+                  background: 'var(--primary)', color: '#fff',
+                  fontSize: '0.6rem', fontWeight: 700,
+                }}>
+                  {(excelDesde || excelHasta ? 1 : 0) + (!todasSeleccionadas ? 1 : 0)}
+                </span>
+              )}
+              <span style={{ fontSize: '0.65rem' }}>{showFilters ? '▲' : '▼'}</span>
+            </button>
+          </div>
+
+          {showFilters && (
+            <div style={{
+              marginTop: '1rem',
+              borderTop: '1px solid var(--bd-006)',
+              paddingTop: '1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1rem',
+            }}>
+
+              {/* Período */}
+              <div>
+                <p style={labelStyle}>Período (fecha de registro)</p>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input
+                    type="date"
+                    value={excelDesde}
+                    onChange={e => setExcelDesde(e.target.value)}
+                    style={dateInputStyle}
+                  />
+                  <span style={{ fontFamily: FM, fontSize: '0.8rem', color: 'var(--text-2)' }}>—</span>
+                  <input
+                    type="date"
+                    value={excelHasta}
+                    onChange={e => setExcelHasta(e.target.value)}
+                    style={dateInputStyle}
+                  />
+                  {(excelDesde || excelHasta) && (
+                    <button
+                      onClick={() => { setExcelDesde(''); setExcelHasta('') }}
+                      style={{ ...btnBordered('neutral'), fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
+                    >
+                      Limpiar
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Tablas */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <p style={{ ...labelStyle, margin: 0 }}>Tablas a incluir</p>
+                  <button
+                    onClick={toggleAll}
+                    style={{ fontFamily: FM, fontSize: '0.72rem', color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                  >
+                    {todasSeleccionadas ? 'Desmarcar todo' : 'Seleccionar todo'}
+                  </button>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem 1.2rem' }}>
+                  {ALL_TABLAS.map(key => (
+                    <label
+                      key={key}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '0.35rem',
+                        cursor: 'pointer', fontFamily: FM, fontSize: '0.82rem',
+                        color: tablasSeleccionadas.has(key) ? 'var(--text-1)' : 'var(--text-2)',
+                        userSelect: 'none',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={tablasSeleccionadas.has(key)}
+                        onChange={() => toggleTabla(key)}
+                        style={{ accentColor: 'var(--primary)', width: 14, height: 14, cursor: 'pointer' }}
+                      />
+                      {TABLA_LABELS[key]}
+                    </label>
+                  ))}
+                </div>
+                {!algunaSeleccionada && (
+                  <p style={{ fontFamily: FM, fontSize: '0.75rem', color: 'var(--danger)', marginTop: '0.4rem' }}>
+                    Seleccioná al menos una tabla.
+                  </p>
+                )}
+              </div>
+
+            </div>
+          )}
         </SectionCard>
 
       </div>

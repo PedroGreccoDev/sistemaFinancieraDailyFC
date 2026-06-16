@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -43,8 +43,14 @@ async def importar(file: UploadFile, db: DbSession) -> dict:
 
 
 @router.get("/exportar-excel")
-def exportar_excel(db: DbSession) -> StreamingResponse:
-    content = svc.exportar_excel(db)
+def exportar_excel(
+    db: DbSession,
+    desde: date | None = Query(None, description="Filtrar registros desde esta fecha (created_at)"),
+    hasta: date | None = Query(None, description="Filtrar registros hasta esta fecha (created_at)"),
+    tablas: str | None = Query(None, description="Tablas a incluir, separadas por coma"),
+) -> StreamingResponse:
+    tablas_list = [t.strip() for t in tablas.split(",") if t.strip()] if tablas else None
+    content = svc.exportar_excel(db, desde=desde, hasta=hasta, tablas_incluidas=tablas_list)
     fecha = datetime.now(tz=UTC).strftime("%Y-%m-%d")
     return StreamingResponse(
         iter([content]),

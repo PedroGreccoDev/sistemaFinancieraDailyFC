@@ -1,5 +1,11 @@
 import { API_BASE } from './client'
 
+export interface ExcelFilters {
+  desde?: string | null
+  hasta?: string | null
+  tablas?: string[]
+}
+
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -19,8 +25,15 @@ export async function exportarJSON(): Promise<void> {
   triggerDownload(blob, `backup_${fecha}.json`)
 }
 
-export async function exportarExcel(): Promise<void> {
-  const res = await fetch(`${API_BASE}/backup/exportar-excel`)
+export async function exportarExcel(filters: ExcelFilters = {}): Promise<void> {
+  const params = new URLSearchParams()
+  if (filters.desde) params.set('desde', filters.desde)
+  if (filters.hasta) params.set('hasta', filters.hasta)
+  if (filters.tablas && filters.tablas.length > 0) {
+    params.set('tablas', filters.tablas.join(','))
+  }
+  const qs = params.toString()
+  const res = await fetch(`${API_BASE}/backup/exportar-excel${qs ? `?${qs}` : ''}`)
   if (!res.ok) throw new Error('Error al exportar Excel')
   const blob = await res.blob()
   const fecha = new Date().toISOString().slice(0, 10)

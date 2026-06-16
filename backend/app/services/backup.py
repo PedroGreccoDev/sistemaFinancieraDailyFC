@@ -24,7 +24,7 @@ from app.db.models import (
 BACKUP_VERSION = 1
 ALEMBIC_REVISION = "0010"
 
-# ── Columnas por tabla (excluye computed/deferred) ──────────────────────────
+# ── Columnas por tabla ──────────────────────────────────────────────────────
 
 _CL = ["id", "nombre", "cuit", "telefono", "created_at", "updated_at"]
 _CH = [
@@ -60,7 +60,33 @@ _GA = [
     "observaciones", "created_at", "updated_at",
 ]
 
-# ── Tipos para deserialización en importar ──────────────────────────────────
+# ── Validación de schema ────────────────────────────────────────────────────
+
+_REQUIRED: dict[str, frozenset[str]] = {
+    "clientes":             frozenset({"id", "nombre"}),
+    "cheques":              frozenset({"id", "nro_cheque", "monto", "estado", "fecha_emision"}),
+    "prestamos":            frozenset({"id", "cliente_id", "credito", "moneda", "cuotas", "frecuencia", "total_a_cobrar", "estado"}),
+    "cuotas":               frozenset({"id", "prestamo_id", "numero_cuota", "fecha_vencimiento", "monto", "estado"}),
+    "movimientos_efectivo": frozenset({"id", "tipo", "moneda", "monto", "cotizacion_aplicada"}),
+    "fiados":               frozenset({"id", "cheque_id", "cliente_id", "monto_original", "saldo_pendiente", "estado"}),
+    "pasivos":              frozenset({"id", "acreedor", "concepto", "monto", "moneda", "estado"}),
+    "gastos_operativos":    frozenset({"id", "concepto", "monto", "moneda", "fecha_operacion"}),
+}
+
+
+def _validate_schema(tablas: dict) -> list[str]:
+    errors: list[str] = []
+    for tbl, required in _REQUIRED.items():
+        for i, row in enumerate(tablas.get(tbl, [])):
+            missing = required - set(row.keys())
+            if missing:
+                errors.append(
+                    f"`{tbl}` fila {i}: faltan campos: {', '.join(sorted(missing))}"
+                )
+    return errors
+
+
+# ── Tipos para deserialización ──────────────────────────────────────────────
 
 _UUID_COLS = frozenset({
     "id", "cliente_id", "cheque_id", "prestamo_id",
@@ -163,6 +189,14 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         )
 
     tablas = data.get("tablas", {})
+    if not isinstance(tablas, dict):
+        raise ValueError("El backup no contiene una clave 'tablas' válida.")
+
+    errors = _validate_schema(tablas)
+    if errors:
+        preview = "\n".join(errors[:10])
+        suffix = f"\n… y {len(errors) - 10} más." if len(errors) > 10 else ""
+        raise ValueError(f"{len(errors)} error(es) de schema:\n{preview}{suffix}")
 
     try:
         for tbl in (
@@ -175,14 +209,14 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
             if rows:
                 db.execute(sa.insert(model), rows)
 
-        bulk(Cliente,           [_cv(r) for r in tablas.get("clientes", [])])
-        bulk(Cheque,            [_cv(r, date_cols=_DATE_CH) for r in tablas.get("cheques", [])])
-        bulk(Prestamo,          [_cv(r, date_cols=_DATE_PR) for r in tablas.get("prestamos", [])])
-        bulk(Cuota,             [_cv(r, date_cols=_DATE_CU) for r in tablas.get("cuotas", [])])
-        bulk(MovimientoEfectivo,[_cv(r, dt_extra=_DT_MO) for r in tablas.get("movimientos_efectivo", [])])
-        bulk(Fiado,             [_cv(r, date_cols=_DATE_FI) for r in tablas.get("fiados", [])])
-        bulk(Pasivo,            [_cv(r, date_cols=_DATE_PA) for r in tablas.get("pasivos", [])])
-        bulk(GastoOperativo,    [_cv(r, date_cols=_DATE_GA, time_cols=_TIME_GA) for r in tablas.get("gastos_operativos", [])])
+        bulk(Cliente,            [_cv(r) for r in tablas.get("clientes", [])])
+        bulk(Cheque,             [_cv(r, date_cols=_DATE_CH) for r in tablas.get("cheques", [])])
+        bulk(Prestamo,           [_cv(r, date_cols=_DATE_PR) for r in tablas.get("prestamos", [])])
+        bulk(Cuota,              [_cv(r, date_cols=_DATE_CU) for r in tablas.get("cuotas", [])])
+        bulk(MovimientoEfectivo, [_cv(r, dt_extra=_DT_MO) for r in tablas.get("movimientos_efectivo", [])])
+        bulk(Fiado,              [_cv(r, date_cols=_DATE_FI) for r in tablas.get("fiados", [])])
+        bulk(Pasivo,             [_cv(r, date_cols=_DATE_PA) for r in tablas.get("pasivos", [])])
+        bulk(GastoOperativo,     [_cv(r, date_cols=_DATE_GA, time_cols=_TIME_GA) for r in tablas.get("gastos_operativos", [])])
 
         db.commit()
     except Exception:
@@ -206,7 +240,7 @@ def _fmt_excel(v: Any) -> Any:
     if isinstance(v, Decimal):
         return float(v)
     if isinstance(v, bytes):
-        return f"[imagen {len(v)} bytes]"
+        return ""
     if isinstance(v, datetime):
         return v.replace(tzinfo=None)
     if isinstance(v, time):
@@ -216,10 +250,44 @@ def _fmt_excel(v: Any) -> Any:
     return v
 
 
-def exportar_excel(db: Session) -> bytes:
+def _xl_image(foto: bytes) -> Any:
+    """Redimensiona y convierte bytes de foto a imagen embebible en openpyxl."""
+    try:
+        from PIL import Image as PILImage
+        from openpyxl.drawing.image import Image as XLImage
+
+        img = PILImage.open(BytesIO(foto))
+        img.thumbnail((110, 110), PILImage.Resampling.LANCZOS)
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        xl = XLImage(buf)
+        xl.width, xl.height = 110, 110
+        return xl
+    except Exception:
+        return None
+
+
+def exportar_excel(
+    db: Session,
+    *,
+    desde: date | None = None,
+    hasta: date | None = None,
+    tablas_incluidas: list[str] | None = None,
+) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
+
+    def _inc(name: str) -> bool:
+        return tablas_incluidas is None or name in tablas_incluidas
+
+    def _date_filter(q: Any, model: Any) -> Any:
+        if desde:
+            q = q.filter(model.created_at >= datetime.combine(desde, time.min, tzinfo=UTC))
+        if hasta:
+            q = q.filter(model.created_at <= datetime.combine(hasta, time(23, 59, 59, 999999), tzinfo=UTC))
+        return q
 
     HEADER_FILL = PatternFill("solid", fgColor="4F46E5")
     HEADER_FONT = Font(bold=True, color="FFFFFF", size=10)
@@ -228,14 +296,17 @@ def exportar_excel(db: Session) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)  # type: ignore[arg-type]
 
-    def add_sheet(title: str, headers: list[str], data_rows: list[list]) -> None:
-        ws = wb.create_sheet(title)
+    def write_headers(ws: Any, headers: list[str]) -> None:
         for ci, h in enumerate(headers, 1):
             cell = ws.cell(row=1, column=ci, value=h)
             cell.font = HEADER_FONT
             cell.fill = HEADER_FILL
             cell.alignment = Alignment(horizontal="center", vertical="center")
         ws.row_dimensions[1].height = 20
+
+    def add_sheet(title: str, headers: list[str], data_rows: list[list]) -> None:
+        ws = wb.create_sheet(title)
+        write_headers(ws, headers)
         for ri, row in enumerate(data_rows, 2):
             fill = ALT_FILL if ri % 2 == 0 else None
             for ci, val in enumerate(row, 1):
@@ -245,115 +316,144 @@ def exportar_excel(db: Session) -> bytes:
         for ci in range(1, len(headers) + 1):
             ws.column_dimensions[get_column_letter(ci)].width = 20
 
-    # Clientes
-    clientes = db.query(Cliente).all()
-    add_sheet(
-        "Clientes",
-        ["ID", "Nombre", "CUIT", "Teléfono", "Creado"],
-        [[_fmt_excel(r.id), r.nombre, r.cuit, r.telefono, _fmt_excel(r.created_at)]
-         for r in clientes],
-    )
+    # ── Clientes ────────────────────────────────────────────────────────────
+    if _inc("clientes"):
+        clientes = _date_filter(db.query(Cliente), Cliente).all()
+        add_sheet(
+            "Clientes",
+            ["ID", "Nombre", "CUIT", "Teléfono", "Creado"],
+            [[_fmt_excel(r.id), r.nombre, r.cuit, r.telefono, _fmt_excel(r.created_at)]
+             for r in clientes],
+        )
 
-    # Cheques (sin foto, con tiene_foto)
-    cheques = db.query(Cheque).all()
-    add_sheet(
-        "Cheques",
-        ["ID", "Nro Cheque", "Banco", "Monto", "Fecha Emisión", "Fecha Pago",
-         "% Compra", "% Venta", "Ganancia", "Estado", "Tiene Foto",
-         "Cliente Origen ID", "Cliente Destino ID", "Creado"],
-        [[
-            _fmt_excel(r.id), r.nro_cheque, r.banco, _fmt_excel(r.monto),
-            _fmt_excel(r.fecha_emision), _fmt_excel(r.fecha_pago),
-            _fmt_excel(r.porcentaje_compra), _fmt_excel(r.porcentaje_venta),
-            _fmt_excel(r.ganancia), _fmt_excel(r.estado),
-            "Sí" if r.tiene_foto else "No",
-            _fmt_excel(r.cliente_origen_id), _fmt_excel(r.cliente_destino_id),
-            _fmt_excel(r.created_at),
-        ] for r in cheques],
-    )
+    # ── Cheques (foto embebida) ──────────────────────────────────────────────
+    if _inc("cheques"):
+        cheques = _date_filter(
+            db.query(Cheque).options(undefer(Cheque.foto)), Cheque
+        ).all()
+        ws_ch = wb.create_sheet("Cheques")
+        ch_headers = [
+            "ID", "Nro Cheque", "Banco", "Monto", "Fecha Emisión", "Fecha Pago",
+            "% Compra", "% Venta", "Ganancia", "Estado",
+            "Cliente Origen ID", "Cliente Destino ID", "Creado", "Foto",
+        ]
+        write_headers(ws_ch, ch_headers)
+        foto_col = len(ch_headers)
+        for ri, r in enumerate(cheques, 2):
+            data_vals = [
+                _fmt_excel(r.id), r.nro_cheque, r.banco, _fmt_excel(r.monto),
+                _fmt_excel(r.fecha_emision), _fmt_excel(r.fecha_pago),
+                _fmt_excel(r.porcentaje_compra), _fmt_excel(r.porcentaje_venta),
+                _fmt_excel(r.ganancia), _fmt_excel(r.estado),
+                _fmt_excel(r.cliente_origen_id), _fmt_excel(r.cliente_destino_id),
+                _fmt_excel(r.created_at),
+            ]
+            fill = ALT_FILL if ri % 2 == 0 else None
+            for ci, val in enumerate(data_vals, 1):
+                cell = ws_ch.cell(row=ri, column=ci, value=val)
+                if fill:
+                    cell.fill = fill
+            if r.foto:
+                xl_img = _xl_image(r.foto)
+                if xl_img:
+                    xl_img.anchor = f"{get_column_letter(foto_col)}{ri}"
+                    ws_ch.add_image(xl_img)
+                    ws_ch.row_dimensions[ri].height = 85
+                else:
+                    ws_ch.cell(row=ri, column=foto_col, value="[error al procesar imagen]")
+            else:
+                ws_ch.cell(row=ri, column=foto_col, value="—")
+        for ci in range(1, len(ch_headers) + 1):
+            ws_ch.column_dimensions[get_column_letter(ci)].width = 17 if ci == foto_col else 20
 
-    # Préstamos
-    prestamos = db.query(Prestamo).all()
-    add_sheet(
-        "Préstamos",
-        ["ID", "Cliente ID", "Crédito", "Moneda", "Cuotas", "Frecuencia",
-         "Total a Cobrar", "Ganancia", "Estado", "Fecha Inicio", "Creado"],
-        [[
-            _fmt_excel(r.id), _fmt_excel(r.cliente_id),
-            _fmt_excel(r.credito), _fmt_excel(r.moneda),
-            r.cuotas, _fmt_excel(r.frecuencia),
-            _fmt_excel(r.total_a_cobrar), _fmt_excel(r.ganancia),
-            _fmt_excel(r.estado), _fmt_excel(r.fecha_inicio), _fmt_excel(r.created_at),
-        ] for r in prestamos],
-    )
+    # ── Préstamos ────────────────────────────────────────────────────────────
+    if _inc("prestamos"):
+        prestamos = _date_filter(db.query(Prestamo), Prestamo).all()
+        add_sheet(
+            "Préstamos",
+            ["ID", "Cliente ID", "Crédito", "Moneda", "Cuotas", "Frecuencia",
+             "Total a Cobrar", "Ganancia", "Estado", "Fecha Inicio", "Creado"],
+            [[
+                _fmt_excel(r.id), _fmt_excel(r.cliente_id),
+                _fmt_excel(r.credito), _fmt_excel(r.moneda),
+                r.cuotas, _fmt_excel(r.frecuencia),
+                _fmt_excel(r.total_a_cobrar), _fmt_excel(r.ganancia),
+                _fmt_excel(r.estado), _fmt_excel(r.fecha_inicio), _fmt_excel(r.created_at),
+            ] for r in prestamos],
+        )
 
-    # Cuotas
-    cuotas = db.query(Cuota).all()
-    add_sheet(
-        "Cuotas",
-        ["ID", "Préstamo ID", "Nro Cuota", "Vencimiento", "Monto", "Estado",
-         "Fecha Cobro", "Creado"],
-        [[
-            _fmt_excel(r.id), _fmt_excel(r.prestamo_id), r.numero_cuota,
-            _fmt_excel(r.fecha_vencimiento), _fmt_excel(r.monto), _fmt_excel(r.estado),
-            _fmt_excel(r.fecha_cobro), _fmt_excel(r.created_at),
-        ] for r in cuotas],
-    )
+    # ── Cuotas ───────────────────────────────────────────────────────────────
+    if _inc("cuotas"):
+        cuotas = _date_filter(db.query(Cuota), Cuota).all()
+        add_sheet(
+            "Cuotas",
+            ["ID", "Préstamo ID", "Nro Cuota", "Vencimiento", "Monto", "Estado",
+             "Fecha Cobro", "Creado"],
+            [[
+                _fmt_excel(r.id), _fmt_excel(r.prestamo_id), r.numero_cuota,
+                _fmt_excel(r.fecha_vencimiento), _fmt_excel(r.monto), _fmt_excel(r.estado),
+                _fmt_excel(r.fecha_cobro), _fmt_excel(r.created_at),
+            ] for r in cuotas],
+        )
 
-    # Movimientos
-    movimientos = db.query(MovimientoEfectivo).all()
-    add_sheet(
-        "Movimientos",
-        ["ID", "Cliente ID", "Tipo", "Moneda", "Monto", "Cotización",
-         "Ganancia", "Fecha Operación", "Observaciones", "Creado"],
-        [[
-            _fmt_excel(r.id), _fmt_excel(r.cliente_id), _fmt_excel(r.tipo),
-            _fmt_excel(r.moneda), _fmt_excel(r.monto), _fmt_excel(r.cotizacion_aplicada),
-            _fmt_excel(r.ganancia), _fmt_excel(r.fecha_operacion),
-            r.observaciones, _fmt_excel(r.created_at),
-        ] for r in movimientos],
-    )
+    # ── Movimientos ──────────────────────────────────────────────────────────
+    if _inc("movimientos_efectivo"):
+        movimientos = _date_filter(db.query(MovimientoEfectivo), MovimientoEfectivo).all()
+        add_sheet(
+            "Movimientos",
+            ["ID", "Cliente ID", "Tipo", "Moneda", "Monto", "Cotización",
+             "Ganancia", "Fecha Operación", "Observaciones", "Creado"],
+            [[
+                _fmt_excel(r.id), _fmt_excel(r.cliente_id), _fmt_excel(r.tipo),
+                _fmt_excel(r.moneda), _fmt_excel(r.monto), _fmt_excel(r.cotizacion_aplicada),
+                _fmt_excel(r.ganancia), _fmt_excel(r.fecha_operacion),
+                r.observaciones, _fmt_excel(r.created_at),
+            ] for r in movimientos],
+        )
 
-    # Fiados
-    fiados = db.query(Fiado).all()
-    add_sheet(
-        "Fiados",
-        ["ID", "Cheque ID", "Cliente ID", "Monto Original", "% Venta",
-         "Saldo Pendiente", "Estado", "Fecha Fiado", "Creado"],
-        [[
-            _fmt_excel(r.id), _fmt_excel(r.cheque_id), _fmt_excel(r.cliente_id),
-            _fmt_excel(r.monto_original), _fmt_excel(r.porcentaje_venta),
-            _fmt_excel(r.saldo_pendiente), _fmt_excel(r.estado),
-            _fmt_excel(r.fecha_fiado), _fmt_excel(r.created_at),
-        ] for r in fiados],
-    )
+    # ── Fiados ───────────────────────────────────────────────────────────────
+    if _inc("fiados"):
+        fiados = _date_filter(db.query(Fiado), Fiado).all()
+        add_sheet(
+            "Fiados",
+            ["ID", "Cheque ID", "Cliente ID", "Monto Original", "% Venta",
+             "Saldo Pendiente", "Estado", "Fecha Fiado", "Creado"],
+            [[
+                _fmt_excel(r.id), _fmt_excel(r.cheque_id), _fmt_excel(r.cliente_id),
+                _fmt_excel(r.monto_original), _fmt_excel(r.porcentaje_venta),
+                _fmt_excel(r.saldo_pendiente), _fmt_excel(r.estado),
+                _fmt_excel(r.fecha_fiado), _fmt_excel(r.created_at),
+            ] for r in fiados],
+        )
 
-    # Pasivos
-    pasivos = db.query(Pasivo).all()
-    add_sheet(
-        "Pasivos",
-        ["ID", "Acreedor", "Concepto", "Monto", "Saldo Pendiente", "Moneda",
-         "Estado", "Vencimiento", "Cancelación", "Observaciones", "Creado"],
-        [[
-            _fmt_excel(r.id), r.acreedor, r.concepto,
-            _fmt_excel(r.monto), _fmt_excel(r.saldo_pendiente), _fmt_excel(r.moneda),
-            _fmt_excel(r.estado), _fmt_excel(r.fecha_vencimiento),
-            _fmt_excel(r.fecha_cancelacion), r.observaciones, _fmt_excel(r.created_at),
-        ] for r in pasivos],
-    )
+    # ── Pasivos ──────────────────────────────────────────────────────────────
+    if _inc("pasivos"):
+        pasivos = _date_filter(db.query(Pasivo), Pasivo).all()
+        add_sheet(
+            "Pasivos",
+            ["ID", "Acreedor", "Concepto", "Monto", "Saldo Pendiente", "Moneda",
+             "Estado", "Vencimiento", "Cancelación", "Observaciones", "Creado"],
+            [[
+                _fmt_excel(r.id), r.acreedor, r.concepto,
+                _fmt_excel(r.monto), _fmt_excel(r.saldo_pendiente), _fmt_excel(r.moneda),
+                _fmt_excel(r.estado), _fmt_excel(r.fecha_vencimiento),
+                _fmt_excel(r.fecha_cancelacion), r.observaciones, _fmt_excel(r.created_at),
+            ] for r in pasivos],
+        )
 
-    # Gastos Operativos
-    gastos = db.query(GastoOperativo).all()
-    add_sheet(
-        "Gastos Operativos",
-        ["ID", "Concepto", "Monto", "Moneda", "Fecha Operación",
-         "Hora Operación", "Observaciones", "Creado"],
-        [[
-            _fmt_excel(r.id), r.concepto, _fmt_excel(r.monto), _fmt_excel(r.moneda),
-            _fmt_excel(r.fecha_operacion), _fmt_excel(r.hora_operacion),
-            r.observaciones, _fmt_excel(r.created_at),
-        ] for r in gastos],
-    )
+    # ── Gastos Operativos ─────────────────────────────────────────────────────
+    if _inc("gastos_operativos"):
+        gastos = _date_filter(db.query(GastoOperativo), GastoOperativo).all()
+        add_sheet(
+            "Gastos Operativos",
+            ["ID", "Concepto", "Monto", "Moneda", "Fecha Operación",
+             "Hora Operación", "Observaciones", "Creado"],
+            [[
+                _fmt_excel(r.id), r.concepto, _fmt_excel(r.monto), _fmt_excel(r.moneda),
+                _fmt_excel(r.fecha_operacion), _fmt_excel(r.hora_operacion),
+                r.observaciones, _fmt_excel(r.created_at),
+            ] for r in gastos],
+        )
 
     buf = BytesIO()
     wb.save(buf)
