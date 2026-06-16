@@ -58,32 +58,32 @@ export default function Reportes() {
 
   return (
     <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
-      {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Reportes</h1>
-        <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Arqueo de caja y ganancias consolidadas</p>
-      </div>
-
-      {/* Filtros */}
-      <div style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '1.5rem' }}>
-        <DropdownFilter
-          label="Período"
-          value={preset}
-          options={[
-            { value: 'hoy' as Preset, label: 'Hoy' },
-            { value: 'semana' as Preset, label: 'Esta semana' },
-            { value: 'mes' as Preset, label: 'Este mes' },
-            { value: 'custom' as Preset, label: labelPersonalizado },
-          ]}
-          onChange={handlePreset}
-        />
-        {showPicker && (
-          <DateRangePicker
-            from={customDesde} to={customHasta}
-            onChange={(f, t) => { setCustomDesde(f); setCustomHasta(t) }}
-            onClose={() => setShowPicker(false)}
+      {/* Header + Filtros */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+        <div>
+          <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Reportes</h1>
+          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Arqueo de caja y ganancias consolidadas</p>
+        </div>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <DropdownFilter
+            label="Período"
+            value={preset}
+            options={[
+              { value: 'hoy' as Preset, label: 'Hoy' },
+              { value: 'semana' as Preset, label: 'Esta semana' },
+              { value: 'mes' as Preset, label: 'Este mes' },
+              { value: 'custom' as Preset, label: labelPersonalizado },
+            ]}
+            onChange={handlePreset}
           />
-        )}
+          {showPicker && (
+            <DateRangePicker
+              from={customDesde} to={customHasta}
+              onChange={(f, t) => { setCustomDesde(f); setCustomHasta(t) }}
+              onClose={() => setShowPicker(false)}
+            />
+          )}
+        </div>
       </div>
 
       {isLoading && <div style={{ textAlign: 'center', color: 'rgba(100,116,139,0.6)', padding: '3rem', fontFamily: FM, fontSize: '0.82rem' }}>Calculando ganancias…</div>}
@@ -94,23 +94,15 @@ export default function Reportes() {
           {/* Sección label */}
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Ganancias del período</p>
 
-          <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1rem' }}>
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '1.5rem' }}>
             <MetricCard label="Cheques (spread)" value={fmtARS(data.ganancia_cheques)} sub="Compra-venta de cheques" color="green" />
             <MetricCard label="Préstamos (intereses)" value={fmtARS(data.ganancia_prestamos)} sub="Diferencia crédito / total" color="green" />
             <MetricCard label="Divisas (efectivo)" value={fmtARS(data.ganancia_movimientos_efectivo)} sub="Compra-venta de dólares" color="green" />
             <MetricCard label="Gastos operativos" value={fmtARS(data.gastos_operativos)} sub="Nafta, insumos, etc." color="red" />
-          </div>
-
-          {/* Totales destacados */}
-          <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.5rem' }}>
-            <div className="lift" style={{ ...CARD, padding: '1.1rem 1.2rem', minWidth: 0 }}>
-              <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>Total bruto</p>
-              <p style={{ fontFamily: FN, fontSize: 'clamp(0.85rem, 4.5vw, 2.2rem)', color: 'var(--text-1)', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{fmtARS(data.total_ganancias)}</p>
-              <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>Sin descontar gastos</p>
-            </div>
-            <div className="lift" style={{ background: 'linear-gradient(145deg, #3730a3, #4338ca)', border: '1px solid rgba(99,102,241,0.4)', boxShadow: '0 4px 24px rgba(99,102,241,0.2)', padding: '1.1rem 1.2rem', minWidth: 0 }}>
+            <MetricCard label="Total bruto" value={fmtARS(data.total_ganancias)} sub="Sin descontar gastos" color="default" />
+            <div className="lift" style={{ background: 'linear-gradient(145deg, #3730a3, #4338ca)', border: '1px solid rgba(99,102,241,0.4)', boxShadow: '0 4px 24px rgba(99,102,241,0.2)', borderRadius: 'var(--r-lg)', padding: '1rem 1.2rem', minWidth: 0 }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.7)', marginBottom: '0.3rem' }}>Neto del período</p>
-              <p style={{ fontFamily: FN, fontSize: 'clamp(0.85rem, 4.5vw, 2.2rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{fmtARS(data.neto)}</p>
+              <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.25rem', overflowWrap: 'anywhere' }}>{fmtARS(data.neto)}</p>
               <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(199,210,254,0.55)' }}>Ganancias − gastos</p>
             </div>
           </div>
