@@ -36,7 +36,7 @@ function MetricCard({ label, value, sub, color = 'default', borderTopColor, badg
   return (
     <div className="lift" style={{
       ...CARD,
-      padding: '1.25rem 1.4rem',
+      padding: 'clamp(0.85rem, 3vw, 1.25rem) clamp(0.9rem, 3vw, 1.4rem)',
       minWidth: 0,
       ...(borderTopColor ? { borderTop: `3px solid ${borderTopColor}` } : {}),
     }}>
@@ -81,32 +81,30 @@ export default function Reportes() {
   return (
     <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
       {/* Header + Filtro */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
-        <div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1.5rem' }}>
+        <div style={{ minWidth: 0 }}>
           <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Reportes</h1>
-          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Arqueo de caja y ganancias consolidadas</p>
+          <p className="hidden sm:block" style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Arqueo de caja y ganancias consolidadas</p>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem', position: 'relative' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <DropdownFilter
-              label="Período"
-              value={preset}
-              options={[
-                { value: 'hoy' as Preset, label: 'Hoy' },
-                { value: 'semana' as Preset, label: 'Esta semana' },
-                { value: 'mes' as Preset, label: 'Este mes' },
-                { value: 'custom' as Preset, label: labelPersonalizado },
-              ]}
-              onChange={handlePreset}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem', position: 'relative', flexShrink: 0 }}>
+          <DropdownFilter
+            label="Período"
+            value={preset}
+            options={[
+              { value: 'hoy' as Preset, label: 'Hoy' },
+              { value: 'semana' as Preset, label: 'Esta semana' },
+              { value: 'mes' as Preset, label: 'Este mes' },
+              { value: 'custom' as Preset, label: labelPersonalizado },
+            ]}
+            onChange={handlePreset}
+          />
+          {showPicker && (
+            <DateRangePicker
+              from={customDesde} to={customHasta}
+              onChange={(f, t) => { setCustomDesde(f); setCustomHasta(t) }}
+              onClose={() => setShowPicker(false)}
             />
-            {showPicker && (
-              <DateRangePicker
-                from={customDesde} to={customHasta}
-                onChange={(f, t) => { setCustomDesde(f); setCustomHasta(t) }}
-                onClose={() => setShowPicker(false)}
-              />
-            )}
-          </div>
+          )}
           <p style={{ fontFamily: FM, fontSize: '0.68rem', fontVariantNumeric: 'tabular-nums', color: 'rgba(100,116,139,0.6)', lineHeight: 1 }}>
             {fmtDate(desde)} — {fmtDate(hasta)}
           </p>
@@ -120,8 +118,8 @@ export default function Reportes() {
         <>
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Ganancias del período</p>
 
-          {/* Grilla 3×2: Cheques / Préstamos / Divisas / Gastos / Total bruto / Neto */}
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+          {/* Grilla 2×3 mobile / 3×2 desktop */}
+          <div className="grid grid-cols-2 sm:grid-cols-3" style={{ gap: '0.75rem', marginBottom: '1.5rem' }}>
             <MetricCard
               label="Cheques (spread)"
               value={fmtARS(data.ganancia_cheques)}
@@ -161,7 +159,7 @@ export default function Reportes() {
               borderTop: '3px solid rgba(129,140,248,0.6)',
               boxShadow: '0 4px 24px rgba(99,102,241,0.2)',
               borderRadius: 'var(--r-lg)',
-              padding: '1.25rem 1.4rem',
+              padding: 'clamp(0.85rem, 3vw, 1.25rem) clamp(0.9rem, 3vw, 1.4rem)',
               minWidth: 0,
             }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.7)', marginBottom: '0.3rem' }}>Neto del período</p>
@@ -243,12 +241,12 @@ export default function Reportes() {
 
           {/* Pasivos snapshot */}
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Pasivos pendientes (snapshot actual)</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               { label: 'Deudas pendientes ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars) },
               { label: 'Deudas pendientes USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd) },
             ].map(({ label, value }) => (
-              <div key={label} className="lift" style={{ ...CARD, padding: '1.25rem 1.4rem', minWidth: 0 }}>
+              <div key={label} className="lift" style={{ ...CARD, padding: 'clamp(0.85rem, 3vw, 1.25rem) clamp(0.9rem, 3vw, 1.4rem)', minWidth: 0 }}>
                 <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
                 <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: 'var(--danger)', letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{value}</p>
               </div>

@@ -33,6 +33,8 @@ function useDraggable() {
   })
   const drag = useRef<{ pointerId: number; startX: number; startY: number; origX: number; origY: number; moved: boolean } | null>(null)
   const didDragRef = useRef(false)
+  const preExpandPosRef = useRef<Pos | null | undefined>(undefined)
+  const movedWhileExpandedRef = useRef(false)
 
   function clamp(p: Pos): Pos {
     const el = nodeRef.current
@@ -56,12 +58,24 @@ function useDraggable() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // Reencuadrar al montar y cada vez que cambia el tamaño del widget
-  // (minimizar ↔ expandir). Sin esto, al expandirse desde una posición pegada
-  // al borde inferior el cuerpo grande queda fuera de pantalla. useLayoutEffect
-  // mide el nuevo tamaño y corrige antes de pintar (sin parpadeo).
+  // Reencuadrar al expandir para evitar que el widget grande quede fuera de pantalla.
+  // Al minimizar, restauramos la posición guardada antes de expandir (si el usuario
+  // no arrastró el widget mientras estaba expandido), para que el botón vuelva
+  // exactamente a donde estaba.
   useLayoutEffect(() => {
-    setPos((p) => (p ? clamp(p) : p))
+    if (!collapsed) {
+      setPos((p) => {
+        preExpandPosRef.current = p
+        movedWhileExpandedRef.current = false
+        return p ? clamp(p) : p
+      })
+    } else {
+      if (!movedWhileExpandedRef.current && preExpandPosRef.current !== undefined) {
+        setPos(preExpandPosRef.current)
+      }
+      preExpandPosRef.current = undefined
+      movedWhileExpandedRef.current = false
+    }
   }, [collapsed])
 
   const dragProps = {
@@ -98,6 +112,7 @@ function useDraggable() {
       if (d?.moved) {
         try { nodeRef.current?.releasePointerCapture(d.pointerId) } catch { /* ignore */ }
         didDragRef.current = true
+        movedWhileExpandedRef.current = true
         setPos((p) => {
           if (p) { try { localStorage.setItem(POS_KEY, JSON.stringify(p)) } catch { /* ignore */ } }
           return p
