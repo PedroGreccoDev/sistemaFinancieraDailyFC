@@ -66,14 +66,13 @@ export const btnGhost = (v: Variant = 'neutral'): CSSProperties => ({
   border: '1px solid transparent',
 })
 
-/** Chip / badge (pill suave): fondo 14% + texto + borde 32%. */
+/** Chip / badge (pill suave): fondo 14% + texto. */
 export const chip = (v: Variant): CSSProperties => ({
   fontFamily: FM,
   fontSize: '0.65rem',
   fontWeight: 700,
   color: TOK[v],
   background: mix(v, 14),
-  border: `1px solid ${mix(v, 32)}`,
   padding: '2px 8px',
   borderRadius: 'var(--r-sm)',
   whiteSpace: 'nowrap',

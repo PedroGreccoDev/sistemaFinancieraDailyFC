@@ -335,7 +335,25 @@ export default function Navbar() {
         top: 0,
         alignSelf: "flex-start",
       }}>
-        <Brand action={
+        <Brand />
+        <NavItems />
+        <DolarBlock />
+        <div style={{
+          padding: '0.875rem 1.5rem',
+          borderTop: BORDER,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginTop: 'auto',
+        }}>
+          <span style={{
+            fontFamily: "'Manrope', sans-serif",
+            fontSize: '0.78rem',
+            fontWeight: 500,
+            color: 'var(--nav-inactive)',
+          }}>
+            {dark ? 'Modo oscuro' : 'Modo claro'}
+          </span>
           <button
             onClick={toggleDark}
             aria-label={dark ? 'Activar modo claro' : 'Activar modo oscuro'}
@@ -343,21 +361,18 @@ export default function Navbar() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              width: '28px',
-              height: '28px',
+              width: '32px',
+              height: '32px',
               background: 'var(--ov-004)',
               border: '1px solid var(--bd-006)',
               borderRadius: '8px',
               color: 'var(--text-2)',
               cursor: 'pointer',
-              flexShrink: 0,
             }}
           >
             {dark ? <SunIcon /> : <MoonIcon />}
           </button>
-        } />
-        <NavItems />
-        <DolarBlock />
+        </div>
       </nav>
     </>
   )

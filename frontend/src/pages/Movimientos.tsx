@@ -328,7 +328,6 @@ export default function Movimientos() {
                           fontFamily: FM, fontSize: '0.58rem', fontWeight: 700,
                           color: cfg.color, background: cfg.bg,
                           padding: '1px 7px', borderRadius: '999px',
-                          border: `1px solid ${cfg.color}30`,
                           flexShrink: 0,
                         }}>
                           {cfg.label}

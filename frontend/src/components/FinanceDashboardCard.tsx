@@ -20,8 +20,8 @@ if (typeof document !== "undefined" && !document.getElementById(RESPONSIVE_STYLE
       .fc-card-num         { font-size: clamp(1.1rem, 5.5vw, 1.7rem) !important; overflow-wrap: anywhere; min-width: 0; }
       .fc-card-numrow      { min-width: 0; }
       .fc-card-prefix      { font-size: 0.8rem !important; margin-bottom: 0.2rem !important; }
-      .fc-card-title       { font-size: 0.58rem !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; max-width: none !important; }
-      .fc-card-subtitle    { font-size: 0.62rem !important; }
+      .fc-card-title       { font-size: 0.65rem !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; max-width: none !important; }
+      .fc-card-subtitle    { font-size: 0.67rem !important; }
       .fc-card-header      { margin-bottom: 0.2rem !important; }
       .fc-card-numrow      { margin-bottom: 0.2rem !important; }
       .fc-card-divider     { margin-bottom: 0.2rem !important; }
@@ -211,7 +211,6 @@ export function FinanceDashboardCard({
               fontWeight: 700,
               color: up ? "#4ade80" : "#f87171",
               background: up ? "rgba(74,222,128,0.08)" : "rgba(248,113,113,0.08)",
-              border: `1px solid ${up ? "rgba(74,222,128,0.25)" : "rgba(248,113,113,0.25)"}`,
             }}>
               <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"
                 style={{ transform: up ? "rotate(0deg)" : "rotate(180deg)" }}>
@@ -230,9 +229,7 @@ export function FinanceDashboardCard({
               </span>
             )}
           </div>
-        ) : (
-          <div style={{ height: "22px" }} />
-        )}
+        ) : null}
       </div>
 
       <div className="absolute bottom-0 left-0 right-0" style={{

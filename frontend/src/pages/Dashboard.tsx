@@ -112,7 +112,6 @@ function AlertCard({ dot, label, count, children }: AlertCardProps) {
             letterSpacing: "0.05em",
             color: dot,
             background: `${dot}18`,
-            border: `1px solid ${dot}35`,
             padding: "0 0.5rem",
             lineHeight: "1.5rem",
           }}>
@@ -411,7 +410,6 @@ export default function Dashboard() {
                   justifyContent: "center",
                   flexShrink: 0,
                   background: item.tipo === 'cheque' ? "rgba(99,102,241,0.12)" : "rgba(168,85,247,0.12)",
-                  border: `1px solid ${item.tipo === 'cheque' ? "rgba(99,102,241,0.3)" : "rgba(168,85,247,0.3)"}`,
                 }}>
                   <span style={{
                     fontFamily: FONT_NUM,
