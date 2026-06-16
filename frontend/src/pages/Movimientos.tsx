@@ -170,16 +170,36 @@ export default function Movimientos() {
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div style={{
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-        marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.75rem',
       }}>
-        <h1 style={{
-          fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em',
-          color: 'var(--text-1)', lineHeight: 1, margin: 0,
-        }}>
-          Movimientos
-        </h1>
+        {/* Izquierda: título + badge + rango */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+          <h1 style={{
+            fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em',
+            color: 'var(--text-1)', lineHeight: 1, margin: 0,
+          }}>
+            Movimientos
+          </h1>
+          <span style={{
+            fontFamily: FM, fontSize: '0.72rem', fontWeight: 700,
+            background: `${ACCENT}22`, color: ACCENT,
+            border: `1px solid ${ACCENT}44`,
+            padding: '0.22rem 0.7rem', borderRadius: '999px',
+            whiteSpace: 'nowrap',
+          }}>
+            {isLoading ? '–' : filtrados.length} en el período
+          </span>
+          <span style={{
+            fontFamily: FM, fontSize: '0.72rem',
+            color: 'rgba(100,116,139,0.5)',
+            whiteSpace: 'nowrap',
+          }}>
+            {rangoLabel}
+          </span>
+        </div>
 
+        {/* Derecha: filtros */}
         <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
           <DropdownFilter
             label="Sección"
@@ -206,47 +226,6 @@ export default function Movimientos() {
             />
           )}
         </div>
-      </div>
-
-      {/* ── Mobile: resumen en card ──────────────────────────────────────── */}
-      <div className="sm:hidden">
-        <div style={{
-          ...CARD,
-          borderLeft:   `3px solid ${ACCENT}`,
-          padding:      '0.875rem 1rem',
-          marginBottom: '1rem',
-        }}>
-          <p style={{
-            fontFamily: FM, fontSize: '0.6rem', fontWeight: 700,
-            letterSpacing: '0.15em', textTransform: 'uppercase',
-            color: ACCENT, margin: '0 0 0.2rem',
-          }}>
-            Movimientos en el período
-          </p>
-          <p style={{ fontFamily: FN, fontSize: '2rem', color: ACCENT, lineHeight: 1, margin: '0 0 0.2rem' }}>
-            {isLoading ? '–' : filtrados.length}
-          </p>
-          <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', margin: 0 }}>
-            {filtrados.length} registro{filtrados.length !== 1 ? 's' : ''} · {rangoLabel}
-          </p>
-        </div>
-      </div>
-
-      {/* ── Desktop: resumen como texto destacado ────────────────────────── */}
-      <div className="hidden sm:block" style={{ marginBottom: '1.5rem' }}>
-        <p style={{
-          fontFamily: FM, fontSize: '0.63rem', fontWeight: 700,
-          letterSpacing: '0.18em', textTransform: 'uppercase',
-          color: ACCENT, margin: '0 0 0.2rem',
-        }}>
-          Movimientos en el período
-        </p>
-        <p style={{ fontFamily: FN, fontSize: '3rem', color: ACCENT, lineHeight: 1, margin: '0 0 0.25rem' }}>
-          {isLoading ? '–' : filtrados.length}
-        </p>
-        <p style={{ fontFamily: FM, fontSize: '0.75rem', color: 'rgba(100,116,139,0.55)', margin: 0 }}>
-          {filtrados.length} registro{filtrados.length !== 1 ? 's' : ''} · {rangoLabel}
-        </p>
       </div>
 
       {/* ── Loading ──────────────────────────────────────────────────────── */}
