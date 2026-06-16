@@ -1,7 +1,29 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import type { ComponentType } from 'react'
 import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange, IconSettings } from './icons'
+import { DolarPill, DolarBlock } from './DolarInline'
+import { useDarkMode } from '../hooks/useDarkMode'
+
+function SunIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="5" />
+      <line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+    </svg>
+  )
+}
+
+function MoonIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  )
+}
 
 const NAV_LINKS: { to: string; label: string; end: boolean; Icon: ComponentType<{ size?: number }> }[] = [
   { to: '/',               label: 'Inicio',        end: true,  Icon: IconHome },
@@ -17,33 +39,42 @@ const ACCENT = "#6366f1"
 const BG     = "var(--nav-bg)"
 const BORDER = "1px solid var(--bd-006)"
 
-function Brand({ compact = false }: { compact?: boolean }) {
+function Brand({ compact = false, action }: { compact?: boolean; action?: React.ReactNode }) {
   return (
-    <div style={{ padding: compact ? 0 : "1.75rem 1.5rem 1.25rem", borderBottom: compact ? "none" : BORDER }}>
-      <span style={{
-        fontFamily: "'Bebas Neue', sans-serif",
-        fontSize: compact ? "1.5rem" : "1.9rem",
-        letterSpacing: "0.1em",
-        color: "var(--text-strong)",
-        lineHeight: 1,
-        display: "block",
-      }}>
-        Daily FC
-      </span>
-      {!compact && (
+    <div style={{
+      padding: compact ? 0 : "1.75rem 1.5rem 1.25rem",
+      borderBottom: compact ? "none" : BORDER,
+      display: "flex",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+    }}>
+      <div>
         <span style={{
-          fontFamily: "'Manrope', sans-serif",
-          fontSize: "0.6rem",
-          fontWeight: 600,
-          letterSpacing: "0.15em",
-          textTransform: "uppercase",
-          color: "rgba(100,116,139,0.7)",
-          marginTop: "4px",
+          fontFamily: "'Bebas Neue', sans-serif",
+          fontSize: compact ? "1.5rem" : "1.9rem",
+          letterSpacing: "0.1em",
+          color: "var(--text-strong)",
+          lineHeight: 1,
           display: "block",
         }}>
-          Sistema Financiero
+          Daily FC
         </span>
-      )}
+        {!compact && (
+          <span style={{
+            fontFamily: "'Manrope', sans-serif",
+            fontSize: "0.6rem",
+            fontWeight: 600,
+            letterSpacing: "0.15em",
+            textTransform: "uppercase",
+            color: "rgba(100,116,139,0.7)",
+            marginTop: "4px",
+            display: "block",
+          }}>
+            Sistema Financiero
+          </span>
+        )}
+      </div>
+      {action}
     </div>
   )
 }
@@ -116,6 +147,7 @@ function CloseIcon() {
 
 export default function Navbar() {
   const [open, setOpen] = useState(false)
+  const [dark, toggleDark] = useDarkMode()
 
   // Gestos táctiles: deslizar desde el borde izquierdo abre el drawer,
   // deslizar hacia la izquierda lo cierra. Solo en mobile.
@@ -197,6 +229,8 @@ export default function Navbar() {
         }}>
           Daily FC
         </span>
+        <div style={{ flex: 1 }} />
+        <DolarPill />
       </nav>
 
       {/* ── Mobile: backdrop ─────────────────────────────────────────────── */}
@@ -254,6 +288,40 @@ export default function Navbar() {
           </button>
         </div>
         <NavItems onNavigate={() => setOpen(false)} />
+        <div style={{
+          padding: '0.875rem 1.5rem',
+          borderTop: BORDER,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <span style={{
+            fontFamily: "'Manrope', sans-serif",
+            fontSize: '0.78rem',
+            fontWeight: 500,
+            color: 'var(--nav-inactive)',
+          }}>
+            {dark ? 'Modo oscuro' : 'Modo claro'}
+          </span>
+          <button
+            onClick={toggleDark}
+            aria-label={dark ? 'Activar modo claro' : 'Activar modo oscuro'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              background: 'var(--ov-004)',
+              border: '1px solid var(--bd-006)',
+              borderRadius: '8px',
+              color: 'var(--text-2)',
+              cursor: 'pointer',
+            }}
+          >
+            {dark ? <SunIcon /> : <MoonIcon />}
+          </button>
+        </div>
       </nav>
 
       {/* ── Desktop: left sidebar ────────────────────────────────────────── */}
@@ -261,14 +329,35 @@ export default function Navbar() {
         background: BG,
         borderRight: BORDER,
         width: "200px",
-        minHeight: "100dvh",
+        height: "100dvh",
         flexShrink: 0,
         position: "sticky",
         top: 0,
         alignSelf: "flex-start",
       }}>
-        <Brand />
+        <Brand action={
+          <button
+            onClick={toggleDark}
+            aria-label={dark ? 'Activar modo claro' : 'Activar modo oscuro'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '28px',
+              height: '28px',
+              background: 'var(--ov-004)',
+              border: '1px solid var(--bd-006)',
+              borderRadius: '8px',
+              color: 'var(--text-2)',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            {dark ? <SunIcon /> : <MoonIcon />}
+          </button>
+        } />
         <NavItems />
+        <DolarBlock />
       </nav>
     </>
   )
