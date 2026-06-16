@@ -16,15 +16,15 @@ if (typeof document !== "undefined" && !document.getElementById(RESPONSIVE_STYLE
   style.id = RESPONSIVE_STYLE_ID;
   style.textContent = `
     @media (max-width: 639px) {
-      .fc-card-body        { padding: 0.75rem 0.9rem !important; }
-      .fc-card-num         { font-size: clamp(1.5rem, 8.5vw, 2.4rem) !important; overflow-wrap: anywhere; min-width: 0; }
+      .fc-card-body        { padding: 0.55rem 0.7rem !important; }
+      .fc-card-num         { font-size: clamp(1.1rem, 5.5vw, 1.7rem) !important; overflow-wrap: anywhere; min-width: 0; }
       .fc-card-numrow      { min-width: 0; }
-      .fc-card-prefix      { font-size: 1rem !important; margin-bottom: 0.3rem !important; }
-      .fc-card-title       { font-size: 0.62rem !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; max-width: none !important; }
-      .fc-card-subtitle    { font-size: 0.7rem !important; }
-      .fc-card-header      { margin-bottom: 0.35rem !important; }
-      .fc-card-numrow      { margin-bottom: 0.35rem !important; }
-      .fc-card-divider     { margin-bottom: 0.35rem !important; }
+      .fc-card-prefix      { font-size: 0.8rem !important; margin-bottom: 0.2rem !important; }
+      .fc-card-title       { font-size: 0.58rem !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; max-width: none !important; }
+      .fc-card-subtitle    { font-size: 0.62rem !important; }
+      .fc-card-header      { margin-bottom: 0.2rem !important; }
+      .fc-card-numrow      { margin-bottom: 0.2rem !important; }
+      .fc-card-divider     { margin-bottom: 0.2rem !important; }
     }
   `;
   document.head.appendChild(style);
@@ -122,9 +122,9 @@ export function FinanceDashboardCard({
         style={{ background: `radial-gradient(circle, ${accentColor}18 0%, transparent 70%)` }}
       />
 
-      <div className="fc-card-body relative" style={{ padding: "1.25rem 1.4rem" }}>
+      <div className="fc-card-body relative" style={{ padding: "0.9rem 1rem" }}>
         {/* Header */}
-        <div className="fc-card-header flex items-start justify-between" style={{ marginBottom: "0.6rem" }}>
+        <div className="fc-card-header flex items-start justify-between" style={{ marginBottom: "0.4rem" }}>
           <div>
             <p className="fc-card-title" style={{
               fontFamily: "'Manrope', sans-serif",
@@ -158,21 +158,21 @@ export function FinanceDashboardCard({
         </div>
 
         {/* Big number — Bebas Neue */}
-        <div className="fc-card-numrow flex items-end gap-1.5" style={{ marginBottom: "0.6rem" }}>
+        <div className="fc-card-numrow flex items-end gap-1.5" style={{ marginBottom: "0.4rem" }}>
           {prefix && (
             <span className="fc-card-prefix" style={{
               fontFamily: "'Bebas Neue', sans-serif",
-              fontSize: "1.6rem",
+              fontSize: "1.2rem",
               color: "var(--num-prefix)",
               letterSpacing: "0.04em",
-              marginBottom: "0.5rem",
+              marginBottom: "0.35rem",
             }}>
               {prefix}
             </span>
           )}
           <span className="fc-card-num" style={{
             fontFamily: "'Bebas Neue', sans-serif",
-            fontSize: "4rem",
+            fontSize: "2.8rem",
             lineHeight: 1,
             color: "var(--text-strong)",
             letterSpacing: "0.02em",
@@ -197,7 +197,7 @@ export function FinanceDashboardCard({
         {/* Divider */}
         <div className="fc-card-divider" style={{
           height: "1px",
-          marginBottom: "0.6rem",
+          marginBottom: "0.4rem",
           background: `linear-gradient(to right, ${accentColor}35, var(--ov-004) 60%, transparent)`,
         }} />
 

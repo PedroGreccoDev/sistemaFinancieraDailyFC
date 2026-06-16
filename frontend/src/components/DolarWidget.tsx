@@ -81,9 +81,13 @@ function useDraggable() {
       const dx = e.clientX - d.startX
       const dy = e.clientY - d.startY
       if (!d.moved) {
-        if (Math.hypot(dx, dy) < 4) return
+        if (Math.hypot(dx, dy) < 6) return
+        // Gesto primariamente vertical → intención de scroll, cancelar drag
+        if (Math.abs(dy) > Math.abs(dx) * 1.5 && Math.abs(dy) > 8) {
+          drag.current = null
+          return
+        }
         d.moved = true
-        // Recién ahora que es un arrastre real capturamos el puntero
         try { nodeRef.current?.setPointerCapture(d.pointerId) } catch { /* ignore */ }
       }
       setPos(clamp({ x: d.origX + dx, y: d.origY + dy }))
@@ -152,6 +156,7 @@ export default function DolarWidget() {
     <div
       ref={(el) => { nodeRef.current = el }}
       {...dragProps}
+      onClick={() => { if (didDragRef.current) { didDragRef.current = false; return } setCollapsed(true) }}
       style={{ ...glass, position: 'fixed', ...positionStyle, zIndex: 50, borderRadius: '24px', minWidth: '198px', touchAction: 'none', cursor: 'grab' }}
       className="p-4 active:cursor-grabbing"
     >
@@ -175,7 +180,8 @@ export default function DolarWidget() {
           <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 tracking-wide">Dólar Blue</span>
         </div>
         <button
-          onClick={() => { if (didDragRef.current) { didDragRef.current = false; return } setCollapsed(true) }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); if (didDragRef.current) { didDragRef.current = false; return } setCollapsed(true) }}
           style={{ background: 'rgba(148,163,184,0.18)', borderRadius: '100px' }}
           className="w-5 h-5 flex items-center justify-center hover:bg-slate-400/30 transition-colors"
           aria-label="Minimizar"

@@ -105,12 +105,12 @@ export default function Reportes() {
           <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.5rem' }}>
             <div className="lift" style={{ ...CARD, padding: '1.1rem 1.2rem', minWidth: 0 }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>Total bruto</p>
-              <p style={{ fontFamily: FN, fontSize: 'clamp(1.3rem, 7vw, 2.2rem)', color: 'var(--text-1)', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{fmtARS(data.total_ganancias)}</p>
+              <p style={{ fontFamily: FN, fontSize: 'clamp(0.85rem, 4.5vw, 2.2rem)', color: 'var(--text-1)', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{fmtARS(data.total_ganancias)}</p>
               <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>Sin descontar gastos</p>
             </div>
             <div className="lift" style={{ background: 'linear-gradient(145deg, #3730a3, #4338ca)', border: '1px solid rgba(99,102,241,0.4)', boxShadow: '0 4px 24px rgba(99,102,241,0.2)', padding: '1.1rem 1.2rem', minWidth: 0 }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.7)', marginBottom: '0.3rem' }}>Neto del período</p>
-              <p style={{ fontFamily: FN, fontSize: 'clamp(1.3rem, 7vw, 2.2rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{fmtARS(data.neto)}</p>
+              <p style={{ fontFamily: FN, fontSize: 'clamp(0.85rem, 4.5vw, 2.2rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{fmtARS(data.neto)}</p>
               <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(199,210,254,0.55)' }}>Ganancias − gastos</p>
             </div>
           </div>
@@ -189,13 +189,12 @@ export default function Reportes() {
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Pasivos pendientes (snapshot actual)</p>
           <div className="grid grid-cols-2 gap-3">
             {[
-              { label: 'Deudas pendientes ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars), sub: 'Lo que el negocio debe (en $)' },
-              { label: 'Deudas pendientes USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd), sub: 'Lo que el negocio debe (en U$D)' },
-            ].map(({ label, value, sub }) => (
+              { label: 'Deudas pendientes ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars) },
+              { label: 'Deudas pendientes USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd) },
+            ].map(({ label, value }) => (
               <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem', minWidth: 0 }}>
                 <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
-                <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: '#f87171', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{value}</p>
-                <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
+                <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: '#f87171', letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere' }}>{value}</p>
               </div>
             ))}
           </div>

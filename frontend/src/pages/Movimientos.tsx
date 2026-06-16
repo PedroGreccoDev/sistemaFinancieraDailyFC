@@ -211,17 +211,20 @@ export default function Movimientos() {
               const cfg = SECCION_CONFIG[item.seccion]
               const montoFmt = fmtMonto(item.monto, item.moneda)
               return (
-                <div key={`m-${item.seccion}-${item.id}`} style={{ padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem' }}>
+                <div key={`m-${item.seccion}-${item.id}`} style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid var(--ov-004)' }}>
+                  {/* Franja de color */}
+                  <div style={{ width: '3px', flexShrink: 0, background: cfg.color, borderRadius: '0 2px 2px 0', margin: '6px 0' }} />
+                  {/* Contenido */}
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.7rem 1rem 0.7rem 0.75rem' }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                        <span style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '2px 8px' }}>{cfg.label}</span>
-                        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.68rem', color: 'rgba(100,116,139,0.6)' }}>{fmtDate(item.fecha)}</span>
+                      <p style={{ fontFamily: FM, fontSize: '0.84rem', fontWeight: 600, color: 'var(--text-1)', wordBreak: 'break-word', marginBottom: '3px' }}>{item.descripcion}</p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: FM, fontSize: '0.58rem', fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '1px 7px', borderRadius: '999px', border: `1px solid ${cfg.color}30` }}>{cfg.label}</span>
+                        <span style={{ fontFamily: FM, fontSize: '0.68rem', fontWeight: 500, color: 'rgba(100,116,139,0.55)' }}>{fmtDate(item.fecha)}</span>
                       </div>
-                      <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-1)', wordBreak: 'break-word' }}>{item.descripcion}</p>
-                      {item.detalle && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.55)', wordBreak: 'break-word', marginTop: '1px' }}>{item.detalle}</p>}
+                      {item.detalle && <p style={{ fontFamily: FM, fontSize: '0.68rem', color: 'rgba(100,116,139,0.45)', wordBreak: 'break-word', marginTop: '3px' }}>{item.detalle}</p>}
                     </div>
-                    <span style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: item.esGasto ? '#f87171' : 'var(--text-1)', whiteSpace: 'nowrap', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+                    <span style={{ fontFamily: FN, fontSize: '1.05rem', letterSpacing: '0.02em', color: item.esGasto ? '#f87171' : 'var(--text-1)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                       {item.esGasto ? `−${montoFmt}` : montoFmt}
                     </span>
                   </div>
@@ -251,7 +254,7 @@ export default function Movimientos() {
                         {fmtDate(item.fecha)}
                       </td>
                       <td style={{ padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '2px 8px' }}>
+                        <span style={{ fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, color: cfg.color, background: cfg.bg, padding: '2px 9px', borderRadius: '999px', border: `1px solid ${cfg.color}30` }}>
                           {cfg.label}
                         </span>
                       </td>
