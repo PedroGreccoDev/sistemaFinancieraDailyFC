@@ -51,3 +51,6 @@ export function IconShare({ size = 18, style, strokeWidth = 2 }: P) {
 export function IconClose({ size = 18, style, strokeWidth = 2.2 }: P) {
   return (<svg {...base(size, strokeWidth)} style={style}><path d="M6 6l12 12M18 6 6 18" /></svg>)
 }
+export function IconBanknote({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M5.5 9.5v.01M18.5 14.5v.01" /></svg>)
+}

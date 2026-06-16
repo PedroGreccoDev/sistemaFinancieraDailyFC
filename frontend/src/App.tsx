@@ -10,6 +10,7 @@ import Pasivos from './pages/Pasivos'
 import Reportes from './pages/Reportes'
 import Fiados from './pages/Fiados'
 import Movimientos from './pages/Movimientos'
+import Gastos from './pages/Gastos'
 import { useDarkMode } from './hooks/useDarkMode'
 import { ToastProvider } from './lib/toast'
 
@@ -61,6 +62,7 @@ export default function App() {
               </Route>
               <Route path="/pasivos"      element={<Pasivos />} />
               <Route path="/reportes"     element={<Reportes />} />
+              <Route path="/gastos"       element={<Gastos />} />
               <Route path="/movimientos" element={<Movimientos />} />
             </Routes>
           </main>

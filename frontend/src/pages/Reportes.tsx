@@ -21,9 +21,6 @@ function getRangeForPreset(preset: Preset, customDesde: string | null, customHas
 
 type BadgeInfo = { label: string; bg: string; textColor: string }
 
-const BADGE_INGRESO: BadgeInfo = { label: 'Ingreso', bg: 'rgba(34,197,94,0.12)', textColor: 'rgba(34,197,94,0.9)' }
-const BADGE_EGRESO: BadgeInfo  = { label: 'Egreso',  bg: 'rgba(239,68,68,0.12)',  textColor: 'rgba(239,68,68,0.9)'  }
-
 function MetricCard({ label, value, sub, color = 'default', borderTopColor, badge, prefix, bigNum }: {
   label: string
   value: string
