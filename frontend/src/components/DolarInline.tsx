@@ -44,14 +44,14 @@ export function DolarPill() {
       }}>USD</span>
       {dolar ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
             <span style={{ fontSize: '7px', fontWeight: 700, color: 'var(--danger)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1, opacity: 0.85 }}>C</span>
             <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '12px', color: 'var(--danger)', lineHeight: 1 }}>
               ${dolar.compra.toLocaleString('es-AR')}
             </span>
           </div>
           <span style={{ color: 'var(--text-2)', fontSize: '10px', lineHeight: 1, opacity: 0.5 }}>·</span>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '1px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
             <span style={{ fontSize: '7px', fontWeight: 700, color: 'var(--success)', textTransform: 'uppercase', letterSpacing: '0.1em', lineHeight: 1, opacity: 0.85 }}>V</span>
             <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '12px', color: 'var(--success)', lineHeight: 1 }}>
               ${dolar.venta.toLocaleString('es-AR')}

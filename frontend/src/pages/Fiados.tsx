@@ -369,12 +369,12 @@ export default function Fiados() {
 
       {/* KPIs */}
       {filtro !== 'CANCELADO' && (
-        <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.25rem' }}>
+        <div className="grid grid-cols-2 gap-3 sm:max-w-xl" style={{ marginBottom: '1.25rem' }}>
           {[
             { label: 'Saldo total a cobrar', value: fmtARS(totalSaldo), color: '#fbbf24', sub: `${abiertos.length} fiado(s) abierto(s)` },
             { label: 'Clientes con deuda', value: String(clientesDistintos), color: 'var(--text-1)', sub: 'cliente(s) distintos' },
           ].map(({ label, value, color, sub }) => (
-            <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
+            <div key={label} className="lift" style={{ ...CARD, padding: '0.8rem 1rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
               <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color, letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{value}</p>
               <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>

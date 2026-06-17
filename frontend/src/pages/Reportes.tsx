@@ -19,36 +19,29 @@ function getRangeForPreset(preset: Preset, customDesde: string | null, customHas
   return { desde: customDesde ?? hoy, hasta: customHasta ?? hoy }
 }
 
-type BadgeInfo = { label: string; bg: string; textColor: string }
-
-function MetricCard({ label, value, sub, color = 'default', borderTopColor, badge, prefix }: {
+function MetricCard({ label, value, color = 'default', accentColor, prefix }: {
   label: string
   value: string
-  sub?: string
   color?: 'default' | 'green' | 'red' | 'indigo'
-  borderTopColor?: string
-  badge?: BadgeInfo
+  accentColor?: string
   prefix?: string
 }) {
   const numColor = { default: 'var(--text-1)', green: 'var(--success)', red: 'var(--danger)', indigo: '#818cf8' }[color]
-  const fontSize = 'clamp(1.15rem, 6vw, 1.75rem)'
   return (
     <div className="lift" style={{
       ...CARD,
-      padding: 'clamp(0.85rem, 3vw, 1.25rem) clamp(0.9rem, 3vw, 1.4rem)',
+      padding: '0.7rem 1rem',
       minWidth: 0,
-      ...(borderTopColor ? { borderTop: `3px solid ${borderTopColor}` } : {}),
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '0.6rem',
+      ...(accentColor ? { borderLeft: `3px solid ${accentColor}` } : {}),
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.3rem' }}>
-        <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginRight: '0.5rem' }}>{label}</p>
-        {badge && (
-          <span style={{ fontFamily: FM, fontSize: '0.55rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0.15rem 0.45rem', borderRadius: 999, background: badge.bg, color: badge.textColor, whiteSpace: 'nowrap', flexShrink: 0 }}>{badge.label}</span>
-        )}
-      </div>
-      <p style={{ fontFamily: FN, fontSize, color: numColor, letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: sub ? '0.25rem' : 0, overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>
+      <p style={{ fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', minWidth: 0 }}>{label}</p>
+      <p style={{ fontFamily: FN, fontSize: 'clamp(1.2rem, 4vw, 1.7rem)', color: numColor, letterSpacing: '0.02em', lineHeight: 1.05, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>
         {prefix}{value}
       </p>
-      {sub && <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.55)' }}>{sub}</p>}
     </div>
   )
 }
@@ -123,45 +116,49 @@ export default function Reportes() {
               label="Cheques (spread)"
               value={fmtARS(data.ganancia_cheques)}
               color="default"
-              borderTopColor="rgba(34,197,94,0.55)"
+              accentColor="rgba(34,197,94,0.55)"
             />
             <MetricCard
               label="Préstamos (intereses)"
               value={fmtARS(data.ganancia_prestamos)}
               color="default"
-              borderTopColor="rgba(34,197,94,0.55)"
+              accentColor="rgba(34,197,94,0.55)"
             />
             <MetricCard
               label="Divisas (efectivo)"
               value={fmtARS(data.ganancia_movimientos_efectivo)}
               color="default"
-              borderTopColor="rgba(34,197,94,0.55)"
+              accentColor="rgba(34,197,94,0.55)"
             />
             <MetricCard
               label="Gastos operativos"
               value={fmtARS(data.gastos_operativos)}
               color="red"
-              borderTopColor="rgba(239,68,68,0.55)"
+              accentColor="rgba(239,68,68,0.55)"
               prefix="− "
             />
             <MetricCard
               label="Total bruto"
               value={fmtARS(data.total_ganancias)}
               color="green"
-              borderTopColor="var(--bd-008)"
+              accentColor="var(--bd-008)"
             />
             {/* Neto: card especial con gradiente índigo */}
             <div className="lift" style={{
               background: 'linear-gradient(145deg, #3730a3, #4338ca)',
               border: '1px solid rgba(99,102,241,0.4)',
-              borderTop: '3px solid rgba(129,140,248,0.6)',
+              borderLeft: '3px solid rgba(129,140,248,0.6)',
               boxShadow: '0 4px 24px rgba(99,102,241,0.2)',
               borderRadius: 'var(--r-lg)',
-              padding: 'clamp(0.85rem, 3vw, 1.25rem) clamp(0.9rem, 3vw, 1.4rem)',
+              padding: '0.7rem 1rem',
               minWidth: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.6rem',
             }}>
-              <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.7)', marginBottom: '0.3rem' }}>Neto del período</p>
-              <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{fmtARS(data.neto)}</p>
+              <p style={{ fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.7)', minWidth: 0 }}>Neto del período</p>
+              <p style={{ fontFamily: FN, fontSize: 'clamp(1.2rem, 4vw, 1.7rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtARS(data.neto)}</p>
             </div>
           </div>
 
@@ -239,12 +236,12 @@ export default function Reportes() {
 
           {/* Pasivos snapshot */}
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Pasivos pendientes (snapshot actual)</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:max-w-xl">
             {[
               { label: 'Deudas pendientes ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars), sub: 'cuentas a pagar' },
               { label: 'Deudas pendientes USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd), sub: 'cuentas a pagar' },
             ].map(({ label, value, sub }) => (
-              <div key={label} className="lift" style={{ ...CARD, padding: 'clamp(0.85rem, 3vw, 1.25rem) clamp(0.9rem, 3vw, 1.4rem)', minWidth: 0 }}>
+              <div key={label} className="lift" style={{ ...CARD, padding: '0.8rem 1rem', minWidth: 0 }}>
                 <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
                 <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: 'var(--danger)', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{value}</p>
                 <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>

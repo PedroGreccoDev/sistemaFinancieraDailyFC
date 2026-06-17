@@ -105,7 +105,6 @@ export default function DeudoresPrestamos() {
           const proxima = proximaCuota(p)
           const cobradas = p.cuotas_detalle.filter((c) => c.estado === 'COBRADA').length
           const nombre = clienteMap.get(p.cliente_id) ?? '…'
-          const pct = (cobradas / p.cuotas) * 100
 
           return (
             <div key={p.id} className="lift" style={{ background: 'var(--surface-grad)', border: `1px solid ${cfg.borderColor}`, borderRadius: 'var(--r-lg)', boxShadow: `var(--shadow-card), 0 0 0 1px ${cfg.borderColor}`, padding: '1.1rem 1.2rem' }}>
@@ -145,8 +144,19 @@ export default function DeudoresPrestamos() {
                   <span>{cobradas} de {p.cuotas} cuotas</span>
                   <span style={{ textTransform: 'lowercase' }}>{p.frecuencia}</span>
                 </div>
-                <div style={{ height: '3px', background: 'var(--bd-006)', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', background: cfg.accent, width: `${pct}%`, transition: 'width 0.3s ease' }} />
+                <div style={{ display: 'flex', gap: '2px' }}>
+                  {Array.from({ length: p.cuotas }).map((_, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        flex: 1,
+                        height: '4px',
+                        borderRadius: '2px',
+                        background: i < cobradas ? cfg.accent : 'var(--bd-006)',
+                        transition: 'background 0.3s ease',
+                      }}
+                    />
+                  ))}
                 </div>
               </div>
             </div>
