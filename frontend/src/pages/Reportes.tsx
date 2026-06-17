@@ -21,7 +21,7 @@ function getRangeForPreset(preset: Preset, customDesde: string | null, customHas
 
 type BadgeInfo = { label: string; bg: string; textColor: string }
 
-function MetricCard({ label, value, sub, color = 'default', borderTopColor, badge, prefix, bigNum }: {
+function MetricCard({ label, value, sub, color = 'default', borderTopColor, badge, prefix }: {
   label: string
   value: string
   sub?: string
@@ -29,10 +29,9 @@ function MetricCard({ label, value, sub, color = 'default', borderTopColor, badg
   borderTopColor?: string
   badge?: BadgeInfo
   prefix?: string
-  bigNum?: boolean
 }) {
   const numColor = { default: 'var(--text-1)', green: 'var(--success)', red: 'var(--danger)', indigo: '#818cf8' }[color]
-  const fontSize = bigNum ? 'clamp(1.4rem, 7vw, 2.1rem)' : 'clamp(1.15rem, 6vw, 1.75rem)'
+  const fontSize = 'clamp(1.15rem, 6vw, 1.75rem)'
   return (
     <div className="lift" style={{
       ...CARD,
@@ -150,7 +149,6 @@ export default function Reportes() {
               value={fmtARS(data.total_ganancias)}
               color="green"
               borderTopColor="var(--bd-008)"
-              bigNum
             />
             {/* Neto: card especial con gradiente índigo */}
             <div className="lift" style={{
@@ -163,7 +161,7 @@ export default function Reportes() {
               minWidth: 0,
             }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.7)', marginBottom: '0.3rem' }}>Neto del período</p>
-              <p style={{ fontFamily: FN, fontSize: 'clamp(1.4rem, 7vw, 2.1rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{fmtARS(data.neto)}</p>
+              <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{fmtARS(data.neto)}</p>
             </div>
           </div>
 
@@ -243,12 +241,13 @@ export default function Reportes() {
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Pasivos pendientes (snapshot actual)</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
-              { label: 'Deudas pendientes ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars) },
-              { label: 'Deudas pendientes USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd) },
-            ].map(({ label, value }) => (
+              { label: 'Deudas pendientes ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars), sub: 'cuentas a pagar' },
+              { label: 'Deudas pendientes USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd), sub: 'cuentas a pagar' },
+            ].map(({ label, value, sub }) => (
               <div key={label} className="lift" style={{ ...CARD, padding: 'clamp(0.85rem, 3vw, 1.25rem) clamp(0.9rem, 3vw, 1.4rem)', minWidth: 0 }}>
                 <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
-                <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: 'var(--danger)', letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{value}</p>
+                <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: 'var(--danger)', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{value}</p>
+                <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
               </div>
             ))}
           </div>

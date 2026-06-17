@@ -120,12 +120,13 @@ export default function Cartera() {
       {cheques && (
         <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.25rem' }}>
           {[
-            { label: 'En cartera', value: String(cheques.length), color: 'var(--text-strong)' },
-            { label: 'Total', value: fmtARS(totalCartera(cheques)), color: 'var(--text-strong)' },
-          ].map(({ label, value, color }) => (
+            { label: 'En cartera', value: String(cheques.length), color: 'var(--text-strong)', sub: 'cheque(s) en stock' },
+            { label: 'Total', value: fmtARS(totalCartera(cheques)), color: 'var(--text-strong)', sub: 'valor nominal' },
+          ].map(({ label, value, color, sub }) => (
             <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
-              <p style={{ fontFamily: FN, fontSize: 'clamp(1.3rem, 7vw, 2rem)', color, letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere' }}>{value}</p>
+              <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color, letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{value}</p>
+              <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
             </div>
           ))}
         </div>
@@ -233,12 +234,13 @@ export default function Cartera() {
 
       <div className="grid grid-cols-2 gap-3" style={{ marginBottom: '1.25rem' }}>
         {[
-          { label: 'Cheques vendidos', value: String(filteredVendidos.length), color: 'var(--text-strong)' },
-          { label: 'Ganancia del período', value: fmtARS(totalGanancia), color: '#4ade80' },
-        ].map(({ label, value, color }) => (
+          { label: 'Cheques vendidos', value: String(filteredVendidos.length), color: 'var(--text-strong)', sub: 'en el período' },
+          { label: 'Ganancia del período', value: fmtARS(totalGanancia), color: '#4ade80', sub: 'spread acumulado' },
+        ].map(({ label, value, color, sub }) => (
           <div key={label} className="lift" style={{ ...CARD, padding: '1rem 1.2rem' }}>
             <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
-            <p style={{ fontFamily: FN, fontSize: 'clamp(1.3rem, 7vw, 2rem)', color, letterSpacing: '0.02em', lineHeight: 1.05, overflowWrap: 'anywhere' }}>{value}</p>
+            <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color, letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{value}</p>
+            <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
           </div>
         ))}
       </div>
