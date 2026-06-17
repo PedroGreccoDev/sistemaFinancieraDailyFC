@@ -10,6 +10,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.orm import Session, undefer
 
+from app.core.fechas import TZ_LOCAL
 from app.db.models import (
     Cheque,
     Cliente,
@@ -283,10 +284,15 @@ def exportar_excel(
         return tablas_incluidas is None or name in tablas_incluidas
 
     def _date_filter(q: Any, model: Any) -> Any:
+        # Los timestamps se guardan en UTC, pero el operador elige fechas en hora
+        # local (Argentina). Convertimos el día local completo a UTC para no
+        # traspapelar operaciones nocturnas al día equivocado (igual que reportes.py).
         if desde:
-            q = q.filter(model.created_at >= datetime.combine(desde, time.min, tzinfo=UTC))
+            desde_dt = datetime.combine(desde, time.min, tzinfo=TZ_LOCAL).astimezone(UTC)
+            q = q.filter(model.created_at >= desde_dt)
         if hasta:
-            q = q.filter(model.created_at <= datetime.combine(hasta, time(23, 59, 59, 999999), tzinfo=UTC))
+            hasta_dt = datetime.combine(hasta, time.max, tzinfo=TZ_LOCAL).astimezone(UTC)
+            q = q.filter(model.created_at <= hasta_dt)
         return q
 
     HEADER_FILL = PatternFill("solid", fgColor="4F46E5")
