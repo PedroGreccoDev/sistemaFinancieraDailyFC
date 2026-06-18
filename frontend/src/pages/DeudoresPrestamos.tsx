@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPrestamos, createPrestamo } from '../api/prestamos'
+import { getPrestamos, createPrestamo, cobrarCuotaEfectivo, cobrarCuotaConCheque } from '../api/prestamos'
 import { getClientes, createCliente } from '../api/clientes'
 import { fmtMonto, fmtDate, daysUntil } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
@@ -49,6 +49,209 @@ const FRECUENCIAS: { value: Frecuencia; label: string }[] = [
   { value: 'MENSUAL',   label: 'Mensual' },
   { value: 'ANUAL',     label: 'Anual' },
 ]
+
+// ── Modal cobrar cuota ────────────────────────────────────────────────
+
+function ModalCobrarCuota({
+  prestamo,
+  clienteNombre,
+  onClose,
+  onSuccess,
+}: {
+  prestamo: Prestamo
+  clienteNombre: string
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const queryClient = useQueryClient()
+
+  const pendientes = prestamo.cuotas_detalle
+    .filter((c) => c.estado !== 'COBRADA')
+    .sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))
+
+  const [cuotaId, setCuotaId] = useState(pendientes[0]?.id ?? '')
+  const [metodo, setMetodo] = useState<'efectivo' | 'cheque'>('efectivo')
+  const [fechaCobro, setFechaCobro] = useState('')
+
+  const [nroCheque, setNroCheque] = useState('')
+  const [banco, setBanco] = useState('')
+  const [montoCheque, setMontoCheque] = useState('')
+  const [pctCompra, setPctCompra] = useState('')
+  const [fechaEmision, setFechaEmision] = useState('')
+  const [fechaPago, setFechaPago] = useState('')
+
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const cuotaSeleccionada = pendientes.find((c) => c.id === cuotaId)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      if (metodo === 'efectivo') {
+        await cobrarCuotaEfectivo(prestamo.id, cuotaId, fechaCobro || null)
+      } else {
+        await cobrarCuotaConCheque(prestamo.id, cuotaId, {
+          nro_cheque: nroCheque.trim(),
+          banco: banco.trim() || null,
+          monto: parseFloat(montoCheque),
+          porcentaje_compra: parseFloat(pctCompra) || 0,
+          fecha_emision: fechaEmision || null,
+          fecha_pago: fechaPago || null,
+          cliente_origen_id: prestamo.cliente_id,
+          fecha_cobro: fechaCobro || null,
+        })
+        queryClient.invalidateQueries({ queryKey: ['cartera'] })
+      }
+      onSuccess()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
+
+        {/* Header */}
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 1 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Cobrar cuota</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{clienteNombre} · {pendientes.length} cuota(s) pendiente(s)</p>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+          {/* Lista de cuotas pendientes */}
+          <div>
+            <p style={LABEL_STYLE}>Seleccioná la cuota a cobrar</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              {pendientes.map((c) => {
+                const mora = daysUntil(c.fecha_vencimiento) < 0
+                const selected = c.id === cuotaId
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setCuotaId(c.id)}
+                    style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '0.6rem 0.875rem',
+                      borderRadius: 'var(--r-md)',
+                      border: selected ? '1px solid var(--primary)' : '1px solid var(--bd-008)',
+                      background: selected ? 'color-mix(in srgb, var(--primary) 10%, transparent)' : 'var(--ov-002)',
+                      cursor: 'pointer', textAlign: 'left', transition: 'all 0.12s ease',
+                    }}
+                  >
+                    <span style={{ fontFamily: FM, fontSize: '0.8rem', fontWeight: selected ? 700 : 500, color: selected ? 'var(--primary)' : 'var(--text-1)' }}>
+                      Cuota {c.numero_cuota}
+                    </span>
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ display: 'block', fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, color: selected ? 'var(--primary)' : 'var(--text-1)' }}>
+                        {fmtMonto(c.monto, prestamo.moneda)}
+                      </span>
+                      <span style={{ display: 'block', fontFamily: FM, fontSize: '0.65rem', color: mora ? 'var(--danger)' : 'rgba(100,116,139,0.6)', marginTop: '1px' }}>
+                        {fmtDate(c.fecha_vencimiento)}{mora ? ' · en mora' : ''}
+                      </span>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Método de pago */}
+          {cuotaSeleccionada && (
+            <div>
+              <p style={LABEL_STYLE}>Método de cobro</p>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button type="button" onClick={() => setMetodo('efectivo')}
+                  style={{ ...(metodo === 'efectivo' ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.45rem', fontSize: '0.78rem' }}>
+                  Efectivo
+                </button>
+                <button type="button" onClick={() => setMetodo('cheque')}
+                  style={{ ...(metodo === 'cheque' ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.45rem', fontSize: '0.78rem' }}>
+                  Con cheque
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Fecha de cobro (efectivo) */}
+          {cuotaSeleccionada && metodo === 'efectivo' && (
+            <div>
+              <label style={LABEL_STYLE}>Fecha de cobro <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
+              <input type="date" value={fechaCobro} onChange={(e) => setFechaCobro(e.target.value)} style={INPUT_STYLE} />
+            </div>
+          )}
+
+          {/* Campos cheque */}
+          {cuotaSeleccionada && metodo === 'cheque' && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={LABEL_STYLE}>Nº de cheque</label>
+                  <input type="text" value={nroCheque} onChange={(e) => setNroCheque(e.target.value)} placeholder="Número" required style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Banco <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
+                  <input type="text" value={banco} onChange={(e) => setBanco(e.target.value)} placeholder="Banco" style={INPUT_STYLE} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={LABEL_STYLE}>Monto nominal</label>
+                  <input type="number" step="0.01" min="0.01" value={montoCheque} onChange={(e) => setMontoCheque(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>% de compra</label>
+                  <input type="number" step="0.0001" min="0" max="100" value={pctCompra} onChange={(e) => setPctCompra(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={LABEL_STYLE}>Fecha emisión</label>
+                  <input type="date" value={fechaEmision} onChange={(e) => setFechaEmision(e.target.value)} style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Fecha de pago</label>
+                  <input type="date" value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} style={INPUT_STYLE} />
+                </div>
+              </div>
+              <div>
+                <label style={LABEL_STYLE}>Fecha de cobro <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
+                <input type="date" value={fechaCobro} onChange={(e) => setFechaCobro(e.target.value)} style={INPUT_STYLE} />
+              </div>
+              {parseFloat(montoCheque) > 0 && parseFloat(pctCompra) >= 0 && (
+                <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.65rem 1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
+                    <span style={{ color: 'rgba(100,116,139,0.7)' }}>Valor neto del cheque</span>
+                    <span style={{ color: 'var(--text-1)', fontWeight: 700 }}>
+                      {fmtMonto(parseFloat(montoCheque) * (100 - (parseFloat(pctCompra) || 0)) / 100, prestamo.moneda)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="submit" disabled={loading || !cuotaSeleccionada}
+              style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: (loading || !cuotaSeleccionada) ? 0.5 : 1 }}>
+              {loading ? 'Guardando…' : 'Confirmar cobro'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
 
 // ── Modal nuevo préstamo ──────────────────────────────────────────────
 
@@ -241,6 +444,7 @@ function ModalNuevoPrestamo({ onClose, onSuccess }: { onClose: () => void; onSuc
 
 export default function DeudoresPrestamos() {
   const [creandoPrestamo, setCreandoPrestamo] = useState(false)
+  const [cobrandoCuota, setCobrandoCuota] = useState<Prestamo | null>(null)
   const queryClient = useQueryClient()
 
   const { data: prestamos, isLoading: loadingP, error: errP } = useQuery({
@@ -272,6 +476,11 @@ export default function DeudoresPrestamos() {
     setCreandoPrestamo(false)
     queryClient.invalidateQueries({ queryKey: ['prestamos'] })
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
+  }
+
+  function handleCobrarCuota() {
+    setCobrandoCuota(null)
+    queryClient.invalidateQueries({ queryKey: ['prestamos'] })
   }
 
   return (
@@ -368,6 +577,14 @@ export default function DeudoresPrestamos() {
                   ))}
                 </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setCobrandoCuota(p)}
+                style={{ ...btnSolid('primary'), width: '100%', marginTop: '0.75rem', padding: '0.45rem', fontSize: '0.75rem', textAlign: 'center' }}
+              >
+                Cobrar cuota
+              </button>
             </div>
           )
         })}
@@ -400,6 +617,14 @@ export default function DeudoresPrestamos() {
         <ModalNuevoPrestamo
           onClose={() => setCreandoPrestamo(false)}
           onSuccess={handleNuevoPrestamo}
+        />
+      )}
+      {cobrandoCuota && (
+        <ModalCobrarCuota
+          prestamo={cobrandoCuota}
+          clienteNombre={clienteMap.get(cobrandoCuota.cliente_id) ?? '…'}
+          onClose={() => setCobrandoCuota(null)}
+          onSuccess={handleCobrarCuota}
         />
       )}
     </div>

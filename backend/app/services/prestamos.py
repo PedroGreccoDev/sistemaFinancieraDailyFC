@@ -6,10 +6,12 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
+    Cheque,
+    ChequeEstado,
     Cliente,
     Cuota,
     CuotaEstado,
@@ -18,7 +20,7 @@ from app.db.models import (
     PrestamoEstado,
 )
 from app.core.fechas import hoy_local
-from app.schemas.prestamos import PrestamoCreate
+from app.schemas.prestamos import CuotaCobrarConChequeRequest, PrestamoCreate
 from app.services.exceptions import ConflictError, DatabaseWriteError, NotFoundError
 
 
@@ -164,4 +166,61 @@ def cobrar_cuota(
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("No se pudo registrar el cobro de la cuota.") from exc
+
+
+def cobrar_cuota_con_cheque(
+    db: Session,
+    prestamo_id: uuid.UUID,
+    cuota_id: uuid.UUID,
+    payload: CuotaCobrarConChequeRequest,
+) -> tuple[Cuota, Cheque]:
+    cuota = db.scalar(
+        select(Cuota)
+        .where(Cuota.id == cuota_id, Cuota.prestamo_id == prestamo_id)
+        .with_for_update()
+    )
+    if cuota is None:
+        raise NotFoundError("Cuota no encontrada.")
+    if cuota.estado == CuotaEstado.COBRADA:
+        raise ConflictError("La cuota ya fue cobrada.")
+
+    cheque = Cheque(
+        nro_cheque=payload.nro_cheque,
+        banco=payload.banco,
+        monto=payload.monto,
+        porcentaje_compra=payload.porcentaje_compra,
+        fecha_emision=payload.fecha_emision,
+        fecha_pago=payload.fecha_pago,
+        cliente_origen_id=payload.cliente_origen_id,
+        estado=ChequeEstado.EN_CARTERA,
+    )
+
+    cuota.estado = CuotaEstado.COBRADA
+    cuota.fecha_cobro = payload.fecha_cobro or hoy_local()
+
+    try:
+        db.add(cheque)
+        db.flush()
+
+        pendientes_restantes = db.scalar(
+            select(func.count()).select_from(Cuota).where(
+                Cuota.prestamo_id == prestamo_id,
+                Cuota.estado != CuotaEstado.COBRADA,
+            )
+        )
+        if pendientes_restantes == 0:
+            prestamo = db.get(Prestamo, prestamo_id)
+            if prestamo is not None:
+                prestamo.estado = PrestamoEstado.CANCELADO
+
+        db.commit()
+        db.refresh(cuota)
+        db.refresh(cheque)
+        return cuota, cheque
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError("Ya existe un cheque con ese número y banco.") from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo registrar el cobro con cheque.") from exc
 

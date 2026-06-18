@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.db.models import PrestamoEstado
 from app.db.session import get_db
 from app.schemas.prestamos import (
+    CuotaCobrarConChequeRequest,
+    CuotaCobrarConChequeResponse,
     CuotaCobroRequest,
     CuotaRead,
     PrestamoCreate,
@@ -48,4 +50,15 @@ def cobrar_cuota(
     db: DbSession,
 ) -> CuotaRead:
     return service.cobrar_cuota(db, prestamo_id, cuota_id, payload.fecha_cobro)
+
+
+@router.post("/{prestamo_id}/cuotas/{cuota_id}/cobrar-con-cheque", response_model=CuotaCobrarConChequeResponse, status_code=201)
+def cobrar_cuota_con_cheque(
+    prestamo_id: UUID,
+    cuota_id: UUID,
+    payload: CuotaCobrarConChequeRequest,
+    db: DbSession,
+) -> CuotaCobrarConChequeResponse:
+    cuota, cheque = service.cobrar_cuota_con_cheque(db, prestamo_id, cuota_id, payload)
+    return CuotaCobrarConChequeResponse(cuota=cuota, cheque=cheque)
 

@@ -143,6 +143,11 @@ export interface CobrarConChequeResult {
   diferencia: string
 }
 
+export interface CuotaCobrarConChequeResult {
+  cuota: Cuota
+  cheque: Cheque
+}
+
 export interface DolarBlue {
   compra: number
   venta: number
