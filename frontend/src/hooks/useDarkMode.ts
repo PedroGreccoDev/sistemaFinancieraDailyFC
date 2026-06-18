@@ -16,6 +16,10 @@ export function useDarkMode(): [boolean, () => void] {
       root.classList.remove('dark')
       localStorage.setItem('theme', 'light')
     }
+    // Sincroniza la barra del navegador en mobile (iOS Safari) con el fondo
+    // del tema, para que no quede oscura al pasar a modo claro.
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (meta) meta.setAttribute('content', dark ? '#080810' : '#ebe4d6')
   }, [dark])
 
   return [dark, () => setDark((d) => !d)]
