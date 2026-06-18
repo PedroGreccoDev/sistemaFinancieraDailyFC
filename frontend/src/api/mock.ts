@@ -168,6 +168,8 @@ const reporte: ReporteGanancias = {
   total_ganancias: '317800',
   neto: '267800',
   saldo_pasivos: { pendiente_ars: '320000', pendiente_usd: '1500' },
+  cobros_cuotas_ars: '0',
+  cobros_cuotas_usd: '0',
 }
 
 // ── Router ────────────────────────────────────────────────────────────
