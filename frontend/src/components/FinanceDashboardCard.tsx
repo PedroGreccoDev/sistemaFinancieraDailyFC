@@ -17,13 +17,12 @@ if (typeof document !== "undefined" && !document.getElementById(RESPONSIVE_STYLE
   style.textContent = `
     @media (max-width: 639px) {
       .fc-card-body        { padding: 0.55rem 0.7rem !important; }
-      .fc-card-num         { font-size: clamp(1.1rem, 5.5vw, 1.7rem) !important; overflow-wrap: anywhere; min-width: 0; }
-      .fc-card-numrow      { min-width: 0; }
-      .fc-card-prefix      { font-size: 0.8rem !important; margin-bottom: 0.2rem !important; }
+      .fc-card-num         { font-size: clamp(0.85rem, 3.8vw, 1.25rem) !important; overflow-wrap: anywhere; word-break: break-all; min-width: 0; max-width: 100%; }
+      .fc-card-numrow      { min-width: 0; overflow: hidden; flex-wrap: wrap; gap: 0.2rem 0.35rem !important; margin-bottom: 0.2rem !important; }
+      .fc-card-prefix      { font-size: 0.7rem !important; margin-bottom: 0 !important; align-self: flex-end; }
       .fc-card-title       { font-size: 0.65rem !important; white-space: normal !important; overflow: visible !important; text-overflow: clip !important; max-width: none !important; }
       .fc-card-subtitle    { font-size: 0.67rem !important; }
       .fc-card-header      { margin-bottom: 0.2rem !important; }
-      .fc-card-numrow      { margin-bottom: 0.2rem !important; }
       .fc-card-divider     { margin-bottom: 0.2rem !important; }
     }
   `;

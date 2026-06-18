@@ -31,16 +31,15 @@ function MetricCard({ label, value, color = 'default', accentColor, prefix }: {
   return (
     <div className="lift" style={{
       ...CARD,
-      padding: '0.7rem 1rem',
+      padding: '0.65rem 0.875rem',
       minWidth: 0,
       display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: '0.6rem',
+      flexDirection: 'column',
+      gap: '0.35rem',
       ...(accentColor ? { borderLeft: `3px solid ${accentColor}` } : {}),
     }}>
-      <p style={{ fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', minWidth: 0 }}>{label}</p>
-      <p style={{ fontFamily: FN, fontSize: 'clamp(1.2rem, 4vw, 1.7rem)', color: numColor, letterSpacing: '0.02em', lineHeight: 1.05, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>
+      <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.65)', lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</p>
+      <p style={{ fontFamily: FN, fontSize: '1.25rem', color: numColor, letterSpacing: '0.02em', lineHeight: 1, fontVariantNumeric: 'tabular-nums', wordBreak: 'break-all' }}>
         {prefix}{value}
       </p>
     </div>
@@ -120,25 +119,25 @@ export default function Reportes() {
           {/* Grilla 2×3 mobile / 3×2 desktop */}
           <div className="grid grid-cols-2 sm:grid-cols-3" style={{ gap: '0.75rem', marginBottom: '1.5rem' }}>
             <MetricCard
-              label="Cheques (spread)"
+              label="Cheques"
               value={fmtARS(data.ganancia_cheques)}
               color="default"
               accentColor="rgba(34,197,94,0.55)"
             />
             <MetricCard
-              label="Préstamos (intereses)"
+              label="Préstamos"
               value={fmtARS(data.ganancia_prestamos)}
               color="default"
               accentColor="rgba(34,197,94,0.55)"
             />
             <MetricCard
-              label="Divisas (efectivo)"
+              label="Divisas"
               value={fmtARS(data.ganancia_movimientos_efectivo)}
               color="default"
               accentColor="rgba(34,197,94,0.55)"
             />
             <MetricCard
-              label="Gastos operativos"
+              label="Gastos"
               value={fmtARS(data.gastos_operativos)}
               color="red"
               accentColor="rgba(239,68,68,0.55)"
@@ -157,15 +156,14 @@ export default function Reportes() {
               borderLeft: '3px solid rgba(129,140,248,0.6)',
               boxShadow: '0 4px 24px rgba(99,102,241,0.2)',
               borderRadius: 'var(--r-lg)',
-              padding: '0.7rem 1rem',
+              padding: '0.65rem 0.875rem',
               minWidth: 0,
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '0.6rem',
+              flexDirection: 'column',
+              gap: '0.35rem',
             }}>
-              <p style={{ fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.7)', minWidth: 0 }}>Neto del período</p>
-              <p style={{ fontFamily: FN, fontSize: 'clamp(1.2rem, 4vw, 1.7rem)', color: '#fff', letterSpacing: '0.02em', lineHeight: 1.05, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtARS(data.neto)}</p>
+              <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.65)', lineHeight: 1.3, whiteSpace: 'nowrap' }}>Neto del período</p>
+              <p style={{ fontFamily: FN, fontSize: '1.25rem', color: '#fff', letterSpacing: '0.02em', lineHeight: 1, fontVariantNumeric: 'tabular-nums', wordBreak: 'break-all' }}>{fmtARS(data.neto)}</p>
             </div>
           </div>
 

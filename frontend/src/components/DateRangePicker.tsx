@@ -41,7 +41,7 @@ export default function DateRangePicker({ from, to, onChange, onClose }: Props) 
   return (
     <div
       ref={ref}
-      className="absolute top-full left-0 mt-2 z-50 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-slate-800 dark:text-slate-200"
+      className="absolute top-full right-0 mt-2 z-50 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-slate-800 dark:text-slate-200"
       style={{
         '--rdp-accent-color': '#3b82f6',
         '--rdp-accent-background-color': 'rgba(59,130,246,0.15)',

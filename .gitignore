@@ -15,3 +15,8 @@ build/
 Thumbs.db
 *.zip
 .claude/
+
+# Imágenes/capturas sueltas (pueden tener datos de cheques/clientes)
+*.png
+*.jpg
+*.jpeg

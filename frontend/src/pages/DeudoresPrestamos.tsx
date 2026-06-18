@@ -134,18 +134,18 @@ function ModalCobrarCuota({
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* Header */}
-        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 1 }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', flexShrink: 0, background: MODAL_BG }}>
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Cobrar cuota</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{clienteNombre} · {pendientes.length} cuota(s) pendiente(s)</p>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <form onSubmit={handleSubmit} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-          {/* Lista de cuotas pendientes */}
-          <div>
+          {/* Lista de cuotas — zona scrolleable */}
+          <div style={{ overflowY: 'auto', flex: '1 1 auto', minHeight: 0, padding: '1.25rem 1.5rem 0.75rem' }}>
             <p style={LABEL_STYLE}>Seleccioná las cuotas a cobrar</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
               {pendientes.map((c) => {
@@ -191,96 +191,100 @@ function ModalCobrarCuota({
                 )
               })}
             </div>
+          </div>
+
+          {/* Parte inferior fija */}
+          <div style={{ flexShrink: 0, borderTop: '1px solid var(--bd-006)', padding: '0.75rem 1.5rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
 
             {cuotaIds.size > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: FM, fontSize: '0.72rem', color: 'var(--primary)', background: 'color-mix(in srgb, var(--primary) 6%, transparent)', borderRadius: 'var(--r-md)', padding: '0.4rem 0.75rem', marginTop: '0.35rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: FM, fontSize: '0.72rem', color: 'var(--primary)', background: 'color-mix(in srgb, var(--primary) 6%, transparent)', borderRadius: 'var(--r-md)', padding: '0.4rem 0.75rem' }}>
                 <span>{cuotaIds.size} cuota{cuotaIds.size > 1 ? 's' : ''} seleccionada{cuotaIds.size > 1 ? 's' : ''}</span>
                 <span style={{ fontWeight: 700 }}>{fmtMonto(totalSeleccionado, prestamo.moneda)}</span>
               </div>
             )}
-          </div>
 
-          {/* Método de pago */}
-          {cuotaIds.size > 0 && (
-            <div>
-              <p style={LABEL_STYLE}>Método de cobro</p>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                {(['efectivo', 'transferencia', 'cheque'] as const).map((m) => (
-                  <button key={m} type="button" onClick={() => setMetodo(m)}
-                    style={{ ...(metodo === m ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.45rem', fontSize: '0.72rem' }}>
-                    {m === 'efectivo' ? 'Efectivo' : m === 'transferencia' ? 'Transferencia' : 'Cheque'}
-                  </button>
-                ))}
+            {/* Método de pago */}
+            {cuotaIds.size > 0 && (
+              <div>
+                <p style={LABEL_STYLE}>Método de cobro</p>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  {(['efectivo', 'transferencia', 'cheque'] as const).map((m) => (
+                    <button key={m} type="button" onClick={() => setMetodo(m)}
+                      style={{ ...(metodo === m ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.45rem', fontSize: '0.72rem' }}>
+                      {m === 'efectivo' ? 'Efectivo' : m === 'transferencia' ? 'Transferencia' : 'Cheque'}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Fecha de cobro (efectivo / transferencia) */}
-          {cuotaIds.size > 0 && (metodo === 'efectivo' || metodo === 'transferencia') && (
-            <div>
-              <label style={LABEL_STYLE}>Fecha de cobro <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
-              <input type="date" value={fechaCobro} onChange={(e) => setFechaCobro(e.target.value)} style={INPUT_STYLE} />
-            </div>
-          )}
-
-          {/* Campos cheque */}
-          {cuotaIds.size > 0 && metodo === 'cheque' && (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div>
-                  <label style={LABEL_STYLE}>Nº de cheque</label>
-                  <input type="text" value={nroCheque} onChange={(e) => setNroCheque(e.target.value)} placeholder="Número" required style={INPUT_STYLE} />
-                </div>
-                <div>
-                  <label style={LABEL_STYLE}>Banco <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
-                  <input type="text" value={banco} onChange={(e) => setBanco(e.target.value)} placeholder="Banco" style={INPUT_STYLE} />
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div>
-                  <label style={LABEL_STYLE}>Monto nominal</label>
-                  <input type="number" step="0.01" min="0.01" value={montoCheque} onChange={(e) => setMontoCheque(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
-                </div>
-                <div>
-                  <label style={LABEL_STYLE}>% de compra</label>
-                  <input type="number" step="0.0001" min="0" max="100" value={pctCompra} onChange={(e) => setPctCompra(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div>
-                  <label style={LABEL_STYLE}>Fecha emisión</label>
-                  <input type="date" value={fechaEmision} onChange={(e) => setFechaEmision(e.target.value)} style={INPUT_STYLE} />
-                </div>
-                <div>
-                  <label style={LABEL_STYLE}>Fecha de pago</label>
-                  <input type="date" value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} style={INPUT_STYLE} />
-                </div>
-              </div>
+            {/* Fecha de cobro (efectivo / transferencia) */}
+            {cuotaIds.size > 0 && (metodo === 'efectivo' || metodo === 'transferencia') && (
               <div>
                 <label style={LABEL_STYLE}>Fecha de cobro <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
                 <input type="date" value={fechaCobro} onChange={(e) => setFechaCobro(e.target.value)} style={INPUT_STYLE} />
               </div>
-              {parseFloat(montoCheque) > 0 && parseFloat(pctCompra) >= 0 && (
-                <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.65rem 1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
-                    <span style={{ color: 'rgba(100,116,139,0.7)' }}>Valor neto del cheque</span>
-                    <span style={{ color: 'var(--text-1)', fontWeight: 700 }}>
-                      {fmtMonto(parseFloat(montoCheque) * (100 - (parseFloat(pctCompra) || 0)) / 100, prestamo.moneda)}
-                    </span>
+            )}
+
+            {/* Campos cheque */}
+            {cuotaIds.size > 0 && metodo === 'cheque' && (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div>
+                    <label style={LABEL_STYLE}>Nº de cheque</label>
+                    <input type="text" value={nroCheque} onChange={(e) => setNroCheque(e.target.value)} placeholder="Número" required style={INPUT_STYLE} />
+                  </div>
+                  <div>
+                    <label style={LABEL_STYLE}>Banco <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
+                    <input type="text" value={banco} onChange={(e) => setBanco(e.target.value)} placeholder="Banco" style={INPUT_STYLE} />
                   </div>
                 </div>
-              )}
-            </>
-          )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div>
+                    <label style={LABEL_STYLE}>Monto nominal</label>
+                    <input type="number" step="0.01" min="0.01" value={montoCheque} onChange={(e) => setMontoCheque(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
+                  </div>
+                  <div>
+                    <label style={LABEL_STYLE}>% de compra</label>
+                    <input type="number" step="0.0001" min="0" max="100" value={pctCompra} onChange={(e) => setPctCompra(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <div>
+                    <label style={LABEL_STYLE}>Fecha emisión</label>
+                    <input type="date" value={fechaEmision} onChange={(e) => setFechaEmision(e.target.value)} style={INPUT_STYLE} />
+                  </div>
+                  <div>
+                    <label style={LABEL_STYLE}>Fecha de pago</label>
+                    <input type="date" value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} style={INPUT_STYLE} />
+                  </div>
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Fecha de cobro <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
+                  <input type="date" value={fechaCobro} onChange={(e) => setFechaCobro(e.target.value)} style={INPUT_STYLE} />
+                </div>
+                {parseFloat(montoCheque) > 0 && parseFloat(pctCompra) >= 0 && (
+                  <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.65rem 1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
+                      <span style={{ color: 'rgba(100,116,139,0.7)' }}>Valor neto del cheque</span>
+                      <span style={{ color: 'var(--text-1)', fontWeight: 700 }}>
+                        {fmtMonto(parseFloat(montoCheque) * (100 - (parseFloat(pctCompra) || 0)) / 100, prestamo.moneda)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
 
-          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+            {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171', margin: 0 }}>{error}</p>}
 
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
-            <button type="submit" disabled={loading || cuotaIds.size === 0}
-              style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: (loading || cuotaIds.size === 0) ? 0.5 : 1 }}>
-              {loading ? 'Guardando…' : cuotaIds.size > 1 ? `Cobrar ${cuotaIds.size} cuotas` : 'Confirmar cobro'}
-            </button>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+              <button type="submit" disabled={loading || cuotaIds.size === 0}
+                style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: (loading || cuotaIds.size === 0) ? 0.5 : 1 }}>
+                {loading ? 'Guardando…' : cuotaIds.size > 1 ? `Cobrar ${cuotaIds.size} cuotas` : 'Confirmar cobro'}
+              </button>
+            </div>
           </div>
         </form>
       </div>
