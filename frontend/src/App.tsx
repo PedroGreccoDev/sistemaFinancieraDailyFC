@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Navbar from './components/Navbar'
@@ -22,13 +23,37 @@ const queryClient = new QueryClient({
 })
 
 export default function App() {
+  const mainRef = useRef<HTMLElement>(null)
+
+  // Bloquea el scroll del fondo (el contenedor <main>) mientras haya cualquier
+  // modal abierto. Detectamos los modales por su clase `.modal-overlay` con un
+  // MutationObserver, así cubre todos los modales sin tener que instrumentarlos
+  // uno por uno. overflow:hidden conserva el scrollTop, no hay salto al cerrar.
+  useEffect(() => {
+    const main = mainRef.current
+    if (!main) return
+    const sync = () => {
+      const open = document.querySelector('.modal-overlay') != null
+      main.style.overflow = open ? 'hidden' : ''
+      document.body.style.overflow = open ? 'hidden' : ''
+    }
+    const obs = new MutationObserver(sync)
+    obs.observe(document.body, { childList: true, subtree: true })
+    sync()
+    return () => {
+      obs.disconnect()
+      main.style.overflow = ''
+      document.body.style.overflow = ''
+    }
+  }, [])
+
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
       <BrowserRouter>
         <div className="min-h-dvh flex flex-col md:flex-row" style={{ background: "var(--bg)" }}>
           <Navbar />
-          <main className="flex-1 min-w-0 overflow-y-auto pb-40 md:pb-0">
+          <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto pb-40 md:pb-0">
             <Routes>
               <Route path="/"          element={<Dashboard />} />
               <Route path="/cartera"      element={<Cartera />} />

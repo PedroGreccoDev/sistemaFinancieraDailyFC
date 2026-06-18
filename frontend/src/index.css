@@ -129,9 +129,16 @@ button:hover:not(:disabled) {
 }
 .modal-overlay {
   animation: modalFade 0.18s ease both;
+  /* El overlay no debe propagar el scroll al contenido de atrás (móvil) */
+  overscroll-behavior: contain;
+  touch-action: none;
 }
 .modal-overlay > div {
   animation: modalPop 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+  /* El contenido scrolleable del modal acepta gestos táctiles pero, al llegar
+     al tope/fondo, no encadena el scroll hacia el contenedor de atrás */
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 /* Scrollbar fino acorde al tema */
