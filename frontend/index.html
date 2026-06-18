@@ -6,6 +6,20 @@
     <meta name="theme-color" content="#ebe4d6" />
     <title>Daily FC — Sistema Financiero</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💼</text></svg>" />
+    <script>
+      // Aplica el tema guardado antes del primer render: evita el parpadeo y
+      // fija el theme-color (barra del navegador mobile) acorde al tema, ya
+      // que iOS Safari lo lee al cargar y no siempre respeta cambios por JS.
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme')
+          var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
+          if (dark) document.documentElement.classList.add('dark')
+          var meta = document.querySelector('meta[name="theme-color"]')
+          if (meta) meta.setAttribute('content', dark ? '#080810' : '#ebe4d6')
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
