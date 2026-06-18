@@ -13,6 +13,9 @@ from app.schemas.prestamos import (
     CuotaCobrarConChequeResponse,
     CuotaCobroRequest,
     CuotaRead,
+    CuotasLoteCobrarConChequeRequest,
+    CuotasLoteCobrarConChequeResponse,
+    CuotasLoteCobrarRequest,
     PrestamoCreate,
     PrestamoRead,
 )
@@ -61,4 +64,23 @@ def cobrar_cuota_con_cheque(
 ) -> CuotaCobrarConChequeResponse:
     cuota, cheque = service.cobrar_cuota_con_cheque(db, prestamo_id, cuota_id, payload)
     return CuotaCobrarConChequeResponse(cuota=cuota, cheque=cheque)
+
+
+@router.post("/{prestamo_id}/cuotas/cobrar-lote", response_model=list[CuotaRead])
+def cobrar_cuotas_lote(
+    prestamo_id: UUID,
+    payload: CuotasLoteCobrarRequest,
+    db: DbSession,
+) -> list[CuotaRead]:
+    return service.cobrar_cuotas_lote(db, prestamo_id, payload.cuota_ids, payload.fecha_cobro)
+
+
+@router.post("/{prestamo_id}/cuotas/cobrar-con-cheque-lote", response_model=CuotasLoteCobrarConChequeResponse, status_code=201)
+def cobrar_cuotas_con_cheque_lote(
+    prestamo_id: UUID,
+    payload: CuotasLoteCobrarConChequeRequest,
+    db: DbSession,
+) -> CuotasLoteCobrarConChequeResponse:
+    cuotas, cheque = service.cobrar_cuotas_con_cheque_lote(db, prestamo_id, payload)
+    return CuotasLoteCobrarConChequeResponse(cuotas=cuotas, cheque=cheque)
 

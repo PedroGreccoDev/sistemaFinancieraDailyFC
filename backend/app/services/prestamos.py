@@ -20,7 +20,11 @@ from app.db.models import (
     PrestamoEstado,
 )
 from app.core.fechas import hoy_local
-from app.schemas.prestamos import CuotaCobrarConChequeRequest, PrestamoCreate
+from app.schemas.prestamos import (
+    CuotaCobrarConChequeRequest,
+    CuotasLoteCobrarConChequeRequest,
+    PrestamoCreate,
+)
 from app.services.exceptions import ConflictError, DatabaseWriteError, NotFoundError
 
 
@@ -217,6 +221,111 @@ def cobrar_cuota_con_cheque(
         db.refresh(cuota)
         db.refresh(cheque)
         return cuota, cheque
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError("Ya existe un cheque con ese número y banco.") from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo registrar el cobro con cheque.") from exc
+
+
+def cobrar_cuotas_lote(
+    db: Session,
+    prestamo_id: uuid.UUID,
+    cuota_ids: list[uuid.UUID],
+    fecha_cobro: date | None = None,
+) -> list[Cuota]:
+    cuotas = list(
+        db.scalars(
+            select(Cuota)
+            .where(Cuota.prestamo_id == prestamo_id, Cuota.id.in_(cuota_ids))
+            .with_for_update()
+        )
+    )
+    if len(cuotas) != len(cuota_ids):
+        raise NotFoundError("Una o más cuotas no fueron encontradas.")
+    for cuota in cuotas:
+        if cuota.estado == CuotaEstado.COBRADA:
+            raise ConflictError(f"La cuota {cuota.numero_cuota} ya fue cobrada.")
+
+    hoy = fecha_cobro or hoy_local()
+    for cuota in cuotas:
+        cuota.estado = CuotaEstado.COBRADA
+        cuota.fecha_cobro = hoy
+
+    try:
+        db.flush()
+        pendientes_restantes = db.scalar(
+            select(func.count()).select_from(Cuota).where(
+                Cuota.prestamo_id == prestamo_id,
+                Cuota.estado != CuotaEstado.COBRADA,
+            )
+        )
+        if pendientes_restantes == 0:
+            prestamo = db.get(Prestamo, prestamo_id)
+            if prestamo is not None:
+                prestamo.estado = PrestamoEstado.CANCELADO
+        db.commit()
+        for cuota in cuotas:
+            db.refresh(cuota)
+        return cuotas
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo registrar el cobro de las cuotas.") from exc
+
+
+def cobrar_cuotas_con_cheque_lote(
+    db: Session,
+    prestamo_id: uuid.UUID,
+    payload: CuotasLoteCobrarConChequeRequest,
+) -> tuple[list[Cuota], Cheque]:
+    cuotas = list(
+        db.scalars(
+            select(Cuota)
+            .where(Cuota.prestamo_id == prestamo_id, Cuota.id.in_(payload.cuota_ids))
+            .with_for_update()
+        )
+    )
+    if len(cuotas) != len(payload.cuota_ids):
+        raise NotFoundError("Una o más cuotas no fueron encontradas.")
+    for cuota in cuotas:
+        if cuota.estado == CuotaEstado.COBRADA:
+            raise ConflictError(f"La cuota {cuota.numero_cuota} ya fue cobrada.")
+
+    cheque = Cheque(
+        nro_cheque=payload.nro_cheque,
+        banco=payload.banco,
+        monto=payload.monto,
+        porcentaje_compra=payload.porcentaje_compra,
+        fecha_emision=payload.fecha_emision,
+        fecha_pago=payload.fecha_pago,
+        cliente_origen_id=payload.cliente_origen_id,
+        estado=ChequeEstado.EN_CARTERA,
+    )
+
+    hoy = payload.fecha_cobro or hoy_local()
+    for cuota in cuotas:
+        cuota.estado = CuotaEstado.COBRADA
+        cuota.fecha_cobro = hoy
+
+    try:
+        db.add(cheque)
+        db.flush()
+        pendientes_restantes = db.scalar(
+            select(func.count()).select_from(Cuota).where(
+                Cuota.prestamo_id == prestamo_id,
+                Cuota.estado != CuotaEstado.COBRADA,
+            )
+        )
+        if pendientes_restantes == 0:
+            prestamo = db.get(Prestamo, prestamo_id)
+            if prestamo is not None:
+                prestamo.estado = PrestamoEstado.CANCELADO
+        db.commit()
+        for cuota in cuotas:
+            db.refresh(cuota)
+        db.refresh(cheque)
+        return cuotas, cheque
     except IntegrityError as exc:
         db.rollback()
         raise ConflictError("Ya existe un cheque con ese número y banco.") from exc

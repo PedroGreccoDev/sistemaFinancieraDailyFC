@@ -148,6 +148,11 @@ export interface CuotaCobrarConChequeResult {
   cheque: Cheque
 }
 
+export interface CuotasLoteCobrarConChequeResult {
+  cuotas: Cuota[]
+  cheque: Cheque
+}
+
 export interface DolarBlue {
   compra: number
   venta: number

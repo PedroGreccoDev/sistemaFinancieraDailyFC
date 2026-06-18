@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Prestamo, Moneda, Frecuencia, CuotaCobrarConChequeResult } from '../types'
+import type { Cuota, Prestamo, Moneda, Frecuencia, CuotaCobrarConChequeResult, CuotasLoteCobrarConChequeResult } from '../types'
 
 export const getPrestamos = (estado?: string): Promise<Prestamo[]> =>
   apiFetch<Prestamo[]>(`/prestamos${estado ? `?estado=${estado}` : ''}`)
@@ -48,5 +48,40 @@ export const cobrarCuotaConCheque = (
 ): Promise<CuotaCobrarConChequeResult> =>
   apiFetch<CuotaCobrarConChequeResult>(
     `/prestamos/${prestamoId}/cuotas/${cuotaId}/cobrar-con-cheque`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  )
+
+interface CobrarLotePayload {
+  cuota_ids: string[]
+  fecha_cobro: string | null
+}
+
+export const cobrarCuotasLote = (
+  prestamoId: string,
+  payload: CobrarLotePayload,
+): Promise<Cuota[]> =>
+  apiFetch<Cuota[]>(`/prestamos/${prestamoId}/cuotas/cobrar-lote`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+interface CobrarConChequeLotePayload {
+  cuota_ids: string[]
+  nro_cheque: string
+  banco: string | null
+  monto: number
+  porcentaje_compra: number
+  fecha_emision: string | null
+  fecha_pago: string | null
+  cliente_origen_id: string | null
+  fecha_cobro: string | null
+}
+
+export const cobrarCuotasConChequeLote = (
+  prestamoId: string,
+  payload: CobrarConChequeLotePayload,
+): Promise<CuotasLoteCobrarConChequeResult> =>
+  apiFetch<CuotasLoteCobrarConChequeResult>(
+    `/prestamos/${prestamoId}/cuotas/cobrar-con-cheque-lote`,
     { method: 'POST', body: JSON.stringify(payload) },
   )

@@ -83,3 +83,25 @@ class CuotaCobrarConChequeRequest(BaseModel):
 class CuotaCobrarConChequeResponse(BaseModel):
     cuota: CuotaRead
     cheque: ChequeRead
+
+
+class CuotasLoteCobrarRequest(BaseModel):
+    cuota_ids: list[UUID] = Field(min_length=1)
+    fecha_cobro: date | None = None
+
+
+class CuotasLoteCobrarConChequeRequest(BaseModel):
+    cuota_ids: list[UUID] = Field(min_length=1)
+    nro_cheque: str = Field(min_length=1, max_length=64)
+    banco: str | None = Field(default=None, max_length=120)
+    monto: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    porcentaje_compra: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
+    fecha_emision: date | None = None
+    fecha_pago: date | None = None
+    cliente_origen_id: UUID | None = None
+    fecha_cobro: date | None = None
+
+
+class CuotasLoteCobrarConChequeResponse(BaseModel):
+    cuotas: list[CuotaRead]
+    cheque: ChequeRead
