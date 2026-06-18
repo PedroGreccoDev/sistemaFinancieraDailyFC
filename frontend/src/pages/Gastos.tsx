@@ -1,10 +1,12 @@
 import { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { getGastos } from '../api/gastos_operativos'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { getGastos, createGasto } from '../api/gastos_operativos'
 import { fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
+import { btnSolid, btnBordered } from '../lib/ui'
+import { useToast } from '../lib/toast'
 import { IconPlus } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
-import type { GastoOperativo } from '../types'
+import type { GastoOperativo, Moneda } from '../types'
 import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
 
@@ -19,6 +21,65 @@ const CARD   = {
   border:       '1px solid var(--bd-006)',
   boxShadow:    'var(--shadow-card)',
   borderRadius: 'var(--r-lg)',
+}
+const MODAL_BG = 'var(--modal)'
+const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
+const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
+
+// ── Modal nuevo gasto ─────────────────────────────────────────────────
+
+function ModalNuevoGasto({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [concepto, setConcepto] = useState('')
+  const [monto, setMonto] = useState('')
+  const [moneda, setMoneda] = useState<Moneda>('ARS')
+  const [fechaOperacion, setFechaOperacion] = useState('')
+  const [observaciones, setObservaciones] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      await createGasto({
+        concepto: concepto.trim(),
+        monto: parseFloat(monto),
+        moneda,
+        fecha_operacion: fechaOperacion || null,
+        observaciones: observaciones.trim() || null,
+      })
+      toast('success', 'Gasto registrado')
+      onSuccess()
+    } catch (err) { setError((err as Error).message) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Registrar gasto</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Gasto operativo de caja</p>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div><label style={LABEL_STYLE}>Concepto</label><input type="text" value={concepto} onChange={(e) => setConcepto(e.target.value)} placeholder="Nafta, insumos, comida…" required autoFocus style={INPUT_STYLE} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div><label style={LABEL_STYLE}>Monto</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} /></div>
+            <div><label style={LABEL_STYLE}>Moneda</label><select value={moneda} onChange={(e) => setMoneda(e.target.value as Moneda)} style={{ ...INPUT_STYLE, cursor: 'pointer' }}><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
+          </div>
+          <div><label style={LABEL_STYLE}>Fecha <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional, hoy por defecto)</span></label><input type="date" value={fechaOperacion} onChange={(e) => setFechaOperacion(e.target.value)} style={INPUT_STYLE} /></div>
+          <div><label style={LABEL_STYLE}>Observaciones <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+          <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="submit" disabled={loading} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: loading ? 0.6 : 1 }}>{loading ? 'Guardando…' : 'Registrar'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
 }
 const PALETTE = ['#fb923c', '#60a5fa', '#a78bfa', '#4ade80', '#f472b6', '#fbbf24']
 const BAR_MAX = 120 // px, la barra más alta
@@ -48,12 +109,19 @@ export default function Gastos() {
   const [customDesde, setCustomDesde] = useState<string | null>(null)
   const [customHasta, setCustomHasta] = useState<string | null>(null)
   const [showPicker, setShowPicker]   = useState(false)
+  const [mostrarNuevo, setMostrarNuevo] = useState(false)
+  const queryClient = useQueryClient()
 
   const { data: gastos = [], isLoading } = useQuery({
     queryKey: ['gastos'],
     queryFn:  getGastos,
     refetchInterval: 30_000,
   })
+
+  function handleNuevoSuccess() {
+    setMostrarNuevo(false)
+    queryClient.invalidateQueries({ queryKey: ['gastos'] })
+  }
 
   const { desde, hasta } = getRango(preset, customDesde, customHasta)
 
@@ -160,7 +228,7 @@ export default function Gastos() {
           )}
           <div className="hidden sm:block">
             <button
-              onClick={() => { /* TODO: abrir modal alta gasto */ }}
+              onClick={() => setMostrarNuevo(true)}
               style={{
                 display:      'flex',
                 alignItems:   'center',
@@ -468,7 +536,7 @@ export default function Gastos() {
       >
         <button
           aria-label="Registrar gasto"
-          onClick={() => { /* TODO: abrir modal alta gasto */ }}
+          onClick={() => setMostrarNuevo(true)}
           style={{
             width:          '52px',
             height:         '52px',
@@ -486,6 +554,8 @@ export default function Gastos() {
           <IconPlus size={22} />
         </button>
       </div>
+
+      {mostrarNuevo && <ModalNuevoGasto onClose={() => setMostrarNuevo(false)} onSuccess={handleNuevoSuccess} />}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { DayPicker } from 'react-day-picker'
 import type { DateRange } from 'react-day-picker'
 import { es } from 'react-day-picker/locale'
@@ -30,32 +30,52 @@ export default function DateRangePicker({ from, to, onChange, onClose }: Props) 
   const ref = useRef<HTMLDivElement>(null)
   const range: DateRange = { from: isoToDate(from), to: isoToDate(to) }
 
+  // En móvil se muestra como modal centrado (full-screen overlay) para evitar
+  // que el popover anclado desborde horizontalmente en pantallas chicas.
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches,
+  )
+
   useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
+  useEffect(() => {
+    if (isMobile) return // en móvil el cierre lo maneja el backdrop
     function handle(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
     document.addEventListener('mousedown', handle)
     return () => document.removeEventListener('mousedown', handle)
-  }, [onClose])
+  }, [onClose, isMobile])
 
-  return (
+  const panelStyle = {
+    '--rdp-accent-color': '#3b82f6',
+    '--rdp-accent-background-color': 'rgba(59,130,246,0.15)',
+    '--rdp-range_middle-background-color': 'rgba(59,130,246,0.12)',
+    '--rdp-range_middle-color': '#3b82f6',
+    '--rdp-range_start-color': '#ffffff',
+    '--rdp-range_end-color': '#ffffff',
+    '--rdp-today-color': '#3b82f6',
+    '--rdp-day-height': '30px',
+    '--rdp-day-width': '30px',
+    '--rdp-day_button-height': '28px',
+    '--rdp-day_button-width': '28px',
+    '--rdp-nav-height': '2rem',
+  } as React.CSSProperties
+
+  const panel = (
     <div
       ref={ref}
-      className="absolute top-full right-0 mt-2 z-50 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-slate-800 dark:text-slate-200"
-      style={{
-        '--rdp-accent-color': '#3b82f6',
-        '--rdp-accent-background-color': 'rgba(59,130,246,0.15)',
-        '--rdp-range_middle-background-color': 'rgba(59,130,246,0.12)',
-        '--rdp-range_middle-color': '#3b82f6',
-        '--rdp-range_start-color': '#ffffff',
-        '--rdp-range_end-color': '#ffffff',
-        '--rdp-today-color': '#3b82f6',
-        '--rdp-day-height': '30px',
-        '--rdp-day-width': '30px',
-        '--rdp-day_button-height': '28px',
-        '--rdp-day_button-width': '28px',
-        '--rdp-nav-height': '2rem',
-      } as React.CSSProperties}
+      className={
+        isMobile
+          ? 'w-full max-w-[360px] max-h-[92dvh] overflow-y-auto rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-slate-800 dark:text-slate-200'
+          : 'absolute top-full right-0 mt-2 z-50 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 text-slate-800 dark:text-slate-200'
+      }
+      style={panelStyle}
     >
       <DayPicker
         mode="range"
@@ -80,6 +100,18 @@ export default function DateRangePicker({ from, to, onChange, onClose }: Props) 
           Aplicar
         </button>
       </div>
+    </div>
+  )
+
+  if (!isMobile) return panel
+
+  return (
+    <div
+      className="modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      {panel}
     </div>
   )
 }
