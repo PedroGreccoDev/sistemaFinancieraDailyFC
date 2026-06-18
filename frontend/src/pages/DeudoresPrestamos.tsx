@@ -208,7 +208,7 @@ function ModalCobrarCuota({
                 {(['efectivo', 'transferencia', 'cheque'] as const).map((m) => (
                   <button key={m} type="button" onClick={() => setMetodo(m)}
                     style={{ ...(metodo === m ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.45rem', fontSize: '0.72rem' }}>
-                    {m === 'efectivo' ? 'Efectivo' : m === 'transferencia' ? 'Transf.' : 'Cheque'}
+                    {m === 'efectivo' ? 'Efectivo' : m === 'transferencia' ? 'Transferencia' : 'Cheque'}
                   </button>
                 ))}
               </div>
