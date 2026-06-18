@@ -3,12 +3,18 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getPrestamos, createPrestamo } from '../api/prestamos'
 import { getClientes, createCliente } from '../api/clientes'
 import { fmtMonto, fmtDate, daysUntil } from '../lib/fmt'
+import { btnSolid, btnBordered } from '../lib/ui'
 import { Skeleton } from '../components/Skeleton'
+import { IconPlus } from '../components/icons'
 import type { Prestamo, Cuota, Moneda, Frecuencia, Cliente } from '../types'
 
 type Semaforo = 'mora' | 'proximo' | 'ok' | 'cancelado'
 
 const FM = "'Manrope', sans-serif"
+const FN = "'Bebas Neue', sans-serif"
+const MODAL_BG = 'var(--modal)'
+const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
+const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
 
 function getSemaforo(prestamo: Prestamo): Semaforo {
   if (prestamo.estado !== 'ACTIVO') return 'cancelado'
@@ -34,14 +40,6 @@ const semaforoConfig: Record<Semaforo, { accent: string; borderColor: string; ba
   proximo:  { accent: 'var(--warning)', borderColor: 'color-mix(in srgb, var(--warning) 50%, transparent)', badgeBg: 'color-mix(in srgb, var(--warning) 12%, transparent)', label: 'Vence pronto' },
   ok:       { accent: 'var(--success)', borderColor: 'color-mix(in srgb, var(--success) 45%, transparent)', badgeBg: 'color-mix(in srgb, var(--success) 12%, transparent)', label: 'Al día' },
   cancelado:{ accent: 'var(--text-2)', borderColor: 'var(--bd-008)', badgeBg: 'var(--bd-006)', label: 'Cancelado' },
-}
-
-function inputCls() {
-  return 'w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500'
-}
-
-function labelCls() {
-  return 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1'
 }
 
 const FRECUENCIAS: { value: Frecuencia; label: string }[] = [
@@ -87,10 +85,7 @@ function ModalNuevoPrestamo({ onClose, onSuccess }: { onClose: () => void; onSuc
     setCargandoCliente(true)
     setErrorCliente(null)
     try {
-      const nuevo = await createCliente({
-        nombre: nuevoNombre.trim(),
-        telefono: nuevoTelefono.trim() || null,
-      })
+      const nuevo = await createCliente({ nombre: nuevoNombre.trim(), telefono: nuevoTelefono.trim() || null })
       queryClient.setQueryData<Cliente[]>(['clientes'], (prev) => [...(prev ?? []), nuevo])
       setClienteId(nuevo.id)
       setMostrandoNuevoCliente(false)
@@ -105,22 +100,11 @@ function ModalNuevoPrestamo({ onClose, onSuccess }: { onClose: () => void; onSuc
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (totalNum < creditoNum) {
-      setError('El total a cobrar debe ser mayor o igual al capital.')
-      return
-    }
+    if (totalNum < creditoNum) { setError('El total a cobrar debe ser mayor o igual al capital.'); return }
     setError(null)
     setLoading(true)
     try {
-      await createPrestamo({
-        cliente_id: clienteId,
-        credito: creditoNum,
-        moneda,
-        cuotas: cuotasNum,
-        frecuencia,
-        total_a_cobrar: totalNum,
-        fecha_inicio: fechaInicio || null,
-      })
+      await createPrestamo({ cliente_id: clienteId, credito: creditoNum, moneda, cuotas: cuotasNum, frecuencia, total_a_cobrar: totalNum, fecha_inicio: fechaInicio || null })
       onSuccess()
     } catch (err) {
       setError((err as Error).message)
@@ -130,71 +114,40 @@ function ModalNuevoPrestamo({ onClose, onSuccess }: { onClose: () => void; onSuc
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-sm shadow-xl max-h-[92vh] overflow-y-auto">
-        <div className="p-5 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
-          <h2 className="font-semibold text-slate-900 dark:text-slate-100">Nuevo préstamo</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Completá los datos de la operación</p>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '400px', maxHeight: '92dvh', overflowY: 'auto' }}>
+
+        {/* Header */}
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 1 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Nuevo préstamo</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Completá los datos de la operación</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+
           {/* Cliente */}
           <div>
-            <label className={labelCls()}>Cliente</label>
+            <label style={LABEL_STYLE}>Cliente</label>
             {!mostrandoNuevoCliente ? (
               <>
-                <select
-                  value={clienteId}
-                  onChange={(e) => setClienteId(e.target.value)}
-                  required
-                  className={inputCls()}
-                >
+                <select value={clienteId} onChange={(e) => setClienteId(e.target.value)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
                   <option value="">Seleccionar cliente…</option>
-                  {clientes?.map((c) => (
-                    <option key={c.id} value={c.id}>{c.nombre}</option>
-                  ))}
+                  {clientes?.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                 </select>
-                <button
-                  type="button"
-                  onClick={() => { setMostrandoNuevoCliente(true); setClienteId('') }}
-                  className="mt-1.5 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
+                <button type="button" onClick={() => { setMostrandoNuevoCliente(true); setClienteId('') }}
+                  style={{ fontFamily: FM, fontSize: '0.7rem', color: 'var(--primary)', background: 'transparent', border: 'none', cursor: 'pointer', marginTop: '0.35rem', padding: 0 }}>
                   + Agregar cliente nuevo
                 </button>
               </>
             ) : (
-              <div className="border border-indigo-200 dark:border-indigo-700 rounded-lg p-3 space-y-2 bg-indigo-50/50 dark:bg-indigo-900/10">
-                <p className="text-xs font-medium text-indigo-700 dark:text-indigo-400">Nuevo cliente</p>
-                <input
-                  type="text"
-                  value={nuevoNombre}
-                  onChange={(e) => setNuevoNombre(e.target.value)}
-                  placeholder="Nombre *"
-                  autoFocus
-                  className={inputCls()}
-                />
-                <input
-                  type="text"
-                  value={nuevoTelefono}
-                  onChange={(e) => setNuevoTelefono(e.target.value)}
-                  placeholder="Teléfono (opcional)"
-                  className={inputCls()}
-                />
-                {errorCliente && <p className="text-xs text-red-500">{errorCliente}</p>}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => { setMostrandoNuevoCliente(false); setErrorCliente(null) }}
-                    className="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
-                  >
-                    Volver
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCrearCliente}
-                    disabled={cargandoCliente || !nuevoNombre.trim()}
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                  >
+              <div style={{ border: '1px solid var(--bd-008)', borderRadius: 'var(--r-md)', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'var(--ov-002)' }}>
+                <p style={{ fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--primary)' }}>Nuevo cliente</p>
+                <input type="text" value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre *" autoFocus style={INPUT_STYLE} />
+                <input type="text" value={nuevoTelefono} onChange={(e) => setNuevoTelefono(e.target.value)} placeholder="Teléfono (opcional)" style={INPUT_STYLE} />
+                {errorCliente && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171' }}>{errorCliente}</p>}
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button type="button" onClick={() => { setMostrandoNuevoCliente(false); setErrorCliente(null) }} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.4rem', fontSize: '0.72rem' }}>Volver</button>
+                  <button type="button" onClick={handleCrearCliente} disabled={cargandoCliente || !nuevoNombre.trim()} style={{ ...btnSolid('primary'), flex: 1, padding: '0.4rem', fontSize: '0.72rem', opacity: (cargandoCliente || !nuevoNombre.trim()) ? 0.5 : 1 }}>
                     {cargandoCliente ? 'Creando…' : 'Crear cliente'}
                   </button>
                 </div>
@@ -204,19 +157,11 @@ function ModalNuevoPrestamo({ onClose, onSuccess }: { onClose: () => void; onSuc
 
           {/* Moneda */}
           <div>
-            <label className={labelCls()}>Moneda</label>
-            <div className="flex gap-2">
+            <label style={LABEL_STYLE}>Moneda</label>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
               {(['ARS', 'USD'] as Moneda[]).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMoneda(m)}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                    moneda === m
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
-                  }`}
-                >
+                <button key={m} type="button" onClick={() => setMoneda(m)}
+                  style={{ ...(moneda === m ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.45rem', fontSize: '0.8rem' }}>
                   {m}
                 </button>
               ))}
@@ -224,101 +169,65 @@ function ModalNuevoPrestamo({ onClose, onSuccess }: { onClose: () => void; onSuc
           </div>
 
           {/* Capital y Total */}
-          <div className="grid grid-cols-2 gap-3">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
             <div>
-              <label className={labelCls()}>Capital</label>
-              <input
-                type="number" step="0.01" min="0.01"
-                value={credito}
-                onChange={(e) => setCredito(e.target.value)}
-                placeholder="0,00"
-                required
-                className={inputCls()}
-              />
+              <label style={LABEL_STYLE}>Capital</label>
+              <input type="number" step="0.01" min="0.01" value={credito} onChange={(e) => setCredito(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
             </div>
             <div>
-              <label className={labelCls()}>Total a cobrar</label>
-              <input
-                type="number" step="0.01" min="0.01"
-                value={totalACobrar}
-                onChange={(e) => setTotalACobrar(e.target.value)}
-                placeholder="0,00"
-                required
-                className={inputCls()}
-              />
+              <label style={LABEL_STYLE}>Total a cobrar</label>
+              <input type="number" step="0.01" min="0.01" value={totalACobrar} onChange={(e) => setTotalACobrar(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
             </div>
           </div>
 
           {/* Cuotas y Frecuencia */}
-          <div className="grid grid-cols-2 gap-3">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
             <div>
-              <label className={labelCls()}>Cuotas</label>
-              <input
-                type="number" step="1" min="1"
-                value={cuotas}
-                onChange={(e) => setCuotas(e.target.value)}
-                placeholder="1"
-                required
-                className={inputCls()}
-              />
+              <label style={LABEL_STYLE}>Cuotas</label>
+              <input type="number" step="1" min="1" value={cuotas} onChange={(e) => setCuotas(e.target.value)} placeholder="1" required style={INPUT_STYLE} />
             </div>
             <div>
-              <label className={labelCls()}>Frecuencia</label>
-              <select
-                value={frecuencia}
-                onChange={(e) => setFrecuencia(e.target.value as Frecuencia)}
-                required
-                className={inputCls()}
-              >
-                {FRECUENCIAS.map((f) => (
-                  <option key={f.value} value={f.value}>{f.label}</option>
-                ))}
+              <label style={LABEL_STYLE}>Frecuencia</label>
+              <select value={frecuencia} onChange={(e) => setFrecuencia(e.target.value as Frecuencia)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+                {FRECUENCIAS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
               </select>
             </div>
           </div>
 
           {/* Fecha inicio */}
           <div>
-            <label className={labelCls()}>Fecha de inicio <span className="text-slate-400 font-normal">(opcional)</span></label>
-            <input
-              type="date"
-              value={fechaInicio}
-              onChange={(e) => setFechaInicio(e.target.value)}
-              className={inputCls()}
-            />
+            <label style={LABEL_STYLE}>Fecha de inicio <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
+            <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} style={INPUT_STYLE} />
           </div>
 
           {/* Preview */}
           {showPreview && (
-            <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg px-4 py-3 text-sm space-y-1.5">
-              <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                <span>Capital</span>
-                <span className="font-semibold">{fmtMonto(creditoNum, moneda)}</span>
+            <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+              {[
+                { label: 'Capital', value: fmtMonto(creditoNum, moneda), color: 'var(--text-1)' },
+                { label: 'Total a cobrar', value: fmtMonto(totalNum, moneda), color: 'var(--text-1)' },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
+                  <span style={{ color: 'rgba(100,116,139,0.7)' }}>{label}</span>
+                  <span style={{ color, fontWeight: 600 }}>{value}</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.35rem', borderTop: '1px solid var(--bd-006)' }}>
+                <span style={{ color: 'var(--success)', fontWeight: 700 }}>Ganancia</span>
+                <span style={{ color: 'var(--success)', fontWeight: 700 }}>{fmtMonto(ganancia, moneda)}</span>
               </div>
-              <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                <span>Total a cobrar</span>
-                <span className="font-semibold">{fmtMonto(totalNum, moneda)}</span>
-              </div>
-              <div className="flex justify-between text-green-600 dark:text-green-400 font-semibold border-t border-slate-200 dark:border-slate-600 pt-1.5">
-                <span>Ganancia</span>
-                <span>{fmtMonto(ganancia, moneda)}</span>
-              </div>
-              <div className="flex justify-between text-slate-500 dark:text-slate-400 text-xs">
-                <span>Cuota aprox.</span>
-                <span>{fmtMonto(montoCuota, moneda)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.72rem' }}>
+                <span style={{ color: 'rgba(100,116,139,0.6)' }}>Cuota aprox.</span>
+                <span style={{ color: 'rgba(100,116,139,0.6)' }}>{fmtMonto(montoCuota, moneda)}</span>
               </div>
             </div>
           )}
 
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
 
-          <div className="flex gap-3 pt-1">
-            <button type="button" onClick={onClose}
-              className="flex-1 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-              Cancelar
-            </button>
-            <button type="submit" disabled={loading || mostrandoNuevoCliente}
-              className="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="submit" disabled={loading || mostrandoNuevoCliente} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: (loading || mostrandoNuevoCliente) ? 0.5 : 1 }}>
               {loading ? 'Guardando…' : 'Confirmar'}
             </button>
           </div>
@@ -383,9 +292,9 @@ export default function DeudoresPrestamos() {
         </div>
         <button
           onClick={() => setCreandoPrestamo(true)}
-          className="text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded px-3 py-1.5 transition-colors"
+          style={{ ...btnSolid('primary'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', padding: '0.45rem 0.875rem' }}
         >
-          Nuevo
+          <IconPlus size={15} />Nuevo
         </button>
       </div>
 
@@ -420,7 +329,6 @@ export default function DeudoresPrestamos() {
 
           return (
             <div key={p.id} className="lift" style={{ background: 'var(--surface-grad)', border: `1px solid ${cfg.borderColor}`, borderRadius: 'var(--r-lg)', boxShadow: `var(--shadow-card), 0 0 0 1px ${cfg.borderColor}`, padding: '1.1rem 1.2rem' }}>
-              {/* Header */}
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
                 <h3 style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word', maxWidth: '70%' }}>{nombre}</h3>
                 <span style={{ fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, color: cfg.accent, background: cfg.badgeBg, border: `1px solid ${cfg.borderColor}`, padding: '2px 8px', letterSpacing: '0.05em', flexShrink: 0 }}>
@@ -428,7 +336,6 @@ export default function DeudoresPrestamos() {
                 </span>
               </div>
 
-              {/* Datos */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginBottom: '0.875rem' }}>
                 {[
                   { label: 'Capital', value: fmtMonto(p.credito, p.moneda) },
@@ -450,7 +357,6 @@ export default function DeudoresPrestamos() {
                 )}
               </div>
 
-              {/* Barra de progreso */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.62rem', color: 'rgba(100,116,139,0.6)', marginBottom: '0.3rem' }}>
                   <span>{cobradas} de {p.cuotas} cuotas</span>
@@ -458,16 +364,7 @@ export default function DeudoresPrestamos() {
                 </div>
                 <div style={{ display: 'flex', gap: '2px' }}>
                   {Array.from({ length: p.cuotas }).map((_, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        flex: 1,
-                        height: '4px',
-                        borderRadius: '2px',
-                        background: i < cobradas ? cfg.accent : 'var(--bd-006)',
-                        transition: 'background 0.3s ease',
-                      }}
-                    />
+                    <div key={i} style={{ flex: 1, height: '4px', borderRadius: '2px', background: i < cobradas ? cfg.accent : 'var(--bd-006)', transition: 'background 0.3s ease' }} />
                   ))}
                 </div>
               </div>
