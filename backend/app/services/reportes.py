@@ -5,11 +5,13 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
     Cheque,
     ChequeEstado,
+    Cuota,
+    CuotaEstado,
     GastoOperativo,
     Moneda,
     MovimientoEfectivo,
@@ -17,7 +19,7 @@ from app.db.models import (
     PasivoEstado,
     Prestamo,
 )
-from app.schemas.reportes import ReporteGananciasRead, SaldoPasivos
+from app.schemas.reportes import CuotaCobradaHistorialItem, ReporteGananciasRead, SaldoPasivos
 from app.services.exceptions import ValidationError
 
 # Los eventos se persisten en UTC, pero el operador elige fechas en hora local
@@ -79,6 +81,15 @@ def get_reporte_ganancias(db: Session, desde: date, hasta: date) -> ReporteGanan
             )
         )
     )
+    cobros_cuotas = _money(
+        db.scalar(
+            select(func.coalesce(func.sum(Cuota.monto), 0)).where(
+                Cuota.estado == CuotaEstado.COBRADA,
+                Cuota.fecha_cobro >= desde,
+                Cuota.fecha_cobro <= hasta,
+            )
+        )
+    )
 
     total_ganancias = ganancia_cheques + ganancia_prestamos + ganancia_movimientos
     saldo_pasivos = _get_saldo_pasivos(db)
@@ -93,7 +104,43 @@ def get_reporte_ganancias(db: Session, desde: date, hasta: date) -> ReporteGanan
         total_ganancias=total_ganancias,
         neto=total_ganancias - gastos,
         saldo_pasivos=saldo_pasivos,
+        cobros_cuotas=cobros_cuotas,
     )
+
+
+def get_cobros_cuotas_historial(
+    db: Session,
+    desde: date,
+    hasta: date,
+) -> list[CuotaCobradaHistorialItem]:
+    cuotas = list(
+        db.scalars(
+            select(Cuota)
+            .join(Cuota.prestamo)
+            .options(joinedload(Cuota.prestamo).joinedload(Prestamo.cliente))
+            .where(
+                Cuota.estado == CuotaEstado.COBRADA,
+                Cuota.fecha_cobro >= desde,
+                Cuota.fecha_cobro <= hasta,
+            )
+            .order_by(Cuota.fecha_cobro.desc(), Cuota.updated_at.desc())
+        )
+    )
+    return [
+        CuotaCobradaHistorialItem(
+            cuota_id=c.id,
+            prestamo_id=c.prestamo_id,
+            cliente_id=c.prestamo.cliente_id,
+            cliente_nombre=c.prestamo.cliente.nombre,
+            numero_cuota=c.numero_cuota,
+            monto=c.monto,
+            moneda=c.prestamo.moneda.value,
+            fecha_cobro=c.fecha_cobro,
+            fecha_vencimiento=c.fecha_vencimiento,
+        )
+        for c in cuotas
+        if c.fecha_cobro is not None
+    ]
 
 
 def _get_saldo_pasivos(db: Session) -> SaldoPasivos:

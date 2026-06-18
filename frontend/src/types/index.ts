@@ -79,6 +79,19 @@ export interface ReporteGanancias {
   total_ganancias: string
   neto: string
   saldo_pasivos: SaldoPasivos
+  cobros_cuotas: string
+}
+
+export interface CuotaCobradaHistorialItem {
+  cuota_id: string
+  prestamo_id: string
+  cliente_id: string
+  cliente_nombre: string
+  numero_cuota: number
+  monto: string
+  moneda: string
+  fecha_cobro: string
+  fecha_vencimiento: string
 }
 
 export type MovimientoTipo = 'COMPRA' | 'VENTA'

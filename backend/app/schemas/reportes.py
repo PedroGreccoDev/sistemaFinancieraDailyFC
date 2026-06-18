@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -22,3 +23,16 @@ class ReporteGananciasRead(BaseModel):
     total_ganancias: Decimal
     neto: Decimal
     saldo_pasivos: SaldoPasivos
+    cobros_cuotas: Decimal
+
+
+class CuotaCobradaHistorialItem(BaseModel):
+    cuota_id: UUID
+    prestamo_id: UUID
+    cliente_id: UUID
+    cliente_nombre: str
+    numero_cuota: int
+    monto: Decimal
+    moneda: str
+    fecha_cobro: date
+    fecha_vencimiento: date

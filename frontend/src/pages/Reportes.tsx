@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getReporteGanancias } from '../api/reportes'
-import { fmtARS, fmtUSD, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
+import { getReporteGanancias, getCobrosHistorial } from '../api/reportes'
+import { fmtARS, fmtUSD, fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
 import DropdownFilter from '../components/DropdownFilter'
 import DateRangePicker from '../components/DateRangePicker'
+import type { Moneda } from '../types'
 
 type Preset = 'hoy' | 'semana' | 'mes' | 'custom'
 
@@ -67,6 +68,12 @@ export default function Reportes() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['reporte', desde, hasta],
     queryFn: () => getReporteGanancias(desde, hasta),
+    enabled: !!desde && !!hasta,
+  })
+
+  const { data: historial } = useQuery({
+    queryKey: ['cobros-historial', desde, hasta],
+    queryFn: () => getCobrosHistorial(desde, hasta),
     enabled: !!desde && !!hasta,
   })
 
@@ -233,6 +240,69 @@ export default function Reportes() {
               ))
             })()}
           </div>
+
+          {/* Cobros de cuotas (flujo de caja) */}
+          <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Cobros del período</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '0.75rem', marginBottom: '1.5rem' }}>
+            <MetricCard
+              label="Cuotas cobradas"
+              value={fmtARS(data.cobros_cuotas)}
+              color="default"
+              accentColor="rgba(99,102,241,0.5)"
+            />
+            <div className="lift" style={{ ...CARD, padding: '0.7rem 1rem', minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.6rem', borderLeft: '3px solid rgba(99,102,241,0.25)' }}>
+              <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.65)', lineHeight: 1.5 }}>
+                Capital + interés recibidos en efectivo, transferencia o cheque. No afecta las ganancias (la ganancia se imputa al crear el préstamo).
+              </p>
+            </div>
+          </div>
+
+          {/* Historial de cobros */}
+          {historial && historial.length > 0 && (
+            <>
+              <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Historial de cobros</p>
+              <div style={{ ...CARD, overflow: 'hidden', marginBottom: '1.5rem' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '320px' }}>
+                    <thead>
+                      <tr>
+                        {['Cliente', 'Cuota', 'Fecha cobro', 'Importe'].map((h, i) => (
+                          <th key={h} style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: i === 3 ? 'right' : 'left', background: 'var(--ov-0025)', borderBottom: '1px solid var(--bd-006)', whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historial.map((item) => (
+                        <tr key={item.cuota_id}
+                          onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
+                          onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
+                          <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.6rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'var(--text-1)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.cliente_nombre}</td>
+                          <td style={{ fontFamily: FM, fontSize: '0.78rem', padding: '0.6rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'rgba(100,116,139,0.7)', whiteSpace: 'nowrap' }}>
+                            Cuota {item.numero_cuota}
+                            <span style={{ display: 'block', fontSize: '0.65rem', color: 'rgba(100,116,139,0.45)' }}>vence {fmtDate(item.fecha_vencimiento)}</span>
+                          </td>
+                          <td style={{ fontFamily: FM, fontSize: '0.78rem', padding: '0.6rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'rgba(100,116,139,0.7)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{fmtDate(item.fecha_cobro)}</td>
+                          <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.6rem 1rem', borderBottom: '1px solid var(--ov-004)', textAlign: 'right', fontWeight: 600, color: 'var(--text-1)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                            {fmtMonto(item.monto, item.moneda as Moneda)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ background: 'var(--ov-0025)' }}>
+                        <td colSpan={3} style={{ fontFamily: FM, fontSize: '0.75rem', padding: '0.6rem 1rem', fontWeight: 700, color: 'var(--text-1)', borderTop: '1px solid var(--bd-008)' }}>
+                          Total ({historial.length} cobro{historial.length !== 1 ? 's' : ''})
+                        </td>
+                        <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.6rem 1rem', textAlign: 'right', fontWeight: 700, color: '#818cf8', fontVariantNumeric: 'tabular-nums', borderTop: '1px solid var(--bd-008)', whiteSpace: 'nowrap' }}>
+                          {fmtARS(data.cobros_cuotas)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Pasivos snapshot */}
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Pasivos pendientes (snapshot actual)</p>
