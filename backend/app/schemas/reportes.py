@@ -23,7 +23,8 @@ class ReporteGananciasRead(BaseModel):
     total_ganancias: Decimal
     neto: Decimal
     saldo_pasivos: SaldoPasivos
-    cobros_cuotas: Decimal
+    cobros_cuotas_ars: Decimal
+    cobros_cuotas_usd: Decimal
 
 
 class CuotaCobradaHistorialItem(BaseModel):

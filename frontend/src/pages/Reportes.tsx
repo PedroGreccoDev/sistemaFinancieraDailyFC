@@ -243,16 +243,22 @@ export default function Reportes() {
 
           {/* Cobros de cuotas (flujo de caja) */}
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Cobros del período</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '0.75rem', marginBottom: '1.5rem' }}>
+          <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: '0.75rem', marginBottom: '1.5rem' }}>
             <MetricCard
-              label="Cuotas cobradas"
-              value={fmtARS(data.cobros_cuotas)}
+              label="Cuotas cobradas ARS"
+              value={fmtARS(data.cobros_cuotas_ars)}
               color="default"
-              accentColor="rgba(99,102,241,0.5)"
+              accentColor="rgba(52,211,153,0.5)"
             />
-            <div className="lift" style={{ ...CARD, padding: '0.7rem 1rem', minWidth: 0, display: 'flex', alignItems: 'center', gap: '0.6rem', borderLeft: '3px solid rgba(99,102,241,0.25)' }}>
-              <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.65)', lineHeight: 1.5 }}>
-                Capital + interés recibidos en efectivo, transferencia o cheque. No afecta las ganancias (la ganancia se imputa al crear el préstamo).
+            <MetricCard
+              label="Cuotas cobradas USD"
+              value={fmtUSD(data.cobros_cuotas_usd)}
+              color="default"
+              accentColor="rgba(52,211,153,0.5)"
+            />
+            <div className="lift" style={{ ...CARD, padding: '0.7rem 1rem', minWidth: 0, display: 'flex', alignItems: 'center', borderLeft: '3px solid rgba(52,211,153,0.2)' }}>
+              <p style={{ fontFamily: FM, fontSize: '0.68rem', color: 'rgba(100,116,139,0.6)', lineHeight: 1.5 }}>
+                Capital + interés recibidos. No afecta las ganancias — la ganancia se imputa al crear el préstamo.
               </p>
             </div>
           </div>
@@ -293,8 +299,8 @@ export default function Reportes() {
                         <td colSpan={3} style={{ fontFamily: FM, fontSize: '0.75rem', padding: '0.6rem 1rem', fontWeight: 700, color: 'var(--text-1)', borderTop: '1px solid var(--bd-008)' }}>
                           Total ({historial.length} cobro{historial.length !== 1 ? 's' : ''})
                         </td>
-                        <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.6rem 1rem', textAlign: 'right', fontWeight: 700, color: '#818cf8', fontVariantNumeric: 'tabular-nums', borderTop: '1px solid var(--bd-008)', whiteSpace: 'nowrap' }}>
-                          {fmtARS(data.cobros_cuotas)}
+                        <td style={{ fontFamily: FM, fontSize: '0.82rem', padding: '0.6rem 1rem', textAlign: 'right', fontWeight: 700, color: '#34d399', fontVariantNumeric: 'tabular-nums', borderTop: '1px solid var(--bd-008)', whiteSpace: 'nowrap' }}>
+                          {fmtARS(data.cobros_cuotas_ars)}{parseFloat(data.cobros_cuotas_usd) > 0 ? ` + ${fmtUSD(data.cobros_cuotas_usd)}` : ''}
                         </td>
                       </tr>
                     </tfoot>

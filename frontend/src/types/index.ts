@@ -79,7 +79,8 @@ export interface ReporteGanancias {
   total_ganancias: string
   neto: string
   saldo_pasivos: SaldoPasivos
-  cobros_cuotas: string
+  cobros_cuotas_ars: string
+  cobros_cuotas_usd: string
 }
 
 export interface CuotaCobradaHistorialItem {

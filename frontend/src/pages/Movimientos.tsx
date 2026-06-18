@@ -4,13 +4,14 @@ import { getMovimientos } from '../api/movimientos'
 import { getGastos } from '../api/gastos_operativos'
 import { getCheques } from '../api/cheques'
 import { getPrestamos } from '../api/prestamos'
+import { getClientes } from '../api/clientes'
 import { fmtUSD, fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
 import { SkeletonRows } from '../components/Skeleton'
 import type { MovimientoEfectivo, GastoOperativo, Cheque, Prestamo } from '../types'
 import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
 
-type Seccion = 'TODOS' | 'DIVISAS' | 'GASTOS' | 'CHEQUES' | 'PRESTAMOS'
+type Seccion = 'TODOS' | 'DIVISAS' | 'GASTOS' | 'CHEQUES' | 'PRESTAMOS' | 'COBROS'
 type PresetFecha = 'HOY' | 'SEMANA' | 'MES' | 'PERSONALIZADO'
 
 const FM     = "'Manrope', sans-serif"
@@ -40,6 +41,7 @@ const SECCION_CONFIG: Record<Exclude<Seccion, 'TODOS'>, { label: string; color: 
   GASTOS:    { label: 'Gastos',    color: '#fb923c', bg: 'rgba(251,146,60,0.13)',   initial: 'G' },
   CHEQUES:   { label: 'Cheques',   color: '#a78bfa', bg: 'rgba(167,139,250,0.13)', initial: 'C' },
   PRESTAMOS: { label: 'Préstamos', color: '#4ade80', bg: 'rgba(74,222,128,0.13)',  initial: 'P' },
+  COBROS:    { label: 'Cobros',    color: '#34d399', bg: 'rgba(52,211,153,0.13)',   initial: 'Q' },
 }
 
 function normalizar(
@@ -47,6 +49,7 @@ function normalizar(
   gastos: GastoOperativo[],
   cheques: Cheque[],
   prestamos: Prestamo[],
+  clienteMap: Map<string, string>,
 ): MovimientoUnificado[] {
   const items: MovimientoUnificado[] = []
 
@@ -90,6 +93,16 @@ function normalizar(
       detalle: `${p.cuotas} cuotas ${freq[p.frecuencia] ?? p.frecuencia.toLowerCase()} · ${p.estado}`,
       monto: p.credito, moneda: p.moneda, esGasto: false,
     })
+    for (const c of p.cuotas_detalle) {
+      if (c.estado === 'COBRADA' && c.fecha_cobro) {
+        items.push({
+          id: c.id, seccion: 'COBROS', fecha: c.fecha_cobro,
+          descripcion: clienteMap.get(p.cliente_id) ?? '–',
+          detalle: `Cuota ${c.numero_cuota} / ${p.cuotas}`,
+          monto: c.monto, moneda: p.moneda, esGasto: false,
+        })
+      }
+    }
   }
 
   return items.sort((a, b) => b.fecha.localeCompare(a.fecha))
@@ -122,10 +135,16 @@ export default function Movimientos() {
   const { data: gastos    = [], isLoading: loadingGas } = useQuery({ queryKey: ['gastos'],         queryFn: getGastos,            refetchInterval: 30_000 })
   const { data: cheques   = [], isLoading: loadingChe } = useQuery({ queryKey: ['cheques-todos'],  queryFn: () => getCheques(),   refetchInterval: 30_000 })
   const { data: prestamos = [], isLoading: loadingPre } = useQuery({ queryKey: ['prestamos-todos'], queryFn: () => getPrestamos(), refetchInterval: 30_000 })
+  const { data: clientes  = [] }                        = useQuery({ queryKey: ['clientes'],        queryFn: getClientes,          staleTime: 60_000 })
 
   const isLoading = loadingDiv || loadingGas || loadingChe || loadingPre
 
-  const todos = useMemo(() => normalizar(divisas, gastos, cheques, prestamos), [divisas, gastos, cheques, prestamos])
+  const clienteMap = useMemo(() => new Map(clientes.map((c) => [c.id, c.nombre])), [clientes])
+
+  const todos = useMemo(
+    () => normalizar(divisas, gastos, cheques, prestamos, clienteMap),
+    [divisas, gastos, cheques, prestamos, clienteMap],
+  )
 
   const { desde, hasta } = getRango(preset, customDesde, customHasta)
 
@@ -163,7 +182,7 @@ export default function Movimientos() {
     setShowPicker(p === 'PERSONALIZADO')
   }
 
-  const secciones: Seccion[] = ['TODOS', 'DIVISAS', 'GASTOS', 'CHEQUES', 'PRESTAMOS']
+  const secciones: Seccion[] = ['TODOS', 'DIVISAS', 'GASTOS', 'CHEQUES', 'PRESTAMOS', 'COBROS']
 
   return (
     <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>

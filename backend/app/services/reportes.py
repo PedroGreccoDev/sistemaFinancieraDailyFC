@@ -81,15 +81,21 @@ def get_reporte_ganancias(db: Session, desde: date, hasta: date) -> ReporteGanan
             )
         )
     )
-    cobros_cuotas = _money(
-        db.scalar(
-            select(func.coalesce(func.sum(Cuota.monto), 0)).where(
-                Cuota.estado == CuotaEstado.COBRADA,
-                Cuota.fecha_cobro >= desde,
-                Cuota.fecha_cobro <= hasta,
+    def _cobros_cuotas(moneda: Moneda) -> Decimal:
+        return _money(
+            db.scalar(
+                select(func.coalesce(func.sum(Cuota.monto), 0))
+                .join(Cuota.prestamo)
+                .where(
+                    Cuota.estado == CuotaEstado.COBRADA,
+                    Cuota.fecha_cobro >= desde,
+                    Cuota.fecha_cobro <= hasta,
+                    Prestamo.moneda == moneda,
+                )
             )
         )
-    )
+    cobros_cuotas_ars = _cobros_cuotas(Moneda.ARS)
+    cobros_cuotas_usd = _cobros_cuotas(Moneda.USD)
 
     total_ganancias = ganancia_cheques + ganancia_prestamos + ganancia_movimientos
     saldo_pasivos = _get_saldo_pasivos(db)
@@ -104,7 +110,8 @@ def get_reporte_ganancias(db: Session, desde: date, hasta: date) -> ReporteGanan
         total_ganancias=total_ganancias,
         neto=total_ganancias - gastos,
         saldo_pasivos=saldo_pasivos,
-        cobros_cuotas=cobros_cuotas,
+        cobros_cuotas_ars=cobros_cuotas_ars,
+        cobros_cuotas_usd=cobros_cuotas_usd,
     )
 
 
