@@ -272,6 +272,19 @@ body {
   .min-h-dvh {
     min-height: 100dvh;
   }
+  /* Espacio inferior para que el botón flotante (FAB) no tape el último
+     ítem. En mobile reserva la altura del FAB; en >=sm el FAB se oculta y
+     vuelve al padding normal de página (1.5rem, equivalente a py-6). El
+     safe-area inferior ya lo agrega <main>. Usar junto con pt-5 sm:pt-6
+     (no con py-*), para que esta clase sea la única que fija padding-bottom. */
+  .pb-fab {
+    padding-bottom: 6rem;
+  }
+  @media (min-width: 640px) {
+    .pb-fab {
+      padding-bottom: 1.5rem;
+    }
+  }
   .scrollbar-none {
     scrollbar-width: none;
   }

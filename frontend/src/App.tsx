@@ -60,7 +60,11 @@ function AppShell() {
   return (
     <div className="min-h-dvh flex flex-col md:flex-row" style={{ background: "var(--bg)" }}>
       <Navbar />
-      <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto pb-40 md:pb-0">
+      <main
+        ref={mainRef}
+        className="flex-1 min-w-0 overflow-y-auto"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
         <Outlet />
       </main>
     </div>

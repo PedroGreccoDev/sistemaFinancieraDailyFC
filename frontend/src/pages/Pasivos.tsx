@@ -276,7 +276,7 @@ export default function Pasivos() {
   }
 
   return (
-    <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
+    <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>

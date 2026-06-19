@@ -103,7 +103,7 @@ export default function Cartera() {
   const totalGanancia = filteredVendidos.reduce((acc, c) => acc + parseFloat(c.ganancia), 0)
 
   return (
-    <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
+    <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
 
       {/* Header cartera */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
