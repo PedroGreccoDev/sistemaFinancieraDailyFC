@@ -7,7 +7,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  clearToken, getToken, setToken, setUnauthorizedHandler,
+  clearToken, getCachedUser, getToken, setCachedUser, setToken, setUnauthorizedHandler,
 } from '../api/client'
 import { getMe, loginReq } from '../api/auth'
 import type { AuthUser } from '../api/auth'
@@ -30,21 +30,30 @@ const AuthContext = createContext<AuthState | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
-  const [user, setUser] = useState<AuthUser | null>(MOCK ? MOCK_USER : null)
-  // Si hay token guardado arrancamos "cargando" hasta hidratar con /auth/me.
-  const [loading, setLoading] = useState<boolean>(MOCK ? false : Boolean(getToken()))
+  // Con token, arrancamos con el usuario cacheado (rehidratación instantánea, sin
+  // parpadeo al login) y revalidamos contra /auth/me en segundo plano.
+  const cached = MOCK ? MOCK_USER : (getToken() ? getCachedUser<AuthUser>() : null)
+  const [user, setUser] = useState<AuthUser | null>(cached)
+  // Solo bloqueamos con spinner si hay token pero todavía no tenemos usuario cacheado.
+  const [loading, setLoading] = useState<boolean>(MOCK ? false : (Boolean(getToken()) && !cached))
 
-  // Hidratación inicial: con token guardado, traer el usuario actual.
+  // Hidratación inicial: con token guardado, revalidar el usuario actual.
   useEffect(() => {
     if (MOCK) return
     if (!getToken()) {
+      setUser(null)
       setLoading(false)
       return
     }
     let vivo = true
     getMe()
-      .then((u) => { if (vivo) setUser(u) })
-      .catch(() => { clearToken(); if (vivo) setUser(null) })
+      .then((u) => { if (vivo) { setUser(u); setCachedUser(u) } })
+      .catch(() => {
+        // apiFetch limpia el token ante 401 (sesión revocada/inválida) → desloguear.
+        // Si el token sigue presente, fue un error de red o el backend dormido: NO
+        // borramos la sesión, conservamos el usuario cacheado para no echar al operador.
+        if (!getToken() && vivo) setUser(null)
+      })
       .finally(() => { if (vivo) setLoading(false) })
     return () => { vivo = false }
   }, [])
@@ -63,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (MOCK) { setUser(MOCK_USER); return }
     const { token, user: u } = await loginReq(username, password)
     setToken(token)
+    setCachedUser(u)
     setUser(u)
   }
 

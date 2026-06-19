@@ -2,10 +2,27 @@ export const API_BASE = '/api/v1'
 
 // Clave del token de sesión en localStorage (sobrevive a recargar/cerrar el navegador).
 const TOKEN_KEY = 'auth_token'
+// Cache del usuario actual: permite rehidratar la sesión al instante al recargar
+// (sin parpadeo) y conservarla si /auth/me falla por red/backend dormido.
+const USER_KEY = 'auth_user'
 
 export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY)
 export const setToken = (t: string): void => localStorage.setItem(TOKEN_KEY, t)
-export const clearToken = (): void => localStorage.removeItem(TOKEN_KEY)
+export const clearToken = (): void => {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(USER_KEY)
+}
+
+export function getCachedUser<T>(): T | null {
+  try {
+    const raw = localStorage.getItem(USER_KEY)
+    return raw ? (JSON.parse(raw) as T) : null
+  } catch {
+    return null
+  }
+}
+export const setCachedUser = (u: unknown): void =>
+  localStorage.setItem(USER_KEY, JSON.stringify(u))
 
 // Handler de "sesión inválida" (401 en ruta protegida). Lo setea el AuthContext
 // para redirigir vía router sin recargar; si nadie lo registró, caemos a un
