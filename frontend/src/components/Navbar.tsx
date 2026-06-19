@@ -374,9 +374,9 @@ export default function Navbar() {
         <div style={{
           padding: '0.875rem 1.5rem',
           // La barra inferior de Safari (iOS) flota sobre el contenido y los vh no
-          // la descuentan: despejamos lo suficiente (safe-area + 3rem) para que el
-          // footer no quede tapado con el drawer abierto, sin dejar un hueco grande.
-          paddingBottom: 'calc(env(safe-area-inset-bottom) + 3rem)',
+          // la descuentan: despejamos lo justo (safe-area + 4rem ≈ alto de esa barra)
+          // para que el footer quede arriba de ella, sin taparse ni dejar hueco.
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 4rem)',
           borderTop: BORDER,
           display: 'flex',
           alignItems: 'center',
