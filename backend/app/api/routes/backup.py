@@ -8,10 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_admin
 from app.db.session import get_db
 from app.services import backup as svc
 
-router = APIRouter(prefix="/backup", tags=["backup"])
+# Toda la sección Configuración (export/import) es solo para administradores.
+router = APIRouter(prefix="/backup", tags=["backup"], dependencies=[Depends(require_admin)])
 
 DbSession = Annotated[Session, Depends(get_db)]
 

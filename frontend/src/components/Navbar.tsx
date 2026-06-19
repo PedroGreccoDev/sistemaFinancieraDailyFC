@@ -36,7 +36,7 @@ const NAV_LINKS: NavItem[] = [
   { to: '/pasivos',        label: 'Deudas',         end: false, Icon: IconReceipt },
   { to: '/reportes',       label: 'Reportes',       end: false, Icon: IconChart },
   { to: '/movimientos',    label: 'Movimientos',    end: false, Icon: IconExchange },
-  { to: '/configuracion',  label: 'Configuración',  end: false, Icon: IconSettings },
+  { to: '/configuracion',  label: 'Configuración',  end: false, Icon: IconSettings, adminOnly: true },
   { to: '/usuarios',       label: 'Usuarios',       end: false, Icon: IconUserCog, adminOnly: true, badge: 'ADMIN' },
 ]
 

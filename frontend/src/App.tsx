@@ -91,9 +91,9 @@ export default function App() {
               <Route path="/pasivos"      element={<Pasivos />} />
               <Route path="/reportes"     element={<Reportes />} />
               <Route path="/movimientos" element={<Movimientos />} />
-              <Route path="/configuracion" element={<Configuracion />} />
               {/* Solo admin */}
               <Route element={<ProtectedRoute adminOnly />}>
+                <Route path="/configuracion" element={<Configuracion />} />
                 <Route path="/usuarios"     element={<Usuarios />} />
               </Route>
             </Route>
