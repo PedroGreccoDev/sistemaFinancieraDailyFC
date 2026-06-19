@@ -9,20 +9,22 @@ import { useNavigate } from 'react-router-dom'
 import {
   clearToken, getCachedUser, getToken, setCachedUser, setToken, setUnauthorizedHandler,
 } from '../api/client'
-import { getMe, loginReq } from '../api/auth'
+import { cambiarPasswordReq, getMe, loginReq } from '../api/auth'
 import type { AuthUser } from '../api/auth'
 
 const MOCK = import.meta.env.VITE_MOCK === '1'
 
 const MOCK_USER: AuthUser = {
   id: 'mock-admin', username: 'm.gonzalez', phone: null,
-  is_admin: true, activo: true, created_at: new Date().toISOString(),
+  is_admin: true, activo: true, must_change_password: false,
+  created_at: new Date().toISOString(),
 }
 
 interface AuthState {
   user: AuthUser | null
   loading: boolean
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<AuthUser>
+  cambiarPassword: (currentPassword: string, newPassword: string) => Promise<void>
   logout: () => void
 }
 
@@ -68,9 +70,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null)
   }, [navigate])
 
-  async function login(username: string, password: string) {
-    if (MOCK) { setUser(MOCK_USER); return }
+  async function login(username: string, password: string): Promise<AuthUser> {
+    if (MOCK) { setUser(MOCK_USER); return MOCK_USER }
     const { token, user: u } = await loginReq(username, password)
+    setToken(token)
+    setCachedUser(u)
+    setUser(u)
+    return u
+  }
+
+  // Cambio de clave del propio usuario. El backend sube token_version (corta
+  // otras sesiones) y devuelve un token nuevo: lo persistimos para no caernos.
+  async function cambiarPassword(currentPassword: string, newPassword: string) {
+    if (MOCK) {
+      setUser((u) => (u ? { ...u, must_change_password: false } : u))
+      return
+    }
+    const { token, user: u } = await cambiarPasswordReq(currentPassword, newPassword)
     setToken(token)
     setCachedUser(u)
     setUser(u)
@@ -83,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, cambiarPassword, logout }}>
       {children}
     </AuthContext.Provider>
   )

@@ -14,6 +14,8 @@ class UsuarioRead(BaseModel):
     phone: str | None
     is_admin: bool
     activo: bool
+    # True → el usuario debe definir su propia clave antes de poder operar.
+    must_change_password: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -45,6 +47,13 @@ class ResetPasswordRequest(BaseModel):
 
 class MensajeResponse(BaseModel):
     detail: str
+
+
+# ── Cambio de contraseña (usuario autenticado) ───────────────────────────────
+
+class CambiarPasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8, max_length=200)
 
 
 # ── Invitación / registro ────────────────────────────────────────────────────

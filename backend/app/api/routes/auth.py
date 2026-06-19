@@ -11,6 +11,7 @@ from app.core.auth import create_token
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.schemas.auth import (
+    CambiarPasswordRequest,
     ForgotPasswordRequest,
     InvitacionCreate,
     InvitacionCreatedResponse,
@@ -89,6 +90,21 @@ def registrar(payload: RegistrarRequest, db: DbSession) -> TokenResponse:
 @router.get("/auth/me", response_model=UsuarioRead)
 def me(user: CurrentUser) -> UsuarioRead:
     return UsuarioRead.model_validate(user)
+
+
+@router.post("/auth/cambiar-password", response_model=TokenResponse)
+def cambiar_password(
+    payload: CambiarPasswordRequest, db: DbSession, user: CurrentUser
+) -> TokenResponse:
+    # Cambiar la clave sube token_version (corta otras sesiones); devolvemos un
+    # token nuevo para que la sesión actual siga viva.
+    actualizado = service.cambiar_password(
+        db, user, payload.current_password, payload.new_password
+    )
+    return TokenResponse(
+        token=create_token(actualizado),
+        user=UsuarioRead.model_validate(actualizado),
+    )
 
 
 # ── Solo admin ───────────────────────────────────────────────────────────────

@@ -1,11 +1,18 @@
 // Guard de rutas. Sin sesión → redirige a /login. Con `adminOnly`, además exige
 // rol admin (si no, redirige a / ). Mientras se hidrata la sesión (GET /auth/me)
 // muestra un placeholder para no parpadear hacia el login.
+//
+// `requirePasswordSet` (default true): si el usuario tiene una clave temporal
+// pendiente de cambio (`must_change_password`), lo manda a /cambiar-clave y no
+// lo deja entrar al panel. La propia pantalla /cambiar-clave usa false para no
+// rebotarse a sí misma.
 
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 
-export default function ProtectedRoute({ adminOnly = false }: { adminOnly?: boolean }) {
+export default function ProtectedRoute(
+  { adminOnly = false, requirePasswordSet = true }: { adminOnly?: boolean; requirePasswordSet?: boolean },
+) {
   const { user, loading } = useAuth()
 
   if (loading) {
@@ -19,6 +26,7 @@ export default function ProtectedRoute({ adminOnly = false }: { adminOnly?: bool
   }
 
   if (!user) return <Navigate to="/login" replace />
+  if (requirePasswordSet && user.must_change_password) return <Navigate to="/cambiar-clave" replace />
   if (adminOnly && !user.is_admin) return <Navigate to="/" replace />
 
   return <Outlet />

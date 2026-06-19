@@ -535,6 +535,11 @@ class Usuario(Base):
     activo:   Mapped[bool] = mapped_column(sa.Boolean(), nullable=False, server_default=sa.text("true"))
     # Se incrementa al resetear/recuperar la clave → invalida los tokens viejos.
     token_version: Mapped[int] = mapped_column(sa.Integer(), nullable=False, server_default=sa.text("0"))
+    # True cuando la clave la fijó otro (alta con temporal o reset del admin): al
+    # ingresar, el usuario queda obligado a definir su propia clave antes de operar.
+    must_change_password: Mapped[bool] = mapped_column(
+        sa.Boolean(), nullable=False, server_default=sa.text("false")
+    )
 
     # Código de recuperación vigente (hash + vencimiento corto).
     reset_code_hash:       Mapped[str | None]      = mapped_column(sa.String(255), nullable=True)

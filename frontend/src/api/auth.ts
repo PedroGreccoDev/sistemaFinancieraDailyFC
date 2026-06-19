@@ -6,6 +6,7 @@ export interface AuthUser {
   phone: string | null
   is_admin: boolean
   activo: boolean
+  must_change_password: boolean
   created_at: string
 }
 
@@ -21,6 +22,15 @@ export const loginReq = (username: string, password: string): Promise<TokenRespo
   })
 
 export const getMe = (): Promise<AuthUser> => apiFetch<AuthUser>('/auth/me')
+
+export const cambiarPasswordReq = (
+  current_password: string,
+  new_password: string,
+): Promise<TokenResponse> =>
+  apiFetch<TokenResponse>('/auth/cambiar-password', {
+    method: 'POST',
+    body: JSON.stringify({ current_password, new_password }),
+  })
 
 export const forgotPassword = (username: string): Promise<{ detail: string }> =>
   apiFetch<{ detail: string }>('/auth/forgot-password', {

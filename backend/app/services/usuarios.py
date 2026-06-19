@@ -137,7 +137,32 @@ def resetear_con_codigo(db: Session, username: str, code: str, new_password: str
     user.password_hash = auth.hash_password(new_password)
     user.reset_code_hash = None
     user.reset_code_expires_at = None
+    user.must_change_password = False  # la fijó el propio usuario
     user.token_version += 1  # invalida sesiones viejas
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def cambiar_password(
+    db: Session, user: Usuario, current_password: str, new_password: str
+) -> Usuario:
+    """Cambio de clave del propio usuario autenticado.
+
+    Verifica la clave actual, fija la nueva y limpia `must_change_password`.
+    Incrementa `token_version` (corta otras sesiones); el router debe emitir un
+    token nuevo para no dejar sin sesión a quien acaba de cambiarla.
+    """
+    if not auth.verify_password(current_password, user.password_hash):
+        raise UnauthorizedError("La contraseña actual es incorrecta.")
+    if auth.verify_password(new_password, user.password_hash):
+        raise ValidationError("La nueva contraseña debe ser distinta de la actual.")
+
+    user.password_hash = auth.hash_password(new_password)
+    user.must_change_password = False
+    user.reset_code_hash = None
+    user.reset_code_expires_at = None
+    user.token_version += 1
     db.commit()
     db.refresh(user)
     return user
@@ -241,6 +266,8 @@ def crear_usuario(db: Session, payload: UsuarioCreate) -> tuple[Usuario, str | N
         phone=_norm_phone(payload.phone),
         is_admin=payload.is_admin,
         activo=True,
+        # Clave temporal generada por el sistema → forzamos el cambio al ingresar.
+        must_change_password=temp_password is not None,
     )
     db.add(user)
     db.commit()
@@ -281,6 +308,7 @@ def actualizar_usuario(
         user.password_hash = auth.hash_password(temp_password)
         user.reset_code_hash = None
         user.reset_code_expires_at = None
+        user.must_change_password = True  # al ingresar deberá fijar su propia clave
         user.token_version += 1  # corta sesiones activas
 
     db.commit()

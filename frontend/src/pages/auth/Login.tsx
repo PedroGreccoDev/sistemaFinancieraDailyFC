@@ -23,8 +23,9 @@ export default function Login() {
     setError(false)
     setLoading(true)
     try {
-      await login(usuario.trim(), password)
-      navigate('/', { replace: true })
+      const u = await login(usuario.trim(), password)
+      // Clave temporal (reset del admin / alta) → obligar a definir una propia.
+      navigate(u.must_change_password ? '/cambiar-clave' : '/', { replace: true })
     } catch {
       // 401 (credenciales/usuario inactivo) u otro error → banner de error.
       setError(true)

@@ -15,6 +15,7 @@ import Usuarios from './pages/Usuarios'
 import Login from './pages/auth/Login'
 import Recuperar from './pages/auth/Recuperar'
 import Registro from './pages/auth/Registro'
+import CambiarClave from './pages/auth/CambiarClave'
 import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './auth/AuthContext'
 import { ToastProvider } from './lib/toast'
@@ -82,6 +83,12 @@ export default function App() {
           <Route path="/login"     element={<Login />} />
           <Route path="/recuperar" element={<Recuperar />} />
           <Route path="/registro"  element={<Registro />} />
+
+          {/* Cambio de clave obligatorio — requiere sesión, pero NO el gate de
+              clave fijada (si no, se rebotaría a sí misma). Full-screen, sin navbar. */}
+          <Route element={<ProtectedRoute requirePasswordSet={false} />}>
+            <Route path="/cambiar-clave" element={<CambiarClave />} />
+          </Route>
 
           {/* Panel — protegido: sin sesión redirige a /login */}
           <Route element={<ProtectedRoute />}>
