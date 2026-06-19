@@ -60,13 +60,25 @@ def bootstrap_admin(db: Session) -> None:
     existente = db.scalar(select(Usuario).where(Usuario.username == username))
 
     if existente is not None:
-        # Re-sincroniza la clave del admin raíz con la env var (recuperación).
-        existente.password_hash = auth.hash_password(settings.admin_password)
-        existente.is_admin = True
-        existente.activo = True
-        existente.token_version += 1
-        db.commit()
-        logger.info("Admin raíz '%s' actualizado desde env vars.", username)
+        # Re-sincroniza el admin raíz con las env vars, pero SOLO tocando lo que
+        # cambió. Antes incrementábamos token_version en cada arranque, lo que
+        # invalidaba la sesión del admin en cada reinicio/cold-start (Railway) y
+        # obligaba a re-loguear todo el tiempo. Ahora solo cortamos sesiones (y
+        # re-hasheamos) cuando ADMIN_PASSWORD realmente cambió.
+        cambios = False
+        if not auth.verify_password(settings.admin_password, existente.password_hash):
+            existente.password_hash = auth.hash_password(settings.admin_password)
+            existente.token_version += 1  # recuperación: corta sesiones viejas
+            cambios = True
+        if not existente.is_admin:
+            existente.is_admin = True
+            cambios = True
+        if not existente.activo:
+            existente.activo = True
+            cambios = True
+        if cambios:
+            db.commit()
+            logger.info("Admin raíz '%s' actualizado desde env vars.", username)
         return
 
     hay_admin = db.scalar(select(Usuario.id).where(Usuario.is_admin.is_(True)).limit(1))
