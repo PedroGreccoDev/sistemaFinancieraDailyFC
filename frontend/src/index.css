@@ -107,6 +107,23 @@ textarea {
   border-radius: var(--r-sm);
 }
 
+/* iOS Safari hace zoom automático (y lo deja pegado) al enfocar un campo cuyo
+   font-size es menor a 16px. En móvil forzamos >=16px en todos los campos para
+   evitarlo, sin tocar el viewport (así se conserva el pinch-zoom, p. ej. para
+   ver la foto de un cheque). Solo aplica a pantallas táctiles angostas. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+  /* Las casillas del código OTP conservan su tamaño grande (>16px tampoco
+     dispara el zoom de iOS); la clase gana en especificidad a la regla de arriba. */
+  .otp-cell {
+    font-size: 1.35rem !important;
+  }
+}
+
 /* Micro-interacción de "press" (estilo HeroUI): leve hundido al click */
 button {
   transition: transform 0.08s ease, opacity 0.15s ease;

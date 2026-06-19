@@ -219,7 +219,7 @@ export function OtpInput({ value, onChange, error, length = 6 }: { value: string
         <input
           key={i}
           ref={(el) => { refs.current[i] = el }}
-          className="fld-auth"
+          className="fld-auth otp-cell"
           value={c}
           inputMode="numeric"
           maxLength={1}
