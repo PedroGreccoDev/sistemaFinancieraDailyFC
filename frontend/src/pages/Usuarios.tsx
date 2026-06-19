@@ -135,7 +135,7 @@ function ModalEditarTel({ user, onClose, onSaved }: { user: AuthUser; onClose: (
                 inputMode="tel"
                 value={tel}
                 onChange={(e) => setTel(e.target.value)}
-                placeholder="9 11 5555 5555"
+                placeholder="3571123456"
                 style={{ ...fieldBase, flex: 1, minWidth: 0, padding: '0.5rem 0.75rem' }}
               />
             </div>
@@ -380,7 +380,7 @@ export default function Usuarios() {
               inputMode="tel"
               value={nuevoTel}
               onChange={(e) => setNuevoTel(e.target.value)}
-              placeholder="9 11 5555 5555"
+              placeholder="3571123456"
               style={{ flex: 1, minWidth: 0, background: 'var(--input-bg)', border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', padding: '0.7rem 0.8rem', fontFamily: FM, fontSize: '0.85rem', color: 'var(--text-strong)', outline: 'none' }}
             />
           </div>
@@ -444,7 +444,7 @@ export default function Usuarios() {
                 inputMode="tel"
                 value={telefono}
                 onChange={(e) => setTelefono(e.target.value)}
-                placeholder="9 11 5555 5555"
+                placeholder="3571123456"
                 style={{ flex: 1, minWidth: 0, background: 'var(--input-bg)', border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', padding: '0.7rem 0.8rem', fontFamily: FM, fontSize: '0.85rem', color: 'var(--text-strong)', outline: 'none' }}
               />
             </div>
