@@ -1,11 +1,12 @@
-// Recuperar contraseña (/recuperar). Solo UI: el envío y la validación del
-// código por WhatsApp están simulados (no hay OTP real todavía).
-// Flujo en 3 pasos: pedir usuario → ingresar código → nueva contraseña.
-// TODO: cablear backend (enviar OTP por WhatsApp, validar código, setear clave).
+// Recuperar contraseña (/recuperar). Flujo en 3 pasos: pedir usuario → ingresar
+// código (OTP enviado por WhatsApp) → nueva contraseña. El código se valida
+// recién en el backend al fijar la clave (endpoint reset-password toma código +
+// clave nueva juntos); si falla, se vuelve al paso del código.
 
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '../../lib/toast'
+import { forgotPassword, resetPassword } from '../../api/auth'
 import {
   AuthScreen, AuthFrame, AuthBottom, Field, OtpInput, PrimaryButton, ErrorBanner, BackLink,
   IconWhatsapp, FM,
@@ -25,6 +26,7 @@ export default function Recuperar() {
   const [pass1, setPass1] = useState('')
   const [pass2, setPass2] = useState('')
   const [secs, setSecs] = useState(RESEND_SECS)
+  const [loading, setLoading] = useState(false)
 
   // Cuenta regresiva del reenvío mientras estamos en el paso del código.
   useEffect(() => {
@@ -37,10 +39,18 @@ export default function Recuperar() {
   const mm = Math.floor(secs / 60)
   const ss = String(secs % 60).padStart(2, '0')
 
-  function enviarCodigo() {
-    if (!usuario.trim()) return
+  async function enviarCodigo() {
+    if (!usuario.trim() || loading) return
+    setLoading(true)
+    try {
+      // Respuesta genérica (no revela si el usuario existe). Igual avanzamos.
+      await forgotPassword(usuario.trim())
+    } catch {
+      // No bloqueamos el flujo: el backend responde 200 genérico de todos modos.
+    }
     setCodigo('')
     setCodeError(false)
+    setLoading(false)
     setPaso(2)
   }
 
@@ -53,10 +63,30 @@ export default function Recuperar() {
     setPaso(3)
   }
 
-  function actualizar() {
-    if (pass1.length < 8 || pass1 !== pass2) return
-    toast('success', 'Contraseña actualizada. Ya podés ingresar.')
-    navigate('/login')
+  async function reenviar() {
+    setSecs(RESEND_SECS)
+    try {
+      await forgotPassword(usuario.trim())
+      toast('info', 'Te reenviamos el código por WhatsApp.')
+    } catch {
+      toast('info', 'Te reenviamos el código por WhatsApp.')
+    }
+  }
+
+  async function actualizar() {
+    if (pass1.length < 8 || pass1 !== pass2 || loading) return
+    setLoading(true)
+    try {
+      await resetPassword(usuario.trim(), codigo, pass1)
+      toast('success', 'Contraseña actualizada. Ya podés ingresar.')
+      navigate('/login')
+    } catch {
+      // Código inválido/vencido → volver al paso del código con el error.
+      setLoading(false)
+      setCodeError(true)
+      setCodigo('')
+      setPaso(2)
+    }
   }
 
   return (
@@ -76,9 +106,9 @@ export default function Recuperar() {
               <p style={{ fontSize: '0.85rem', color: 'var(--text-2)', lineHeight: 1.5, margin: '0 0 1.8rem' }}>
                 Ingresá tu usuario y te enviamos un código por WhatsApp para crear una nueva contraseña.
               </p>
-              <Field label="Usuario" value={usuario} onChange={setUsuario} placeholder="tu.usuario" autoComplete="username" />
+              <Field label="Usuario" value={usuario} onChange={setUsuario} placeholder="tu.usuario" autoComplete="username" disabled={loading} />
               <AuthBottom>
-                <PrimaryButton onClick={enviarCodigo} disabled={!usuario.trim()}>Enviar código</PrimaryButton>
+                <PrimaryButton onClick={enviarCodigo} disabled={!usuario.trim()} loading={loading}>Enviar código</PrimaryButton>
               </AuthBottom>
             </>
           )}
@@ -96,8 +126,7 @@ export default function Recuperar() {
               </div>
               <p style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-strong)', margin: '0 0 0.6rem' }}>Revisá tu WhatsApp</p>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-2)', lineHeight: 1.5, margin: '0 0 1.3rem' }}>
-                Te enviamos un código al número terminado en{' '}
-                <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-strong)' }}>•••• 4821</span>. Ingresalo acá.
+                Si el usuario existe y tiene un teléfono cargado, te enviamos un código por WhatsApp. Ingresalo acá.
               </p>
 
               {codeError && (
@@ -118,7 +147,7 @@ export default function Recuperar() {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => { setSecs(RESEND_SECS); toast('info', 'Te reenviamos el código por WhatsApp.') }}
+                      onClick={reenviar}
                       style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', fontFamily: FM, fontSize: '0.76rem', fontWeight: 700, color: '#6366f1' }}
                     >
                       Reenviar código
@@ -144,7 +173,7 @@ export default function Recuperar() {
                   : undefined}
               />
               <AuthBottom>
-                <PrimaryButton onClick={actualizar} disabled={pass1.length < 8 || pass1 !== pass2}>Actualizar contraseña</PrimaryButton>
+                <PrimaryButton onClick={actualizar} disabled={pass1.length < 8 || pass1 !== pass2} loading={loading}>Actualizar contraseña</PrimaryButton>
               </AuthBottom>
             </>
           )}

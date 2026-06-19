@@ -125,6 +125,34 @@ El cliente puede cancelar esa deuda de dos formas:
 - `GET /api/v1/backup/exportar-excel`: export a XLSX (filtrable por día local ART).
 - `POST /api/v1/backup/importar`: import con **validación de schema** antes de aplicar.
 
+### 9. Autenticación / Usuarios _(módulo agregado 2026-06-19)_
+
+- Login **por usuario+contraseña** para el panel. La validación es **en el backend**: todos los
+  routers de negocio van con `dependencies=[Depends(get_current_user)]` en `app/main.py`. **Públicos:**
+  `/health`, `auth.router` y el `webhook` de WhatsApp.
+- **Sesión sin caducidad por tiempo:** el JWT (HS256, `app/core/auth.py`) **no lleva `exp`**; lleva
+  `sub` + `ver`. La revocación es por BD: `get_current_user` exige `usuario.activo` y que `ver` del
+  token coincida con `usuario.token_version`. Resetear/recuperar la clave **incrementa `token_version`**
+  → mata las sesiones viejas. El token se guarda en `localStorage` del front (`auth_token`).
+- **Alta por invitación (no registro abierto):** un **admin** invita (`POST /api/v1/invitaciones`
+  `{phone, is_admin}`); se genera un **enlace de un solo uso** (vence 24 h) que se envía por WhatsApp
+  con `send_text` y también se devuelve en la respuesta. La persona abre `/registro?token=...`,
+  `POST /api/v1/auth/registrar` crea la cuenta (auto-login) y marca la invitación usada.
+- **Recuperación de clave por WhatsApp:** `POST /api/v1/auth/forgot-password {username}` → código OTP
+  de 6 dígitos (hash bcrypt + vence ~10 min) enviado por WhatsApp; responde **siempre 200 genérico**
+  (no revela si el usuario existe). `POST /api/v1/auth/reset-password {username, code, new_password}`.
+  **Reseteo por admin** (respaldo, sin WhatsApp): `PATCH /api/v1/usuarios/{id} {reset_password:true}`
+  genera una **clave temporal** que se devuelve al admin para comunicarla.
+- **Admin raíz:** se bootstrapea en el `startup` de `main.py` desde `ADMIN_USERNAME`/`ADMIN_PASSWORD`
+  (idempotente; si se cambia la env var y se reinicia, re-sincroniza la clave → siempre recuperable).
+- **Solo admin** (`require_admin`, 403 si no): invitar/revocar, listar usuarios, `PATCH` (reset clave,
+  activar/desactivar, cambiar rol, editar teléfono). Salvaguarda: no se puede dejar el sistema sin
+  ningún admin activo. El `username` se guarda **siempre en minúsculas** (unicidad case-insensitive).
+- **Frontend:** `AuthContext` (`frontend/src/auth/AuthContext.tsx`) + `ProtectedRoute` (guard;
+  `/usuarios` es `adminOnly`). `apiFetch` (`api/client.ts`) inyecta el Bearer y, ante **401** en ruta
+  protegida, limpia el token y vuelve a `/login`. En `VITE_MOCK=1` el `AuthContext` cortocircuita con
+  un admin mock para que la demo siga navegable sin backend.
+
 ---
 
 ## Bot WhatsApp
@@ -189,3 +217,6 @@ Ver `backend/.env.example`. Las críticas para producción:
 - `OPENAI_API_KEY` (Whisper, para transcribir audios)
 - `WAHA_API_URL` / `WAHA_API_KEY` / `WAHA_SESSION` (gateway WhatsApp, engine NOWEB)
 - `WHATSAPP_OPERATOR_PHONE` (solo dígitos, sin `@s.whatsapp.net`)
+- `SECRET_KEY` (firma de los JWT de sesión — **obligatoria en prod**, larga y aleatoria)
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD` (admin raíz bootstrapeado al arranque)
+- `PUBLIC_BASE_URL` (opcional; base para los enlaces de invitación, sin barra final)

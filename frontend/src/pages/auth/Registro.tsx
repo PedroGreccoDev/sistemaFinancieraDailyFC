@@ -1,13 +1,12 @@
-// Registro por invitación (/registro?token=…). Solo UI: la validación del
-// token y la creación de la cuenta están simuladas.
+// Registro por invitación (/registro?token=…). Valida el token contra el backend
+// y crea la cuenta (auto-login al éxito).
 // Estados: validando el enlace → formulario de alta → enlace inválido/vencido.
-// Demo: token "invalid"/"vencido" o ausente cae en inválido; usuario "j.perez"
-// dispara el error de "usuario en uso".
-// TODO: cablear backend (validar token de invitación, crear usuario).
 
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useToast } from '../../lib/toast'
+import { registrarReq, validarInvitacion } from '../../api/auth'
+import { setToken } from '../../api/client'
 import {
   AuthScreen, AuthCard, AuthFrame, AuthBottom, BrandMark, Field, PrimaryButton, Spinner, TextLink, FM,
 } from './authUi'
@@ -24,24 +23,40 @@ export default function Registro() {
   const [usuario, setUsuario] = useState('')
   const [pass1, setPass1] = useState('')
   const [pass2, setPass2] = useState('')
+  const [usuarioEnUso, setUsuarioEnUso] = useState(false)
+  const [loading, setLoading] = useState(false)
 
-  // Simulación de validación del enlace de invitación.
+  // Validación real del enlace de invitación contra el backend.
   useEffect(() => {
-    if (!token || token === 'invalid' || token === 'vencido') {
-      setEstado('invalido')
-      return
-    }
-    const id = setTimeout(() => setEstado('form'), 900)
-    return () => clearTimeout(id)
+    if (!token) { setEstado('invalido'); return }
+    let vivo = true
+    validarInvitacion(token)
+      .then(() => { if (vivo) setEstado('form') })
+      .catch(() => { if (vivo) setEstado('invalido') })
+    return () => { vivo = false }
   }, [token])
 
-  const usuarioEnUso = usuario.trim().toLowerCase() === 'j.perez'
   const puedeCrear = usuario.trim().length > 0 && !usuarioEnUso && pass1.length >= 8 && pass1 === pass2
 
-  function crear() {
-    if (!puedeCrear) return
-    toast('success', 'Cuenta creada. Ya podés ingresar.')
-    navigate('/login')
+  async function crear() {
+    if (!puedeCrear || loading) return
+    setLoading(true)
+    try {
+      const { token: sessionToken } = await registrarReq(token, usuario.trim(), pass1)
+      setToken(sessionToken)
+      // Recargamos para que el AuthProvider hidrate la sesión y entre al panel.
+      window.location.assign('/')
+    } catch (e) {
+      setLoading(false)
+      const msg = e instanceof Error ? e.message : ''
+      if (/existe/i.test(msg)) {
+        setUsuarioEnUso(true)
+      } else if (/enlace|inv[aá]lid|venci|v[aá]lid/i.test(msg)) {
+        setEstado('invalido')
+      } else {
+        toast('error', msg || 'No se pudo crear la cuenta. Intentá de nuevo.')
+      }
+    }
   }
 
   return (
@@ -94,7 +109,7 @@ export default function Registro() {
 
             <div style={{ marginBottom: '0.9rem' }}>
               <Field
-                label="Elegí un usuario" value={usuario} onChange={setUsuario} placeholder="Nicolas Perez" autoComplete="username"
+                label="Elegí un usuario" value={usuario} onChange={(v) => { setUsuario(v); setUsuarioEnUso(false) }} placeholder="Nicolas Perez" autoComplete="username"
                 error={usuarioEnUso}
                 hint={usuarioEnUso
                   ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
@@ -115,7 +130,7 @@ export default function Registro() {
             />
 
             <AuthBottom>
-              <PrimaryButton type="submit" disabled={!puedeCrear}>Crear cuenta</PrimaryButton>
+              <PrimaryButton type="submit" disabled={!puedeCrear} loading={loading}>Crear cuenta</PrimaryButton>
             </AuthBottom>
           </AuthFrame>
         )}

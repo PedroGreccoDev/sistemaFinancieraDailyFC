@@ -15,6 +15,8 @@ import Usuarios from './pages/Usuarios'
 import Login from './pages/auth/Login'
 import Recuperar from './pages/auth/Recuperar'
 import Registro from './pages/auth/Registro'
+import ProtectedRoute from './components/ProtectedRoute'
+import { AuthProvider } from './auth/AuthContext'
 import { ToastProvider } from './lib/toast'
 
 const queryClient = new QueryClient({
@@ -28,8 +30,8 @@ const queryClient = new QueryClient({
 
 // Shell del panel: navbar + contenido. Las pantallas de autenticación
 // (login/recuperar/registro) quedan fuera de este layout (pantalla completa,
-// sin navbar). El gating real está desactivado por ahora: estas rutas son
-// alcanzables pero no bloquean el resto del panel.
+// sin navbar). El acceso al shell está protegido por <ProtectedRoute> (ver más
+// abajo): sin sesión válida se redirige a /login.
 function AppShell() {
   const mainRef = useRef<HTMLElement>(null)
 
@@ -70,27 +72,34 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
       <BrowserRouter>
+        <AuthProvider>
         <Routes>
-          {/* Autenticación — pantalla completa, sin navbar */}
+          {/* Autenticación — pantalla completa, sin navbar (públicas) */}
           <Route path="/login"     element={<Login />} />
           <Route path="/recuperar" element={<Recuperar />} />
           <Route path="/registro"  element={<Registro />} />
 
-          {/* Panel — dentro del shell con navbar */}
-          <Route element={<AppShell />}>
-            <Route path="/"          element={<Dashboard />} />
-            <Route path="/cartera"      element={<Cartera />} />
-            <Route path="/deudores" element={<Deudores />}>
-              <Route index element={<DeudoresPrestamos />} />
-              <Route path="cheques-fiados" element={<Fiados />} />
+          {/* Panel — protegido: sin sesión redirige a /login */}
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppShell />}>
+              <Route path="/"          element={<Dashboard />} />
+              <Route path="/cartera"      element={<Cartera />} />
+              <Route path="/deudores" element={<Deudores />}>
+                <Route index element={<DeudoresPrestamos />} />
+                <Route path="cheques-fiados" element={<Fiados />} />
+              </Route>
+              <Route path="/pasivos"      element={<Pasivos />} />
+              <Route path="/reportes"     element={<Reportes />} />
+              <Route path="/movimientos" element={<Movimientos />} />
+              <Route path="/configuracion" element={<Configuracion />} />
+              {/* Solo admin */}
+              <Route element={<ProtectedRoute adminOnly />}>
+                <Route path="/usuarios"     element={<Usuarios />} />
+              </Route>
             </Route>
-            <Route path="/pasivos"      element={<Pasivos />} />
-            <Route path="/reportes"     element={<Reportes />} />
-            <Route path="/movimientos" element={<Movimientos />} />
-            <Route path="/configuracion" element={<Configuracion />} />
-            <Route path="/usuarios"     element={<Usuarios />} />
           </Route>
         </Routes>
+        </AuthProvider>
       </BrowserRouter>
       </ToastProvider>
     </QueryClientProvider>

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import type { ComponentType } from 'react'
 import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange, IconSettings, IconUserCog, IconLogout } from './icons'
 import { DolarPill, DolarBlock } from './DolarInline'
 import { useDarkMode } from '../hooks/useDarkMode'
 import { useCurrentUser } from '../lib/auth'
+import { useAuth } from '../auth/AuthContext'
 
 function SunIcon() {
   return (
@@ -137,11 +138,10 @@ function NavItems({ onNavigate, isAdmin }: { onNavigate?: () => void; isAdmin: b
   )
 }
 
-// Pie con el usuario actual, su rol y el botón de cerrar sesión. El logout es
-// solo de UI por ahora: limpia la "sesión" simulada llevando al login.
-// TODO: cablear backend (invalidar sesión / token real).
+// Pie con el usuario actual, su rol y el botón de cerrar sesión. El logout borra
+// el token de la sesión (localStorage) y vuelve al login.
 function UserBlock() {
-  const navigate = useNavigate()
+  const { logout } = useAuth()
   const me = useCurrentUser()
   return (
     <div style={{ padding: "0.875rem 1.5rem", borderTop: BORDER, display: "flex", alignItems: "center", gap: "0.6rem" }}>
@@ -156,7 +156,7 @@ function UserBlock() {
         <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: "0.62rem", color: "var(--text-2)", margin: 0 }}>{me.rol === 'admin' ? 'Administrador' : 'Usuario'}</p>
       </div>
       <button
-        onClick={() => navigate('/login')}
+        onClick={logout}
         aria-label="Cerrar sesión"
         title="Cerrar sesión"
         style={{

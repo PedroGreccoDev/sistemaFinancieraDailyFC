@@ -1,12 +1,18 @@
-// Administración de usuarios (/usuarios, solo admin). Solo UI: todos los datos
-// son mock en estado local y las acciones (invitar, revocar, activar, etc.)
-// solo muestran feedback, no impactan en ningún backend.
-// TODO: cablear backend (CRUD de usuarios, invitaciones, reset de contraseña).
+// Administración de usuarios (/usuarios, solo admin). Conectado al backend:
+// invitar (enlace de un solo uso enviado por WhatsApp), revocar invitaciones,
+// listar usuarios, resetear clave (genera una temporal), activar/desactivar y
+// editar teléfono. Usa React Query + apiFetch + toast.
 
 import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useToast } from '../lib/toast'
-import { useCurrentUser } from '../lib/auth'
+import { useCurrentUser, iniciales } from '../lib/auth'
+import {
+  getInvitaciones, crearInvitacion, revocarInvitacion,
+  getUsuarios, actualizarUsuario,
+} from '../api/usuarios'
+import type { AuthUser } from '../api/auth'
 
 const FM = "'Manrope', sans-serif"
 const FN = "'Bebas Neue', sans-serif"
@@ -15,15 +21,10 @@ const ACCENT = '#6366f1'
 const CARD: CSSProperties = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)', borderRadius: 'var(--r-lg)' }
 const CAP: CSSProperties = { fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-2)' }
 
-type Rol = 'Usuario' | 'Admin'
-interface Invitacion { id: number; telefono: string; rol: Rol; dias: number }
-interface Usuario { id: number; username: string; initials: string; rol: Rol; activo: boolean; telefono: string; esVos?: boolean }
-
-// ── Datos mock iniciales ──────────────────────────────────────────────────────
-const PENDIENTES_INI: Invitacion[] = [
-  { id: 1, telefono: '+54 9 11 4821', rol: 'Usuario', dias: 6 },
-  { id: 2, telefono: '+54 9 351 7733', rol: 'Admin', dias: 2 },
-]
+const DAY = 86_400_000
+const diasRestantes = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / DAY))
+const absLink = (link: string) => (/^https?:\/\//.test(link) ? link : `${window.location.origin}${link}`)
+const msgError = (e: unknown) => (e instanceof Error ? e.message : 'Ocurrió un error')
 
 // ── Subcomponentes ────────────────────────────────────────────────────────────
 function Avatar({ initials, tone = 'muted', size = 34 }: { initials: string; tone?: 'accent' | 'muted'; size?: number }) {
@@ -88,28 +89,38 @@ function Solid({ children, onClick, color = ACCENT }: { children: ReactNode; onC
 export default function Usuarios() {
   const toast = useToast()
   const me = useCurrentUser()
+  const qc = useQueryClient()
 
   const [telefono, setTelefono] = useState('')
   const [esAdmin, setEsAdmin] = useState(false)
   const [link, setLink] = useState<string | null>(null)
-  const [pendientes, setPendientes] = useState<Invitacion[]>(PENDIENTES_INI)
-  const [usuarios, setUsuarios] = useState<Usuario[]>([
-    { id: 0, username: me.username, initials: me.initials, rol: 'Admin', activo: true, telefono: '', esVos: true },
-    { id: 1, username: 'j.perez', initials: 'JP', rol: 'Usuario', activo: true, telefono: '+54 9 11 4821' },
-    { id: 2, username: 'l.rodriguez', initials: 'LR', rol: 'Usuario', activo: false, telefono: '+54 9 351 7733' },
-  ])
+  const [enviando, setEnviando] = useState(false)
+  // Clave temporal revelada tras un reseteo por admin (para comunicarla al usuario).
+  const [tempPass, setTempPass] = useState<{ username: string; password: string } | null>(null)
 
-  function enviarInvitacion() {
-    if (!telefono.trim()) return
-    const token = Math.random().toString(36).slice(2, 6)
-    setLink(`dailyfc.app/registro?token=${token}…`)
-    setPendientes((p) => [
-      { id: Date.now(), telefono: `+54 ${telefono.trim()}`, rol: esAdmin ? 'Admin' : 'Usuario', dias: 7 },
-      ...p,
-    ])
-    setTelefono('')
-    setEsAdmin(false)
-    toast('success', 'Invitación enviada por WhatsApp')
+  const invitacionesQ = useQuery({ queryKey: ['invitaciones'], queryFn: getInvitaciones })
+  const usuariosQ = useQuery({ queryKey: ['usuarios'], queryFn: getUsuarios })
+  const pendientes = invitacionesQ.data ?? []
+  const usuarios = usuariosQ.data ?? []
+
+  async function enviarInvitacion() {
+    const digits = telefono.replace(/\D/g, '')
+    if (enviando) return
+    setEnviando(true)
+    try {
+      // El UI muestra el prefijo +54; mandamos el teléfono completo (o null si vacío).
+      const phone = digits ? `54${digits}` : null
+      const res = await crearInvitacion(phone, esAdmin)
+      setLink(absLink(res.link))
+      setTelefono('')
+      setEsAdmin(false)
+      qc.invalidateQueries({ queryKey: ['invitaciones'] })
+      toast('success', res.enviada_por_whatsapp ? 'Invitación enviada por WhatsApp' : 'Invitación creada — copiá el enlace')
+    } catch (e) {
+      toast('error', msgError(e))
+    } finally {
+      setEnviando(false)
+    }
   }
 
   async function copiar(texto: string) {
@@ -121,14 +132,48 @@ export default function Usuarios() {
     }
   }
 
-  function revocar(id: number) {
-    setPendientes((p) => p.filter((x) => x.id !== id))
-    toast('info', 'Invitación revocada')
+  async function revocar(id: string) {
+    try {
+      await revocarInvitacion(id)
+      qc.invalidateQueries({ queryKey: ['invitaciones'] })
+      toast('info', 'Invitación revocada')
+    } catch (e) {
+      toast('error', msgError(e))
+    }
   }
 
-  function toggleActivo(u: Usuario) {
-    setUsuarios((list) => list.map((x) => (x.id === u.id ? { ...x, activo: !x.activo } : x)))
-    toast('success', u.activo ? `Usuario ${u.username} desactivado` : `Usuario ${u.username} activado`)
+  async function toggleActivo(u: AuthUser) {
+    try {
+      await actualizarUsuario(u.id, { activo: !u.activo })
+      qc.invalidateQueries({ queryKey: ['usuarios'] })
+      toast('success', u.activo ? `Usuario ${u.username} desactivado` : `Usuario ${u.username} activado`)
+    } catch (e) {
+      toast('error', msgError(e))
+    }
+  }
+
+  async function resetClave(u: AuthUser) {
+    try {
+      const res = await actualizarUsuario(u.id, { reset_password: true })
+      if (res.temp_password) setTempPass({ username: u.username, password: res.temp_password })
+      qc.invalidateQueries({ queryKey: ['usuarios'] })
+      toast('success', `Se generó una clave temporal para ${u.username}`)
+    } catch (e) {
+      toast('error', msgError(e))
+    }
+  }
+
+  async function editarTel(u: AuthUser) {
+    const actual = u.phone ?? ''
+    const nuevo = window.prompt(`Teléfono de ${u.username} (solo dígitos, con código de país):`, actual)
+    if (nuevo === null) return
+    try {
+      await actualizarUsuario(u.id, { phone: nuevo.replace(/\D/g, '') || null })
+      qc.invalidateQueries({ queryKey: ['usuarios'] })
+      toast('success', 'Teléfono actualizado')
+    } catch (e) {
+      toast('error', msgError(e))
+    }
   }
 
   // ── Bloques reutilizables ───────────────────────────────────────────────────
@@ -178,8 +223,8 @@ export default function Usuarios() {
             <span style={{ fontSize: '0.82rem', fontWeight: 500, color: 'var(--text-1)' }}>¿Es administrador?</span>
             <Toggle on={esAdmin} onClick={() => setEsAdmin((v) => !v)} />
           </div>
-          <button type="button" onClick={enviarInvitacion} disabled={!telefono.trim()} style={{ width: '100%', background: ACCENT, color: '#fff', border: 'none', borderRadius: 'var(--r-md)', padding: '0.8rem', fontFamily: FM, fontSize: '0.85rem', fontWeight: 700, cursor: telefono.trim() ? 'pointer' : 'default', opacity: telefono.trim() ? 1 : 0.6 }}>
-            Enviar invitación
+          <button type="button" onClick={enviarInvitacion} disabled={enviando} style={{ width: '100%', background: ACCENT, color: '#fff', border: 'none', borderRadius: 'var(--r-md)', padding: '0.8rem', fontFamily: FM, fontSize: '0.85rem', fontWeight: 700, cursor: enviando ? 'default' : 'pointer', opacity: enviando ? 0.7 : 1 }}>
+            {enviando ? 'Enviando…' : 'Enviar invitación'}
           </button>
         </>
       )}
@@ -199,9 +244,9 @@ export default function Usuarios() {
           {pendientes.map((inv) => (
             <div key={inv.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', background: 'var(--input-bg)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.7rem 0.85rem' }}>
               <div style={{ minWidth: 0 }}>
-                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-strong)', margin: '0 0 2px' }}>{inv.telefono}</p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-strong)', margin: '0 0 2px' }}>{inv.phone ? `+${inv.phone}` : 'Sin teléfono'}</p>
                 <p style={{ fontSize: '0.66rem', color: 'var(--text-2)', margin: 0 }}>
-                  Vence en {inv.dias} días · {inv.rol === 'Admin' ? <span style={{ color: '#818cf8', fontWeight: 600 }}>Admin</span> : 'Usuario'}
+                  Vence en {diasRestantes(inv.expires_at)} días · {inv.is_admin ? <span style={{ color: '#818cf8', fontWeight: 600 }}>Admin</span> : 'Usuario'}
                 </p>
               </div>
               <Ghost danger onClick={() => revocar(inv.id)}>Revocar</Ghost>
@@ -216,44 +261,68 @@ export default function Usuarios() {
     <div style={{ ...CARD, padding: '1.1rem 1.2rem' }}>
       <p style={{ ...CAP, margin: '0 0 0.9rem' }}>Usuarios existentes</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
-        {usuarios.map((u) => (
+        {usuarios.map((u) => {
+          const esVos = u.username.toLowerCase() === me.username.toLowerCase()
+          return (
           <div key={u.id} style={{
             background: 'var(--input-bg)', borderRadius: 'var(--r-md)', padding: '0.85rem',
-            border: `1px solid ${u.esVos ? 'rgba(99,102,241,0.25)' : 'var(--bd-006)'}`,
+            border: `1px solid ${esVos ? 'rgba(99,102,241,0.25)' : 'var(--bd-006)'}`,
             opacity: u.activo ? 1 : 0.72,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.7rem' }}>
-              <Avatar initials={u.initials} tone={u.esVos ? 'accent' : 'muted'} />
+              <Avatar initials={iniciales(u.username)} tone={esVos ? 'accent' : 'muted'} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <p style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-strong)', margin: 0 }}>
                   {u.username}
-                  {u.esVos && <span style={{ fontSize: '0.62rem', fontWeight: 600, color: '#818cf8', background: 'rgba(99,102,241,0.16)', borderRadius: 999, padding: '1px 7px', marginLeft: 5 }}>Vos</span>}
+                  {esVos && <span style={{ fontSize: '0.62rem', fontWeight: 600, color: '#818cf8', background: 'rgba(99,102,241,0.16)', borderRadius: 999, padding: '1px 7px', marginLeft: 5 }}>Vos</span>}
                 </p>
                 <p style={{ fontSize: '0.68rem', color: 'var(--text-2)', margin: 0 }}>
-                  {u.rol} · {u.activo ? 'Activo' : 'Inactivo'}{u.telefono ? ` · ${u.telefono}` : ''}
+                  {u.is_admin ? 'Admin' : 'Usuario'} · {u.activo ? 'Activo' : 'Inactivo'}{u.phone ? ` · +${u.phone}` : ''}
                 </p>
               </div>
-              {!u.esVos && (
+              {!esVos && (
                 <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: u.activo ? 'var(--success)' : 'var(--bd-012)' }} />
               )}
             </div>
 
-            {u.esVos ? (
+            {esVos ? (
               <p style={{ fontSize: '0.68rem', color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: '0.35rem', margin: 0 }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
                 No podés desactivarte ni quitarte el rol a vos mismo.
               </p>
             ) : (
               <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                <Ghost onClick={() => toast('info', `Se reenvió un código de reseteo a ${u.username}`)}>Resetear clave</Ghost>
+                <Ghost onClick={() => resetClave(u)}>Resetear clave</Ghost>
                 {u.activo
                   ? <Ghost danger onClick={() => toggleActivo(u)}>Desactivar</Ghost>
                   : <Solid color="var(--success)" onClick={() => toggleActivo(u)}>Activar</Solid>}
-                <Ghost onClick={() => toast('info', 'Edición de teléfono — pendiente de backend')} style={{ color: 'var(--text-2)' }}>Editar tel.</Ghost>
+                <Ghost onClick={() => editarTel(u)} style={{ color: 'var(--text-2)' }}>Editar tel.</Ghost>
               </div>
             )}
           </div>
-        ))}
+          )
+        })}
+      </div>
+    </div>
+  )
+
+  // ── Banner de clave temporal (tras reset por admin) ─────────────────────────
+  const cardTempPass = tempPass && (
+    <div className="md:col-span-2" style={{
+      background: 'color-mix(in srgb, var(--success) 8%, transparent)',
+      border: '1px solid color-mix(in srgb, var(--success) 28%, transparent)',
+      borderRadius: 'var(--r-lg)', padding: '1rem 1.2rem',
+    }}>
+      <p style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--success)', margin: '0 0 0.6rem' }}>
+        Clave temporal de {tempPass.username}
+      </p>
+      <p style={{ fontSize: '0.72rem', color: 'var(--text-2)', margin: '0 0 0.7rem' }}>
+        Pasásela por un canal seguro. El usuario debería cambiarla al ingresar. Esta clave no se vuelve a mostrar.
+      </p>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <span style={{ flex: 1, minWidth: 0, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.9rem', color: 'var(--text-strong)', background: 'var(--input-bg)', border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', padding: '0.6rem 0.75rem', letterSpacing: '0.04em' }}>{tempPass.password}</span>
+        <button type="button" onClick={() => copiar(tempPass.password)} style={{ flexShrink: 0, background: ACCENT, color: '#fff', border: 'none', borderRadius: 'var(--r-sm)', padding: '0.6rem 0.8rem', fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>Copiar</button>
+        <button type="button" onClick={() => setTempPass(null)} style={{ flexShrink: 0, background: 'transparent', color: 'var(--text-2)', border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', padding: '0.6rem 0.8rem', fontFamily: FM, fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer' }}>Ocultar</button>
       </div>
     </div>
   )
@@ -264,6 +333,7 @@ export default function Usuarios() {
 
       {/* Móvil: apilado · Escritorio: grid 2 columnas (usuarios ocupa toda la fila) */}
       <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: '1.1rem', alignItems: 'start', maxWidth: 920 }}>
+        {cardTempPass}
         {cardInvitar}
         {cardPendientes}
         <div className="md:col-span-2">{cardUsuarios}</div>

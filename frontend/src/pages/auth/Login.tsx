@@ -1,28 +1,35 @@
-// Pantalla de login (/login). Solo UI: la "autenticación" está simulada.
-// Mobile-first; en escritorio (md+) muestra el layout partido del diseño
-// (panel índigo de marca a la izquierda + formulario a la derecha).
-// TODO: cablear backend de auth (POST credenciales, manejar 401, guardar sesión).
+// Pantalla de login (/login). Mobile-first; en escritorio (md+) muestra el
+// layout partido del diseño (panel índigo de marca a la izquierda + formulario
+// a la derecha). Autentica contra el backend vía AuthContext.
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../../auth/AuthContext'
 import { AuthScreen, AuthFrame, AuthBottom, BrandMark, Field, PrimaryButton, ErrorBanner, TextLink, FM, FB } from './authUi'
 
 export default function Login() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [usuario, setUsuario] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
 
-  function submit() {
+  async function submit() {
     if (!usuario.trim() || !password) {
       setError(true)
       return
     }
     setError(false)
     setLoading(true)
-    // Simulación de login: sin backend, entra al panel tras un instante.
-    setTimeout(() => navigate('/'), 900)
+    try {
+      await login(usuario.trim(), password)
+      navigate('/', { replace: true })
+    } catch {
+      // 401 (credenciales/usuario inactivo) u otro error → banner de error.
+      setError(true)
+      setLoading(false)
+    }
   }
 
   // Región de campos, compartida entre móvil y escritorio (mismos inputs).

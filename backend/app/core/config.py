@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     # Número del operador autorizado (sin @s.whatsapp.net, solo dígitos)
     whatsapp_operator_phone: str = Field(default="")
 
+    # Autenticación (login del panel)
+    # Clave para firmar los JWT de sesión (HS256). Obligatoria en producción;
+    # el default solo sirve para desarrollo local.
+    secret_key: str = Field(default="dev-insecure-secret-change-me")
+    # Admin raíz bootstrapeado al arranque (recuperable cambiando la env var).
+    admin_username: str = Field(default="admin")
+    admin_password: str = Field(default="")
+
+    # URL pública base del sistema, usada para armar el enlace de invitación
+    # (p. ej. https://midominio.app). Si queda vacío, el front arma el enlace
+    # con su propio origen. Sin barra final.
+    public_base_url: str = Field(default="")
+
 
 @lru_cache
 def get_settings() -> Settings:

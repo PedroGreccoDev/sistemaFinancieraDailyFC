@@ -511,3 +511,60 @@ class GastoOperativo(Base):
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
     )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: Usuario  (cuentas de acceso al panel)
+# ══════════════════════════════════════════════════════════════════════
+
+class Usuario(Base):
+    __tablename__ = "usuarios"
+    __table_args__ = (
+        sa.UniqueConstraint("username", name="uq_usuarios_username"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Se guarda SIEMPRE en minúsculas (la unicidad es case-insensitive de facto).
+    username:      Mapped[str]        = mapped_column(sa.String(80), nullable=False)
+    password_hash: Mapped[str]        = mapped_column(sa.String(255), nullable=False)
+    # Teléfono (solo dígitos, sin @c.us): destino del código de recuperación por WhatsApp.
+    phone:         Mapped[str | None] = mapped_column(sa.String(40), nullable=True)
+
+    is_admin: Mapped[bool] = mapped_column(sa.Boolean(), nullable=False, server_default=sa.text("false"))
+    activo:   Mapped[bool] = mapped_column(sa.Boolean(), nullable=False, server_default=sa.text("true"))
+    # Se incrementa al resetear/recuperar la clave → invalida los tokens viejos.
+    token_version: Mapped[int] = mapped_column(sa.Integer(), nullable=False, server_default=sa.text("0"))
+
+    # Código de recuperación vigente (hash + vencimiento corto).
+    reset_code_hash:       Mapped[str | None]      = mapped_column(sa.String(255), nullable=True)
+    reset_code_expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: Invitacion  (alta de usuarios por enlace de un solo uso)
+# ══════════════════════════════════════════════════════════════════════
+
+class Invitacion(Base):
+    __tablename__ = "invitaciones"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Teléfono al que se envió la invitación por WhatsApp (queda como phone del usuario resultante).
+    phone:    Mapped[str | None] = mapped_column(sa.String(40), nullable=True)
+    is_admin: Mapped[bool]       = mapped_column(sa.Boolean(), nullable=False, server_default=sa.text("false"))
+
+    # Hash del token que viaja en el enlace (el token en claro no se persiste).
+    token_hash: Mapped[str]            = mapped_column(sa.String(255), nullable=False)
+    expires_at: Mapped[datetime]       = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    used_at:    Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
