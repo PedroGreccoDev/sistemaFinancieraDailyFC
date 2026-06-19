@@ -100,12 +100,11 @@ async def crear_invitacion(
 
     enviada = False
     if inv.phone:
-        await wa_client.send_text(
+        enviada = await wa_client.send_text(
             inv.phone,
             f"*Daily FC* — Te invitaron al sistema.\n\n"
             f"Creá tu cuenta acá (el enlace vence en 24 h):\n{link}",
         )
-        enviada = True
 
     return InvitacionCreatedResponse(
         invitacion=InvitacionRead.model_validate(inv),
