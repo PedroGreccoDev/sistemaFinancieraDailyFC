@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.schemas.auth import (
     CambiarPasswordRequest,
+    DefinirPasswordRequest,
     ForgotPasswordRequest,
     InvitacionCreate,
     InvitacionCreatedResponse,
@@ -101,6 +102,20 @@ def cambiar_password(
     actualizado = service.cambiar_password(
         db, user, payload.current_password, payload.new_password
     )
+    return TokenResponse(
+        token=create_token(actualizado),
+        user=UsuarioRead.model_validate(actualizado),
+    )
+
+
+@router.post("/auth/definir-password", response_model=TokenResponse)
+def definir_password(
+    payload: DefinirPasswordRequest, db: DbSession, user: CurrentUser
+) -> TokenResponse:
+    # El usuario ingresó con una clave temporal (must_change_password); define la
+    # suya sin reingresar la temporal. Sube token_version (corta otras sesiones) y
+    # devuelve un token nuevo para que la sesión actual siga viva.
+    actualizado = service.definir_password(db, user, payload.new_password)
     return TokenResponse(
         token=create_token(actualizado),
         user=UsuarioRead.model_validate(actualizado),

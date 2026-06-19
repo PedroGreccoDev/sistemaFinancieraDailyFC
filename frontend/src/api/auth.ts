@@ -32,6 +32,16 @@ export const cambiarPasswordReq = (
     body: JSON.stringify({ current_password, new_password }),
   })
 
+// Cambio obligatorio tras ingresar con una clave temporal: no reenvía la temporal,
+// solo la nueva (el login con la temporal ya probó que la conoce).
+export const definirPasswordReq = (
+  new_password: string,
+): Promise<TokenResponse> =>
+  apiFetch<TokenResponse>('/auth/definir-password', {
+    method: 'POST',
+    body: JSON.stringify({ new_password }),
+  })
+
 export const forgotPassword = (username: string): Promise<{ detail: string }> =>
   apiFetch<{ detail: string }>('/auth/forgot-password', {
     method: 'POST',

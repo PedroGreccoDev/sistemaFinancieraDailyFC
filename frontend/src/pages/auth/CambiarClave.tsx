@@ -1,9 +1,9 @@
 // Cambio obligatorio de contraseña (/cambiar-clave). El usuario llega acá tras
 // ingresar con una clave temporal (reset del admin o alta con clave generada):
 // ProtectedRoute lo retiene en esta pantalla hasta que defina su propia clave.
-// Pide la clave actual (la temporal), la nueva y su repetición; al confirmar, el
-// backend invalida las demás sesiones y devuelve un token nuevo (lo guarda el
-// AuthContext) y entramos al panel.
+// No pide la temporal de nuevo (el login ya probó que la conoce): solo la nueva y
+// su repetición. Al confirmar, el backend invalida las demás sesiones y devuelve
+// un token nuevo (lo guarda el AuthContext) y entramos al panel.
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -16,22 +16,21 @@ import {
 export default function CambiarClave() {
   const navigate = useNavigate()
   const toast = useToast()
-  const { cambiarPassword, logout } = useAuth()
-  const [actual, setActual] = useState('')
+  const { definirPassword, logout } = useAuth()
   const [pass1, setPass1] = useState('')
   const [pass2, setPass2] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
   const noCoincide = pass2.length > 0 && pass1 !== pass2
-  const puedeEnviar = actual.length > 0 && pass1.length >= 8 && pass1 === pass2
+  const puedeEnviar = pass1.length >= 8 && pass1 === pass2
 
   async function submit() {
     if (!puedeEnviar || loading) return
     setError('')
     setLoading(true)
     try {
-      await cambiarPassword(actual, pass1)
+      await definirPassword(pass1)
       toast('success', 'Contraseña actualizada. ¡Listo!')
       navigate('/', { replace: true })
     } catch (e) {
@@ -61,10 +60,6 @@ export default function CambiarClave() {
           </div>
         )}
 
-        <div style={{ marginBottom: '1rem' }}>
-          <Field label="Contraseña temporal" type="password" value={actual} onChange={setActual}
-            placeholder="La que te pasaron" autoComplete="current-password" disabled={loading} />
-        </div>
         <div style={{ marginBottom: '1rem' }}>
           <Field label="Nueva contraseña" type="password" value={pass1} onChange={setPass1}
             placeholder="Mínimo 8 caracteres" autoComplete="new-password" disabled={loading} />

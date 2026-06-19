@@ -168,6 +168,30 @@ def cambiar_password(
     return user
 
 
+def definir_password(db: Session, user: Usuario, new_password: str) -> Usuario:
+    """Fija la clave del usuario que ingresó con una temporal (cambio obligatorio).
+
+    No pide la clave actual: el login con la temporal ya probó que la conoce. Solo
+    es válido mientras `must_change_password` esté activo; un cambio voluntario debe
+    pasar por `cambiar_password`, que sí exige la clave actual (protege la sesión
+    abierta de un tercero). Incrementa `token_version` (corta otras sesiones); el
+    router emite un token nuevo para no dejar sin sesión a quien acaba de definirla.
+    """
+    if not user.must_change_password:
+        raise ValidationError("No tenés un cambio de clave pendiente.")
+    if auth.verify_password(new_password, user.password_hash):
+        raise ValidationError("La nueva contraseña debe ser distinta de la temporal.")
+
+    user.password_hash = auth.hash_password(new_password)
+    user.must_change_password = False
+    user.reset_code_hash = None
+    user.reset_code_expires_at = None
+    user.token_version += 1
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 # ── Invitaciones ─────────────────────────────────────────────────────────────
 
 def crear_invitacion(db: Session, payload: InvitacionCreate) -> tuple[Invitacion, str]:

@@ -56,6 +56,14 @@ class CambiarPasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=200)
 
 
+class DefinirPasswordRequest(BaseModel):
+    """Define la clave del usuario que ingresó con una temporal.
+
+    No pide la clave actual: el login con la temporal ya probó que la conoce.
+    """
+    new_password: str = Field(min_length=8, max_length=200)
+
+
 # ── Invitación / registro ────────────────────────────────────────────────────
 
 class InvitacionValidaResponse(BaseModel):
