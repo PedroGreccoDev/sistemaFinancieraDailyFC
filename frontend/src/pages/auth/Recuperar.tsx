@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '../../lib/toast'
+import { useAuth } from '../../auth/AuthContext'
 import { forgotPassword, resetPassword } from '../../api/auth'
 import {
   AuthScreen, AuthFrame, AuthBottom, Field, OtpInput, PrimaryButton, ErrorBanner, BackLink,
@@ -19,6 +20,7 @@ const RESEND_SECS = 30
 export default function Recuperar() {
   const navigate = useNavigate()
   const toast = useToast()
+  const { login } = useAuth()
   const [paso, setPaso] = useState<Paso>(1)
   const [usuario, setUsuario] = useState('')
   const [codigo, setCodigo] = useState('')
@@ -78,14 +80,24 @@ export default function Recuperar() {
     setLoading(true)
     try {
       await resetPassword(usuario.trim(), codigo, pass1)
-      toast('success', 'Contraseña actualizada. Ya podés ingresar.')
-      navigate('/login')
     } catch {
       // Código inválido/vencido → volver al paso del código con el error.
       setLoading(false)
       setCodeError(true)
       setCodigo('')
       setPaso(2)
+      return
+    }
+    // Clave actualizada: iniciamos sesión directo con la nueva contraseña y
+    // entramos al panel (sin pasar por el login manual).
+    try {
+      await login(usuario.trim(), pass1)
+      toast('success', 'Contraseña actualizada. ¡Bienvenido de nuevo!')
+      navigate('/', { replace: true })
+    } catch {
+      // Si el auto-login fallara, caemos al login manual con la clave nueva.
+      toast('success', 'Contraseña actualizada. Ya podés ingresar.')
+      navigate('/login')
     }
   }
 

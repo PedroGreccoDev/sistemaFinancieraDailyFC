@@ -92,7 +92,7 @@ function AlertCard({ dot, label, count, children }: AlertCardProps) {
           height: "6px",
           borderRadius: "50%",
           background: dot,
-          boxShadow: `0 0 6px ${dot}`,
+          boxShadow: `0 0 3px ${dot}80`,
           flexShrink: 0,
         }} />
         <span style={{

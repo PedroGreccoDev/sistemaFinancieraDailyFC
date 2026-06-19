@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { Link } from 'react-router-dom'
 import { exportarJSON, exportarExcel, importarJSON } from '../api/backup'
 import { useToast } from '../lib/toast'
 import { btnFlat, btnSolid, btnBordered, FM } from '../lib/ui'
-import { IconDownload, IconUpload, IconFileJson, IconTable, IconAlert, IconClose } from '../components/icons'
+import { IconDownload, IconUpload, IconFileJson, IconTable, IconAlert, IconClose, IconUserCog } from '../components/icons'
 
 const TABLA_LABELS: Record<string, string> = {
   clientes:             'Clientes',
@@ -257,6 +258,22 @@ export default function Configuracion() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+        {/* ── Usuarios ─────────────────────────────────────────────────── */}
+        <SectionCard>
+          <SectionTitle
+            icon={<IconUserCog size={20} />}
+            title="Usuarios"
+            subtitle="Invitá personas, editá roles y gestioná el acceso al panel."
+          />
+          <Link
+            to="/usuarios"
+            style={{ ...btnSolid('primary'), display: 'inline-flex', alignItems: 'center', gap: '0.4rem', textDecoration: 'none' }}
+          >
+            <IconUserCog size={14} />
+            Gestionar usuarios
+          </Link>
+        </SectionCard>
 
         {/* ── Backup JSON ──────────────────────────────────────────────── */}
         <SectionCard>

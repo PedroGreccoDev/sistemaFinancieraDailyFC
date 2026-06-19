@@ -118,7 +118,7 @@ export function FinanceDashboardCard({
       {/* Radial glow */}
       <div
         className="absolute -top-8 -left-8 w-40 h-40 pointer-events-none"
-        style={{ background: `radial-gradient(circle, ${accentColor}18 0%, transparent 70%)` }}
+        style={{ background: `radial-gradient(circle, ${accentColor}0c 0%, transparent 70%)` }}
       />
 
       <div className="fc-card-body relative" style={{ padding: "0.9rem 1rem" }}>
@@ -132,7 +132,7 @@ export function FinanceDashboardCard({
               letterSpacing: "0.13em",
               textTransform: "uppercase",
               color: accentColor,
-              opacity: 0.95,
+              opacity: 0.8,
               lineHeight: 1.25,
               maxWidth: "calc(100% - 1.25rem)",
             }}>
@@ -151,8 +151,7 @@ export function FinanceDashboardCard({
             )}
           </div>
           <div className="relative" style={{ marginTop: "3px" }}>
-            <div className="w-2 h-2 rounded-full" style={{ background: accentColor }} />
-            <div className="absolute inset-0 rounded-full animate-ping" style={{ background: accentColor, opacity: 0.4 }} />
+            <div className="w-2 h-2 rounded-full" style={{ background: accentColor, opacity: 0.8 }} />
           </div>
         </div>
 
@@ -175,7 +174,7 @@ export function FinanceDashboardCard({
             lineHeight: 1,
             color: "var(--text-strong)",
             letterSpacing: "0.02em",
-            textShadow: `0 0 40px ${accentColor}25`,
+            textShadow: `0 0 40px ${accentColor}10`,
           }}>
             {display}
           </span>
@@ -197,7 +196,7 @@ export function FinanceDashboardCard({
         <div className="fc-card-divider" style={{
           height: "1px",
           marginBottom: "0.4rem",
-          background: `linear-gradient(to right, ${accentColor}35, var(--ov-004) 60%, transparent)`,
+          background: `linear-gradient(to right, ${accentColor}20, var(--ov-004) 60%, transparent)`,
         }} />
 
         {/* Trend */}
@@ -233,7 +232,7 @@ export function FinanceDashboardCard({
 
       <div className="absolute bottom-0 left-0 right-0" style={{
         height: "1px",
-        background: `linear-gradient(to right, ${accentColor}35, transparent)`,
+        background: `linear-gradient(to right, ${accentColor}20, transparent)`,
       }} />
     </div>
   );

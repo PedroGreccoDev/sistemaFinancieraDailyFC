@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import type { ComponentType } from 'react'
-import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange, IconSettings, IconUserCog, IconLogout } from './icons'
+import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange, IconSettings, IconLogout } from './icons'
 import { DolarPill, DolarBlock } from './DolarInline'
 import { useDarkMode } from '../hooks/useDarkMode'
 import { useCurrentUser } from '../lib/auth'
@@ -36,8 +36,6 @@ const NAV_LINKS: NavItem[] = [
   { to: '/pasivos',        label: 'Deudas',         end: false, Icon: IconReceipt },
   { to: '/reportes',       label: 'Reportes',       end: false, Icon: IconChart },
   { to: '/movimientos',    label: 'Movimientos',    end: false, Icon: IconExchange },
-  { to: '/configuracion',  label: 'Configuración',  end: false, Icon: IconSettings, adminOnly: true },
-  { to: '/usuarios',       label: 'Usuarios',       end: false, Icon: IconUserCog, adminOnly: true, badge: 'ADMIN' },
 ]
 
 const ACCENT = "#6366f1"
@@ -140,11 +138,16 @@ function NavItems({ onNavigate, isAdmin }: { onNavigate?: () => void; isAdmin: b
 
 // Pie con el usuario actual, su rol y el botón de cerrar sesión. El logout borra
 // el token de la sesión (localStorage) y vuelve al login.
-function UserBlock() {
+function UserBlock({ position = 'bottom' }: { position?: 'top' | 'bottom' }) {
   const { logout } = useAuth()
   const me = useCurrentUser()
+  // Arriba (debajo del logo): separador inferior y padding reducido para que quede
+  // pegado al logo y a las secciones. Abajo (pie): separador superior clásico.
+  const sep = position === 'top'
+    ? { borderBottom: BORDER, padding: "0.625rem 1.5rem" }
+    : { borderTop: BORDER, padding: "0.875rem 1.5rem" }
   return (
-    <div style={{ padding: "0.875rem 1.5rem", borderTop: BORDER, display: "flex", alignItems: "center", gap: "0.6rem" }}>
+    <div style={{ ...sep, display: "flex", alignItems: "center", gap: "0.6rem" }}>
       <span style={{
         width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -170,6 +173,33 @@ function UserBlock() {
         <IconLogout size={14} />
       </button>
     </div>
+  )
+}
+
+// Ruedita de Configuración (solo admin) que vive en la fila inferior, donde antes
+// estaba el texto "Modo claro/oscuro". El toggle de tema queda a su derecha.
+function ConfigGear({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <NavLink
+      to="/configuracion"
+      onClick={onNavigate}
+      aria-label="Configuración"
+      title="Configuración"
+      style={({ isActive }) => ({
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '32px',
+        height: '32px',
+        background: isActive ? 'rgba(99,102,241,0.12)' : 'var(--ov-004)',
+        border: isActive ? `1px solid ${ACCENT}` : '1px solid var(--bd-006)',
+        borderRadius: '8px',
+        color: isActive ? '#818cf8' : 'var(--text-2)',
+        cursor: 'pointer',
+      })}
+    >
+      <IconSettings size={16} />
+    </NavLink>
   )
 }
 
@@ -336,22 +366,16 @@ export default function Navbar() {
             <CloseIcon />
           </button>
         </div>
+        <UserBlock position="top" />
         <NavItems onNavigate={() => setOpen(false)} isAdmin={isAdmin} />
         <div style={{
           padding: '0.875rem 1.5rem',
           borderTop: BORDER,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          gap: '0.6rem',
         }}>
-          <span style={{
-            fontFamily: "'Manrope', sans-serif",
-            fontSize: '0.78rem',
-            fontWeight: 500,
-            color: 'var(--nav-inactive)',
-          }}>
-            {dark ? 'Modo oscuro' : 'Modo claro'}
-          </span>
+          {isAdmin && <ConfigGear onNavigate={() => setOpen(false)} />}
           <button
             onClick={toggleDark}
             aria-label={dark ? 'Activar modo claro' : 'Activar modo oscuro'}
@@ -361,6 +385,7 @@ export default function Navbar() {
               justifyContent: 'center',
               width: '32px',
               height: '32px',
+              marginLeft: 'auto',
               background: 'var(--ov-004)',
               border: '1px solid var(--bd-006)',
               borderRadius: '8px',
@@ -371,7 +396,6 @@ export default function Navbar() {
             {dark ? <SunIcon /> : <MoonIcon />}
           </button>
         </div>
-        <UserBlock />
       </nav>
 
       {/* ── Desktop: left sidebar ────────────────────────────────────────── */}
@@ -386,6 +410,7 @@ export default function Navbar() {
         alignSelf: "flex-start",
       }}>
         <Brand />
+        <UserBlock position="top" />
         <NavItems isAdmin={isAdmin} />
         <DolarBlock />
         <div style={{
@@ -394,16 +419,9 @@ export default function Navbar() {
           borderTop: BORDER,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
+          gap: '0.6rem',
         }}>
-          <span style={{
-            fontFamily: "'Manrope', sans-serif",
-            fontSize: '0.78rem',
-            fontWeight: 500,
-            color: 'var(--nav-inactive)',
-          }}>
-            {dark ? 'Modo oscuro' : 'Modo claro'}
-          </span>
+          {isAdmin && <ConfigGear />}
           <button
             onClick={toggleDark}
             aria-label={dark ? 'Activar modo claro' : 'Activar modo oscuro'}
@@ -413,6 +431,7 @@ export default function Navbar() {
               justifyContent: 'center',
               width: '32px',
               height: '32px',
+              marginLeft: 'auto',
               background: 'var(--ov-004)',
               border: '1px solid var(--bd-006)',
               borderRadius: '8px',
@@ -423,7 +442,6 @@ export default function Navbar() {
             {dark ? <SunIcon /> : <MoonIcon />}
           </button>
         </div>
-        <UserBlock />
       </nav>
     </>
   )

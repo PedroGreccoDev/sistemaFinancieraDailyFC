@@ -44,7 +44,7 @@ export default function Login() {
       </div>
 
       <div style={{ marginBottom: '1rem' }}>
-        <Field label="Usuario" value={usuario} onChange={setUsuario} placeholder="tu.usuario" autoComplete="username" error={error} disabled={loading} />
+        <Field label="Usuario" value={usuario} onChange={setUsuario} placeholder="Usuario" autoComplete="username" error={error} disabled={loading} />
       </div>
       <div style={{ marginBottom: '0.7rem' }}>
         <Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="••••••••" autoComplete="current-password" error={error} disabled={loading} />
@@ -64,44 +64,45 @@ export default function Login() {
   )
 
   return (
-    <AuthScreen maxWidth={880}>
+    <>
       {/* ── Móvil: misma tarjeta/estructura que recuperar y registro ──────── */}
-      <div className="md:hidden" style={{ maxWidth: 380, margin: '0 auto' }}>
-        <AuthFrame as="form" onSubmit={(e) => { e.preventDefault(); submit() }}>
-          <div style={{ marginBottom: '2.2rem' }}>
-            <BrandMark />
-          </div>
-          {campos}
-          <AuthBottom>
-            {botonIngresar}
-            {ayuda}
-          </AuthBottom>
-        </AuthFrame>
+      <div className="md:hidden">
+        <AuthScreen maxWidth={380}>
+          <AuthFrame as="form" onSubmit={(e) => { e.preventDefault(); submit() }}>
+            <div style={{ marginBottom: '2.2rem' }}>
+              <BrandMark />
+            </div>
+            {campos}
+            <AuthBottom>
+              {botonIngresar}
+              {ayuda}
+            </AuthBottom>
+          </AuthFrame>
+        </AuthScreen>
       </div>
 
-      {/* ── Escritorio: layout partido (botón en flujo natural) ──────────── */}
+      {/* ── Escritorio: layout partido a pantalla completa ───────────────── */}
       <form
         onSubmit={(e) => { e.preventDefault(); submit() }}
         className="hidden md:flex"
-        style={{
-          minHeight: 520, background: 'var(--surface-grad)', border: '1px solid var(--bd-008)',
-          borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-card)', overflow: 'hidden',
-        }}
+        style={{ minHeight: '100dvh', width: '100%', background: 'var(--bg)', fontFamily: FM }}
       >
-        <div style={{ width: '46%', background: 'linear-gradient(150deg,#3730a3,#6366f1)', padding: '3rem 2.6rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+        <div style={{ width: '42%', background: 'linear-gradient(150deg,#3730a3,#6366f1)', padding: '4rem 3.4rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
-            <p style={{ fontFamily: FB, fontSize: '3.4rem', letterSpacing: '0.1em', color: '#fff', lineHeight: 0.9, margin: 0 }}>Daily FC</p>
-            <p style={{ fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.9)', margin: '0.6rem 0 0' }}>Sistema Financiero</p>
+            <p style={{ fontFamily: FB, fontSize: '4rem', letterSpacing: '0.1em', color: '#fff', lineHeight: 0.9, margin: 0 }}>Daily FC</p>
+            <p style={{ fontSize: '0.74rem', fontWeight: 600, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(199,210,254,0.9)', margin: '0.7rem 0 0' }}>Sistema Financiero</p>
           </div>
-          <p style={{ fontSize: '1.05rem', fontWeight: 500, color: 'rgba(224,231,255,0.92)', lineHeight: 1.5, margin: 0 }}>
+          <p style={{ fontSize: '1.2rem', fontWeight: 500, color: 'rgba(224,231,255,0.92)', lineHeight: 1.5, margin: 0, maxWidth: 460 }}>
             Cheques, préstamos, divisas y caja — todo tu negocio financiero en un solo lugar.
           </p>
         </div>
-        <div style={{ flex: 1, padding: '3rem 3.2rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', fontFamily: FM }}>
-          {campos}
-          <div style={{ marginTop: '1.6rem' }}>{botonIngresar}</div>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
+          <div style={{ width: '100%', maxWidth: 420 }}>
+            {campos}
+            <div style={{ marginTop: '1.6rem' }}>{botonIngresar}</div>
+          </div>
         </div>
       </form>
-    </AuthScreen>
+    </>
   )
 }
