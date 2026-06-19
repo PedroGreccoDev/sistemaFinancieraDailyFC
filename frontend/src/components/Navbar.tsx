@@ -337,9 +337,7 @@ export default function Navbar() {
           position: "fixed",
           top: 0,
           left: 0,
-          // 100svh (viewport visible mínimo): con 100dvh el footer quedaba por
-          // debajo de la barra inferior de Safari (toolbars retraídos) y se tapaba.
-          height: "100svh",
+          height: "100dvh",
           width: "240px",
           maxWidth: "80vw",
           background: BG,
@@ -375,7 +373,10 @@ export default function Navbar() {
         <NavItems onNavigate={() => setOpen(false)} isAdmin={isAdmin} />
         <div style={{
           padding: '0.875rem 1.5rem',
-          paddingBottom: 'calc(0.875rem + env(safe-area-inset-bottom))',
+          // La barra inferior de Safari (iOS) flota sobre el contenido y los vh no
+          // la descuentan: despejamos ~6rem (igual que .pb-fab del contenido) + el
+          // safe-area, para que el footer no quede tapado con el drawer abierto.
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 5rem)',
           borderTop: BORDER,
           display: 'flex',
           alignItems: 'center',
