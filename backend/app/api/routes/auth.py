@@ -104,6 +104,7 @@ async def crear_invitacion(
             inv.phone,
             f"*Daily FC* — Te invitaron al sistema.\n\n"
             f"Creá tu cuenta acá (el enlace vence en 24 h):\n{link}",
+            link_preview=True,
         )
 
     return InvitacionCreatedResponse(

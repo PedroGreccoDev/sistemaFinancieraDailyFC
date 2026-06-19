@@ -107,7 +107,7 @@ async def _resolve_chat_id(phone: str) -> str | None:
     return data.get("chatId") or f"{phone}@c.us"
 
 
-async def send_text(phone: str, text: str) -> bool:
+async def send_text(phone: str, text: str, link_preview: bool = False) -> bool:
     """Envía un mensaje de texto vía WAHA. Devuelve si se entregó.
 
     Maximiza la entrega: asegura que la sesión esté operativa, resuelve el `chatId`
@@ -119,6 +119,9 @@ async def send_text(phone: str, text: str) -> bool:
     Args:
         phone: Número de teléfono sin sufijo (solo dígitos).
         text: Texto a enviar (soporta *negrita* y saltos de línea).
+        link_preview: Si el texto incluye una URL, pedirle a WAHA que genere el
+            preview del enlace. Con el engine NOWEB esto es lo que hace que la URL
+            llegue como enlace clickeable y no como texto plano.
 
     Returns:
         `True` si WAHA aceptó el envío; `False` si no se pudo enviar.
@@ -152,6 +155,7 @@ async def send_text(phone: str, text: str) -> bool:
         "session": settings.waha_session,
         "chatId": chat_id,
         "text": text,
+        "linkPreview": link_preview,
     }
     try:
         await _request_retry("POST", url, json=payload, headers=_headers())
