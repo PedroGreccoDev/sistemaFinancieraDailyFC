@@ -20,6 +20,18 @@ export interface UsuarioActualizado {
   temp_password: string | null
 }
 
+export interface UsuarioCreado {
+  usuario: AuthUser
+  temp_password: string | null
+}
+
+export interface UsuarioCreatePayload {
+  username: string
+  password?: string | null
+  phone?: string | null
+  is_admin?: boolean
+}
+
 export interface UsuarioUpdatePayload {
   activo?: boolean
   is_admin?: boolean
@@ -41,6 +53,12 @@ export const revocarInvitacion = (id: string): Promise<void> =>
 
 // ── Usuarios ────────────────────────────────────────────────────────────────
 export const getUsuarios = (): Promise<AuthUser[]> => apiFetch<AuthUser[]>('/usuarios')
+
+export const crearUsuario = (payload: UsuarioCreatePayload): Promise<UsuarioCreado> =>
+  apiFetch<UsuarioCreado>('/usuarios', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 
 export const actualizarUsuario = (
   id: string,

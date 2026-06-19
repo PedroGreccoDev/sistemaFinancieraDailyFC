@@ -21,6 +21,8 @@ from app.schemas.auth import (
     RegistrarRequest,
     ResetPasswordRequest,
     TokenResponse,
+    UsuarioCreate,
+    UsuarioCreatedResponse,
     UsuarioRead,
     UsuarioUpdate,
     UsuarioUpdatedResponse,
@@ -128,6 +130,17 @@ def revocar_invitacion(invitacion_id: UUID, db: DbSession, _admin: AdminUser) ->
 @router.get("/usuarios", response_model=list[UsuarioRead])
 def listar_usuarios(db: DbSession, _admin: AdminUser) -> list[UsuarioRead]:
     return [UsuarioRead.model_validate(u) for u in service.listar_usuarios(db)]
+
+
+@router.post("/usuarios", response_model=UsuarioCreatedResponse, status_code=201)
+def crear_usuario(
+    payload: UsuarioCreate, db: DbSession, _admin: AdminUser
+) -> UsuarioCreatedResponse:
+    user, temp_password = service.crear_usuario(db, payload)
+    return UsuarioCreatedResponse(
+        usuario=UsuarioRead.model_validate(user),
+        temp_password=temp_password,
+    )
 
 
 @router.patch("/usuarios/{usuario_id}", response_model=UsuarioUpdatedResponse)

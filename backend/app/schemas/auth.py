@@ -84,6 +84,21 @@ class InvitacionCreatedResponse(BaseModel):
 
 # ── Gestión de usuarios (admin) ──────────────────────────────────────────────
 
+class UsuarioCreate(BaseModel):
+    """Alta directa de un usuario desde el panel (sin enlace de invitación)."""
+    username: str = Field(min_length=1, max_length=80)
+    # Si se omite, el backend genera una clave temporal y la devuelve al admin.
+    password: str | None = Field(default=None, min_length=8, max_length=200)
+    phone: str | None = Field(default=None, max_length=40)
+    is_admin: bool = False
+
+
+class UsuarioCreatedResponse(BaseModel):
+    usuario: UsuarioRead
+    # Solo presente cuando el admin no fijó una clave: la temporal a comunicar.
+    temp_password: str | None = None
+
+
 class UsuarioUpdate(BaseModel):
     activo: bool | None = None
     is_admin: bool | None = None

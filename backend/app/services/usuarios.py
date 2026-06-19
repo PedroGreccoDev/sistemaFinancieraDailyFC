@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.core import auth
 from app.core.config import get_settings
 from app.db.models import Invitacion, Usuario
-from app.schemas.auth import InvitacionCreate, UsuarioUpdate
+from app.schemas.auth import InvitacionCreate, UsuarioCreate, UsuarioUpdate
 from app.services.exceptions import (
     ConflictError,
     GoneError,
@@ -216,6 +216,36 @@ def registrar_desde_invitacion(
 
 def listar_usuarios(db: Session) -> list[Usuario]:
     return list(db.scalars(select(Usuario).order_by(Usuario.created_at.asc())).all())
+
+
+def crear_usuario(db: Session, payload: UsuarioCreate) -> tuple[Usuario, str | None]:
+    """Alta directa de un usuario (sin invitación). Devuelve `(usuario, temp_password?)`.
+
+    Si el admin no fijó una clave, se genera una temporal y se devuelve en claro
+    para que la comunique (misma lógica que el reset de clave).
+    """
+    uname = _norm_username(payload.username)
+    if db.scalar(select(Usuario.id).where(Usuario.username == uname)) is not None:
+        raise ConflictError("Ese usuario ya existe. Probá con otro.")
+
+    temp_password: str | None = None
+    if payload.password:
+        password = payload.password
+    else:
+        password = auth.generar_password_temporal()
+        temp_password = password
+
+    user = Usuario(
+        username=uname,
+        password_hash=auth.hash_password(password),
+        phone=_norm_phone(payload.phone),
+        is_admin=payload.is_admin,
+        activo=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user, temp_password
 
 
 def actualizar_usuario(

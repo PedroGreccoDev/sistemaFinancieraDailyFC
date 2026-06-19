@@ -8,10 +8,12 @@ import type { CSSProperties, ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useToast } from '../lib/toast'
+import { btnSolid, btnBordered } from '../lib/ui'
+import { IconAlert, IconClose } from '../components/icons'
 import { useCurrentUser, iniciales } from '../lib/auth'
 import {
   getInvitaciones, crearInvitacion, revocarInvitacion,
-  getUsuarios, actualizarUsuario,
+  getUsuarios, actualizarUsuario, crearUsuario,
 } from '../api/usuarios'
 import type { AuthUser } from '../api/auth'
 
@@ -20,7 +22,9 @@ const FN = "'Bebas Neue', sans-serif"
 const ACCENT = '#6366f1'
 
 const CARD: CSSProperties = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)', borderRadius: 'var(--r-lg)' }
-const CAP: CSSProperties = { fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--text-2)' }
+const SECTION: CSSProperties = { fontFamily: FN, fontSize: '1.05rem', letterSpacing: '0.06em', color: 'var(--text-strong)', margin: '0 0 0.85rem', lineHeight: 1 }
+const MODAL_BG = 'var(--modal)'
+const LABEL_STYLE: CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
 
 const DAY = 86_400_000
 const diasRestantes = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / DAY))
@@ -86,6 +90,119 @@ function Solid({ children, onClick, color = ACCENT }: { children: ReactNode; onC
   )
 }
 
+// ── Modal: editar teléfono ──────────────────────────────────────────────────
+function ModalEditarTel({ user, onClose, onSaved }: { user: AuthUser; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast()
+  // El alta/invitación anteponen "54"; en el campo mostramos solo la parte local.
+  const [tel, setTel] = useState(user.phone ? user.phone.replace(/^54/, '') : '')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (loading) return
+    setError(null)
+    setLoading(true)
+    try {
+      const digits = tel.replace(/\D/g, '')
+      await actualizarUsuario(user.id, { phone: digits ? `54${digits}` : null })
+      toast('success', 'Teléfono actualizado')
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ocurrió un error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fieldBase: CSSProperties = { background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: FM, fontSize: '0.82rem', borderRadius: 'var(--r-sm)', outline: 'none', boxSizing: 'border-box' }
+
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '380px' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)' }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Editar teléfono</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{user.username}</p>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div>
+            <label style={LABEL_STYLE}>Teléfono</label>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <span style={{ ...fieldBase, display: 'flex', alignItems: 'center', padding: '0 0.7rem', fontWeight: 600, color: 'var(--text-2)' }}>+54</span>
+              <input
+                autoFocus
+                type="tel"
+                inputMode="tel"
+                value={tel}
+                onChange={(e) => setTel(e.target.value)}
+                placeholder="9 11 5555 5555"
+                style={{ ...fieldBase, flex: 1, minWidth: 0, padding: '0.5rem 0.75rem' }}
+              />
+            </div>
+            <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.5)', marginTop: '0.3rem' }}>Dejalo vacío para quitar el teléfono.</p>
+          </div>
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+          <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="submit" disabled={loading} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: loading ? 0.6 : 1 }}>{loading ? 'Guardando…' : 'Guardar'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Modal: confirmación de acciones irreversibles ────────────────────────────
+type ConfirmConfig = {
+  title: string
+  intro?: string
+  warning: ReactNode
+  confirmLabel: string
+  loadingLabel: string
+  variant: 'danger' | 'warning'
+  onConfirm: () => Promise<void>
+}
+
+function ConfirmModal({ config, onClose }: { config: ConfirmConfig; onClose: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const color = config.variant === 'danger' ? 'var(--danger)' : 'var(--warning)'
+
+  async function go() {
+    if (loading) return
+    setLoading(true)
+    try {
+      await config.onConfirm()
+      onClose()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '400px' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', minWidth: 0 }}>
+            <IconAlert size={20} style={{ color, flexShrink: 0 }} />
+            <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>{config.title}</h2>
+          </div>
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: 4, lineHeight: 0 }}><IconClose size={18} /></button>
+        </div>
+        <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          {config.intro && <p style={{ fontFamily: FM, fontSize: '0.8rem', color: 'var(--text-2)', margin: 0 }}>{config.intro}</p>}
+          <div style={{ background: `color-mix(in srgb, ${color} 10%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`, borderRadius: 'var(--r-md)', padding: '0.9rem 1rem' }}>
+            <p style={{ fontFamily: FM, fontSize: '0.8rem', color, margin: 0, lineHeight: 1.6 }}>{config.warning}</p>
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
+            <button type="button" onClick={onClose} disabled={loading} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="button" onClick={go} disabled={loading} style={{ ...btnSolid(config.variant), flex: 1, padding: '0.55rem', opacity: loading ? 0.6 : 1 }}>{loading ? config.loadingLabel : config.confirmLabel}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Página ────────────────────────────────────────────────────────────────────
 export default function Usuarios() {
   const toast = useToast()
@@ -99,6 +216,17 @@ export default function Usuarios() {
   const [enviando, setEnviando] = useState(false)
   // Clave temporal revelada tras un reseteo por admin (para comunicarla al usuario).
   const [tempPass, setTempPass] = useState<{ username: string; password: string } | null>(null)
+  // Usuario cuyo teléfono se está editando (abre el modal).
+  const [editandoTel, setEditandoTel] = useState<AuthUser | null>(null)
+  // Configuración del modal de confirmación de acciones irreversibles.
+  const [confirmCfg, setConfirmCfg] = useState<ConfirmConfig | null>(null)
+
+  // Alta directa de usuario (sin enlace de invitación).
+  const [nuevoUser, setNuevoUser] = useState('')
+  const [nuevoPass, setNuevoPass] = useState('')
+  const [nuevoTel, setNuevoTel] = useState('')
+  const [nuevoEsAdmin, setNuevoEsAdmin] = useState(false)
+  const [creando, setCreando] = useState(false)
 
   const invitacionesQ = useQuery({ queryKey: ['invitaciones'], queryFn: getInvitaciones })
   const usuariosQ = useQuery({ queryKey: ['usuarios'], queryFn: getUsuarios })
@@ -125,6 +253,44 @@ export default function Usuarios() {
       toast('error', msgError(e))
     } finally {
       setEnviando(false)
+    }
+  }
+
+  async function crearUsuarioDirecto() {
+    if (creando) return
+    const username = nuevoUser.trim()
+    if (!username) {
+      toast('error', 'Ingresá un nombre de usuario')
+      return
+    }
+    const password = nuevoPass.trim()
+    if (password && password.length < 8) {
+      toast('error', 'La contraseña debe tener al menos 8 caracteres')
+      return
+    }
+    const digits = nuevoTel.replace(/\D/g, '')
+    setCreando(true)
+    try {
+      const res = await crearUsuario({
+        username,
+        // Si se deja vacío, el backend genera una clave temporal y la devuelve.
+        password: password || null,
+        phone: digits ? `54${digits}` : null,
+        is_admin: nuevoEsAdmin,
+      })
+      qc.invalidateQueries({ queryKey: ['usuarios'] })
+      if (res.temp_password) {
+        setTempPass({ username: res.usuario.username, password: res.temp_password })
+      }
+      setNuevoUser('')
+      setNuevoPass('')
+      setNuevoTel('')
+      setNuevoEsAdmin(false)
+      toast('success', `Usuario ${res.usuario.username} creado`)
+    } catch (e) {
+      toast('error', msgError(e))
+    } finally {
+      setCreando(false)
     }
   }
 
@@ -168,23 +334,75 @@ export default function Usuarios() {
     }
   }
 
-  async function editarTel(u: AuthUser) {
-    const actual = u.phone ?? ''
-    const nuevo = window.prompt(`Teléfono de ${u.username} (solo dígitos, con código de país):`, actual)
-    if (nuevo === null) return
-    try {
-      await actualizarUsuario(u.id, { phone: nuevo.replace(/\D/g, '') || null })
-      qc.invalidateQueries({ queryKey: ['usuarios'] })
-      toast('success', 'Teléfono actualizado')
-    } catch (e) {
-      toast('error', msgError(e))
-    }
-  }
-
   // ── Bloques reutilizables ───────────────────────────────────────────────────
+  const cardCrear = (
+    <div style={{ ...CARD, padding: '1.1rem 1.2rem', display: 'flex', flexDirection: 'column' }}>
+      <p style={{ fontSize: '0.72rem', color: 'var(--text-2)', margin: '0 0 0.95rem' }}>
+        Alta directa, sin enlace. Si dejás la clave vacía, se genera una temporal para comunicar.
+      </p>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          <label style={{ fontSize: '0.58rem', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-2)' }}>Usuario</label>
+          <input
+            className="fld-auth"
+            type="text"
+            autoCapitalize="none"
+            autoCorrect="off"
+            value={nuevoUser}
+            onChange={(e) => setNuevoUser(e.target.value)}
+            placeholder="nombredeusuario"
+            style={{ background: 'var(--input-bg)', border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', padding: '0.7rem 0.8rem', fontFamily: FM, fontSize: '0.85rem', color: 'var(--text-strong)', outline: 'none' }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          <label style={{ fontSize: '0.58rem', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-2)' }}>Contraseña (opcional)</label>
+          <input
+            className="fld-auth"
+            type="text"
+            autoCapitalize="none"
+            autoCorrect="off"
+            value={nuevoPass}
+            onChange={(e) => setNuevoPass(e.target.value)}
+            placeholder="Dejar vacío para generar una temporal"
+            style={{ background: 'var(--input-bg)', border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', padding: '0.7rem 0.8rem', fontFamily: FM, fontSize: '0.85rem', color: 'var(--text-strong)', outline: 'none' }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          <label style={{ fontSize: '0.58rem', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-2)' }}>Teléfono (opcional)</label>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <span style={{ display: 'flex', alignItems: 'center', background: 'var(--input-bg)', border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', padding: '0 0.7rem', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-2)' }}>+54</span>
+            <input
+              className="fld-auth"
+              type="tel"
+              inputMode="tel"
+              value={nuevoTel}
+              onChange={(e) => setNuevoTel(e.target.value)}
+              placeholder="9 11 5555 5555"
+              style={{ flex: 1, minWidth: 0, background: 'var(--input-bg)', border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', padding: '0.7rem 0.8rem', fontFamily: FM, fontSize: '0.85rem', color: 'var(--text-strong)', outline: 'none' }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 0 0.95rem', marginTop: 'auto' }}>
+        <span style={{ fontSize: '0.82rem', fontWeight: 500, color: 'var(--text-1)' }}>¿Es administrador?</span>
+        <Toggle on={nuevoEsAdmin} onClick={() => setNuevoEsAdmin((v) => !v)} />
+      </div>
+
+      <button type="button" onClick={crearUsuarioDirecto} disabled={creando} style={{ width: '100%', background: ACCENT, color: '#fff', border: 'none', borderRadius: 'var(--r-md)', padding: '0.8rem', fontFamily: FM, fontSize: '0.85rem', fontWeight: 700, cursor: creando ? 'default' : 'pointer', opacity: creando ? 0.7 : 1 }}>
+        {creando ? 'Creando…' : 'Crear usuario'}
+      </button>
+    </div>
+  )
+
   const cardInvitar = (
-    <div style={{ ...CARD, padding: '1.1rem 1.2rem' }}>
-      <p style={{ ...CAP, margin: '0 0 0.9rem' }}>Invitar persona</p>
+    <div style={{ ...CARD, padding: '1.1rem 1.2rem', display: 'flex', flexDirection: 'column' }}>
+      <p style={{ fontSize: '0.72rem', color: 'var(--text-2)', margin: '0 0 0.95rem' }}>
+        Enviá un enlace de un solo uso por WhatsApp. La persona elige su propia clave (vence en 24 h).
+      </p>
 
       {result ? (
         <div style={{
@@ -231,7 +449,7 @@ export default function Usuarios() {
               />
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.55rem 0 0.95rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.55rem 0 0.95rem', marginTop: 'auto' }}>
             <span style={{ fontSize: '0.82rem', fontWeight: 500, color: 'var(--text-1)' }}>¿Es administrador?</span>
             <Toggle on={esAdmin} onClick={() => setEsAdmin((v) => !v)} />
           </div>
@@ -245,10 +463,6 @@ export default function Usuarios() {
 
   const cardPendientes = (
     <div style={{ ...CARD, padding: '1.1rem 1.2rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.9rem' }}>
-        <p style={{ ...CAP, margin: 0 }}>Invitaciones pendientes</p>
-        <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.14)', borderRadius: 999, padding: '1px 8px' }}>{pendientes.length}</span>
-      </div>
       {pendientes.length === 0 ? (
         <p style={{ fontSize: '0.78rem', color: 'var(--text-2)', margin: 0 }}>No hay invitaciones pendientes.</p>
       ) : (
@@ -261,7 +475,15 @@ export default function Usuarios() {
                   Vence en {diasRestantes(inv.expires_at)} días · {inv.is_admin ? <span style={{ color: '#818cf8', fontWeight: 600 }}>Admin</span> : 'Usuario'}
                 </p>
               </div>
-              <Ghost danger onClick={() => revocar(inv.id)}>Revocar</Ghost>
+              <Ghost danger onClick={() => setConfirmCfg({
+                title: 'Revocar invitación',
+                intro: inv.phone ? `Invitación para +${inv.phone}.` : 'Invitación sin teléfono.',
+                warning: <>El enlace dejará de funcionar y <strong>no se puede recuperar</strong>. Si la necesitás, vas a tener que generar una invitación nueva.</>,
+                confirmLabel: 'Sí, revocar',
+                loadingLabel: 'Revocando…',
+                variant: 'danger',
+                onConfirm: () => revocar(inv.id),
+              })}>Revocar</Ghost>
             </div>
           ))}
         </div>
@@ -271,8 +493,7 @@ export default function Usuarios() {
 
   const cardUsuarios = (
     <div style={{ ...CARD, padding: '1.1rem 1.2rem' }}>
-      <p style={{ ...CAP, margin: '0 0 0.9rem' }}>Usuarios existentes</p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '0.7rem', alignItems: 'start' }}>
         {usuarios.map((u) => {
           const esVos = u.username.toLowerCase() === me.username.toLowerCase()
           return (
@@ -304,11 +525,27 @@ export default function Usuarios() {
               </p>
             ) : (
               <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                <Ghost onClick={() => resetClave(u)}>Resetear clave</Ghost>
+                <Ghost onClick={() => setConfirmCfg({
+                  title: 'Resetear clave',
+                  intro: `Vas a resetear la clave de ${u.username}.`,
+                  warning: <>Se generará una <strong>clave temporal nueva</strong> y se cerrarán todas sus sesiones activas. La clave actual dejará de funcionar. <strong>No se puede deshacer.</strong></>,
+                  confirmLabel: 'Sí, resetear',
+                  loadingLabel: 'Reseteando…',
+                  variant: 'warning',
+                  onConfirm: () => resetClave(u),
+                })}>Resetear clave</Ghost>
                 {u.activo
-                  ? <Ghost danger onClick={() => toggleActivo(u)}>Desactivar</Ghost>
+                  ? <Ghost danger onClick={() => setConfirmCfg({
+                      title: 'Desactivar usuario',
+                      intro: `Vas a desactivar a ${u.username}.`,
+                      warning: <>No va a poder ingresar al panel y se <strong>cerrarán sus sesiones activas</strong>. Podés volver a activarlo cuando quieras.</>,
+                      confirmLabel: 'Sí, desactivar',
+                      loadingLabel: 'Desactivando…',
+                      variant: 'danger',
+                      onConfirm: () => toggleActivo(u),
+                    })}>Desactivar</Ghost>
                   : <Solid color="var(--success)" onClick={() => toggleActivo(u)}>Activar</Solid>}
-                <Ghost onClick={() => editarTel(u)} style={{ color: 'var(--text-2)' }}>Editar tel.</Ghost>
+                <Ghost onClick={() => setEditandoTel(u)} style={{ color: 'var(--text-2)' }}>Editar tel.</Ghost>
               </div>
             )}
           </div>
@@ -320,7 +557,7 @@ export default function Usuarios() {
 
   // ── Banner de clave temporal (tras reset por admin) ─────────────────────────
   const cardTempPass = tempPass && (
-    <div className="md:col-span-2" style={{
+    <div style={{
       background: 'color-mix(in srgb, var(--success) 8%, transparent)',
       border: '1px solid color-mix(in srgb, var(--success) 28%, transparent)',
       borderRadius: 'var(--r-lg)', padding: '1rem 1.2rem',
@@ -347,15 +584,56 @@ export default function Usuarios() {
       >
         ← Configuración
       </Link>
-      <p style={{ fontFamily: FN, fontSize: '1.9rem', letterSpacing: '0.05em', color: 'var(--text-strong)', margin: '0 0 1.2rem', lineHeight: 1 }}>Usuarios</p>
+      <p style={{ fontFamily: FN, fontSize: '1.9rem', letterSpacing: '0.05em', color: 'var(--text-strong)', margin: '0 0 1.4rem', lineHeight: 1 }}>Usuarios</p>
 
-      {/* Móvil: apilado · Escritorio: grid 2 columnas (usuarios ocupa toda la fila) */}
-      <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: '1.1rem', alignItems: 'start', maxWidth: 920 }}>
-        {cardTempPass}
-        {cardInvitar}
-        {cardPendientes}
-        <div className="md:col-span-2">{cardUsuarios}</div>
+      {cardTempPass && <div style={{ marginBottom: '1.4rem' }}>{cardTempPass}</div>}
+
+      {/* Dashboard: barra lateral con las acciones (alta + invitaciones pendientes)
+          y la lista de cuentas ocupando el resto del ancho. En móvil/tablet apila. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '1.8rem', alignItems: 'start' }}>
+        <div>
+          <section>
+            <p style={SECTION}>Crear usuario</p>
+            {cardCrear}
+          </section>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.8rem' }}>
+          <section>
+            <p style={SECTION}>Invitar por enlace</p>
+            {cardInvitar}
+          </section>
+
+          <section>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0 0 0.85rem' }}>
+              <p style={{ ...SECTION, margin: 0 }}>Cuentas</p>
+              <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.14)', borderRadius: 999, padding: '1px 8px' }}>{usuarios.length}</span>
+            </div>
+            {cardUsuarios}
+          </section>
+
+          <section>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0 0 0.85rem' }}>
+              <p style={{ ...SECTION, margin: 0 }}>Invitaciones pendientes</p>
+              <span style={{ fontSize: '0.6rem', fontWeight: 700, color: '#818cf8', background: 'rgba(99,102,241,0.14)', borderRadius: 999, padding: '1px 8px' }}>{pendientes.length}</span>
+            </div>
+            {cardPendientes}
+          </section>
+        </div>
       </div>
+
+      {editandoTel && (
+        <ModalEditarTel
+          user={editandoTel}
+          onClose={() => setEditandoTel(null)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ['usuarios'] })
+            setEditandoTel(null)
+          }}
+        />
+      )}
+
+      {confirmCfg && <ConfirmModal config={confirmCfg} onClose={() => setConfirmCfg(null)} />}
     </div>
   )
 }
