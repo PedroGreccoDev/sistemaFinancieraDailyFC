@@ -5,6 +5,7 @@
 
 import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useToast } from '../lib/toast'
 import { useCurrentUser, iniciales } from '../lib/auth'
@@ -93,7 +94,8 @@ export default function Usuarios() {
 
   const [telefono, setTelefono] = useState('')
   const [esAdmin, setEsAdmin] = useState(false)
-  const [link, setLink] = useState<string | null>(null)
+  // Resultado de la última invitación: el enlace + si se envió por WhatsApp.
+  const [result, setResult] = useState<{ link: string; enviada: boolean } | null>(null)
   const [enviando, setEnviando] = useState(false)
   // Clave temporal revelada tras un reseteo por admin (para comunicarla al usuario).
   const [tempPass, setTempPass] = useState<{ username: string; password: string } | null>(null)
@@ -111,11 +113,14 @@ export default function Usuarios() {
       // El UI muestra el prefijo +54; mandamos el teléfono completo (o null si vacío).
       const phone = digits ? `54${digits}` : null
       const res = await crearInvitacion(phone, esAdmin)
-      setLink(absLink(res.link))
+      setResult({ link: absLink(res.link), enviada: res.enviada_por_whatsapp })
       setTelefono('')
       setEsAdmin(false)
       qc.invalidateQueries({ queryKey: ['invitaciones'] })
-      toast('success', res.enviada_por_whatsapp ? 'Invitación enviada por WhatsApp' : 'Invitación creada — copiá el enlace')
+      toast(
+        res.enviada_por_whatsapp ? 'success' : 'info',
+        res.enviada_por_whatsapp ? 'Invitación enviada por WhatsApp' : 'No se pudo enviar por WhatsApp — pasale el enlace',
+      )
     } catch (e) {
       toast('error', msgError(e))
     } finally {
@@ -181,24 +186,31 @@ export default function Usuarios() {
     <div style={{ ...CARD, padding: '1.1rem 1.2rem' }}>
       <p style={{ ...CAP, margin: '0 0 0.9rem' }}>Invitar persona</p>
 
-      {link ? (
+      {result ? (
         <div style={{
-          background: 'color-mix(in srgb, var(--success) 8%, transparent)',
-          border: '1px solid color-mix(in srgb, var(--success) 28%, transparent)',
+          background: `color-mix(in srgb, ${result.enviada ? 'var(--success)' : '#f59e0b'} 8%, transparent)`,
+          border: `1px solid color-mix(in srgb, ${result.enviada ? 'var(--success)' : '#f59e0b'} 28%, transparent)`,
           borderRadius: 'var(--r-md)', padding: '0.85rem',
         }}>
-          <p style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--success)', margin: '0 0 0.7rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><polyline points="20 6 9 17 4 12" /></svg>
-            Enlace de invitación generado
+          <p style={{ fontSize: '0.74rem', fontWeight: 600, color: result.enviada ? 'var(--success)' : '#f59e0b', margin: '0 0 0.7rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            {result.enviada ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><polyline points="20 6 9 17 4 12" /></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /></svg>
+            )}
+            {result.enviada ? 'Invitación enviada por WhatsApp' : 'No se pudo enviar por WhatsApp — pasale este enlace'}
+          </p>
+          <p style={{ fontSize: '0.64rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-2)', margin: '0 0 0.4rem' }}>
+            {result.enviada ? 'Enlace de respaldo' : 'Enlace de invitación'}
           </p>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <span style={{ flex: 1, minWidth: 0, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.7rem', color: 'var(--text-2)', background: 'var(--input-bg)', border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', padding: '0.55rem 0.7rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{link}</span>
-            <button type="button" onClick={() => copiar(link)} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.35rem', background: ACCENT, color: '#fff', border: 'none', borderRadius: 'var(--r-sm)', padding: '0.55rem 0.7rem', fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
+            <span style={{ flex: 1, minWidth: 0, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.7rem', color: 'var(--text-2)', background: 'var(--input-bg)', border: '1px solid var(--bd-008)', borderRadius: 'var(--r-sm)', padding: '0.55rem 0.7rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{result.link}</span>
+            <button type="button" onClick={() => copiar(result.link)} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.35rem', background: ACCENT, color: '#fff', border: 'none', borderRadius: 'var(--r-sm)', padding: '0.55rem 0.7rem', fontFamily: FM, fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
               Copiar
             </button>
           </div>
-          <button type="button" onClick={() => setLink(null)} style={{ marginTop: '0.85rem', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', fontFamily: FM, fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-2)' }}>
+          <button type="button" onClick={() => setResult(null)} style={{ marginTop: '0.85rem', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', fontFamily: FM, fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-2)' }}>
             Invitar a otra persona
           </button>
         </div>
@@ -329,6 +341,12 @@ export default function Usuarios() {
 
   return (
     <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
+      <Link
+        to="/configuracion"
+        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-2)', textDecoration: 'none', marginBottom: '0.6rem' }}
+      >
+        ← Configuración
+      </Link>
       <p style={{ fontFamily: FN, fontSize: '1.9rem', letterSpacing: '0.05em', color: 'var(--text-strong)', margin: '0 0 1.2rem', lineHeight: 1 }}>Usuarios</p>
 
       {/* Móvil: apilado · Escritorio: grid 2 columnas (usuarios ocupa toda la fila) */}
