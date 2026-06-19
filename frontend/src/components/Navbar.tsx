@@ -337,7 +337,9 @@ export default function Navbar() {
           position: "fixed",
           top: 0,
           left: 0,
-          height: "100dvh",
+          // 100svh (viewport visible mínimo): con 100dvh el footer quedaba por
+          // debajo de la barra inferior de Safari (toolbars retraídos) y se tapaba.
+          height: "100svh",
           width: "240px",
           maxWidth: "80vw",
           background: BG,
@@ -373,6 +375,7 @@ export default function Navbar() {
         <NavItems onNavigate={() => setOpen(false)} isAdmin={isAdmin} />
         <div style={{
           padding: '0.875rem 1.5rem',
+          paddingBottom: 'calc(0.875rem + env(safe-area-inset-bottom))',
           borderTop: BORDER,
           display: 'flex',
           alignItems: 'center',
