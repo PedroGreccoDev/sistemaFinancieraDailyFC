@@ -194,6 +194,27 @@ button:hover:not(:disabled) {
   animation: toastIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* Spinner de carga (login, registro validando, recuperar) */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+/* Campos de las pantallas de auth: foco índigo en cualquier foco (no solo
+   teclado), igual que el diseño. El placeholder usa el muted del tema. */
+.fld-auth {
+  transition: border-color 0.15s, background 0.15s;
+}
+.fld-auth:focus {
+  border-color: var(--focus) !important;
+  background: color-mix(in srgb, var(--focus) 6%, var(--input-bg)) !important;
+}
+.fld-auth::placeholder {
+  color: var(--text-2);
+}
+
 /* Accesibilidad: respetar usuarios que prefieren menos movimiento */
 @media (prefers-reduced-motion: reduce) {
   .skeleton { animation: none; }

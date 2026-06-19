@@ -13,7 +13,8 @@
       (function () {
         try {
           var stored = localStorage.getItem('theme')
-          var dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
+          // Por defecto modo claro; solo respeta lo que el usuario eligió antes.
+          var dark = stored === 'dark'
           if (dark) document.documentElement.classList.add('dark')
           var meta = document.querySelector('meta[name="theme-color"]')
           if (meta) meta.setAttribute('content', dark ? '#080810' : '#ebe4d6')

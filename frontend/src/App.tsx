@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Outlet } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Navbar from './components/Navbar'
 import Dashboard from './pages/Dashboard'
@@ -11,6 +11,10 @@ import Reportes from './pages/Reportes'
 import Fiados from './pages/Fiados'
 import Movimientos from './pages/Movimientos'
 import Configuracion from './pages/Configuracion'
+import Usuarios from './pages/Usuarios'
+import Login from './pages/auth/Login'
+import Recuperar from './pages/auth/Recuperar'
+import Registro from './pages/auth/Registro'
 import { ToastProvider } from './lib/toast'
 
 const queryClient = new QueryClient({
@@ -22,7 +26,11 @@ const queryClient = new QueryClient({
   },
 })
 
-export default function App() {
+// Shell del panel: navbar + contenido. Las pantallas de autenticación
+// (login/recuperar/registro) quedan fuera de este layout (pantalla completa,
+// sin navbar). El gating real está desactivado por ahora: estas rutas son
+// alcanzables pero no bloquean el resto del panel.
+function AppShell() {
   const mainRef = useRef<HTMLElement>(null)
 
   // Bloquea el scroll del fondo (el contenedor <main>) mientras haya cualquier
@@ -48,26 +56,41 @@ export default function App() {
   }, [])
 
   return (
+    <div className="min-h-dvh flex flex-col md:flex-row" style={{ background: "var(--bg)" }}>
+      <Navbar />
+      <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto pb-40 md:pb-0">
+        <Outlet />
+      </main>
+    </div>
+  )
+}
+
+export default function App() {
+  return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
       <BrowserRouter>
-        <div className="min-h-dvh flex flex-col md:flex-row" style={{ background: "var(--bg)" }}>
-          <Navbar />
-          <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto pb-40 md:pb-0">
-            <Routes>
-              <Route path="/"          element={<Dashboard />} />
-              <Route path="/cartera"      element={<Cartera />} />
-              <Route path="/deudores" element={<Deudores />}>
-                <Route index element={<DeudoresPrestamos />} />
-                <Route path="cheques-fiados" element={<Fiados />} />
-              </Route>
-              <Route path="/pasivos"      element={<Pasivos />} />
-              <Route path="/reportes"     element={<Reportes />} />
-              <Route path="/movimientos" element={<Movimientos />} />
-              <Route path="/configuracion" element={<Configuracion />} />
-            </Routes>
-          </main>
-        </div>
+        <Routes>
+          {/* Autenticación — pantalla completa, sin navbar */}
+          <Route path="/login"     element={<Login />} />
+          <Route path="/recuperar" element={<Recuperar />} />
+          <Route path="/registro"  element={<Registro />} />
+
+          {/* Panel — dentro del shell con navbar */}
+          <Route element={<AppShell />}>
+            <Route path="/"          element={<Dashboard />} />
+            <Route path="/cartera"      element={<Cartera />} />
+            <Route path="/deudores" element={<Deudores />}>
+              <Route index element={<DeudoresPrestamos />} />
+              <Route path="cheques-fiados" element={<Fiados />} />
+            </Route>
+            <Route path="/pasivos"      element={<Pasivos />} />
+            <Route path="/reportes"     element={<Reportes />} />
+            <Route path="/movimientos" element={<Movimientos />} />
+            <Route path="/configuracion" element={<Configuracion />} />
+            <Route path="/usuarios"     element={<Usuarios />} />
+          </Route>
+        </Routes>
       </BrowserRouter>
       </ToastProvider>
     </QueryClientProvider>

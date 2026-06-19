@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import type { ComponentType } from 'react'
-import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange, IconSettings } from './icons'
+import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange, IconSettings, IconUserCog, IconLogout } from './icons'
 import { DolarPill, DolarBlock } from './DolarInline'
 import { useDarkMode } from '../hooks/useDarkMode'
+import { useCurrentUser } from '../lib/auth'
 
 function SunIcon() {
   return (
@@ -25,7 +26,9 @@ function MoonIcon() {
   )
 }
 
-const NAV_LINKS: { to: string; label: string; end: boolean; Icon: ComponentType<{ size?: number }> }[] = [
+type NavItem = { to: string; label: string; end: boolean; Icon: ComponentType<{ size?: number }>; adminOnly?: boolean; badge?: string }
+
+const NAV_LINKS: NavItem[] = [
   { to: '/',               label: 'Inicio',        end: true,  Icon: IconHome },
   { to: '/cartera',        label: 'Cartera',        end: false, Icon: IconWallet },
   { to: '/deudores',       label: 'Deudores',       end: false, Icon: IconUsers },
@@ -33,6 +36,7 @@ const NAV_LINKS: { to: string; label: string; end: boolean; Icon: ComponentType<
   { to: '/reportes',       label: 'Reportes',       end: false, Icon: IconChart },
   { to: '/movimientos',    label: 'Movimientos',    end: false, Icon: IconExchange },
   { to: '/configuracion',  label: 'Configuración',  end: false, Icon: IconSettings },
+  { to: '/usuarios',       label: 'Usuarios',       end: false, Icon: IconUserCog, adminOnly: true, badge: 'ADMIN' },
 ]
 
 const ACCENT = "#6366f1"
@@ -79,10 +83,10 @@ function Brand({ compact = false, action }: { compact?: boolean; action?: React.
   )
 }
 
-function NavItems({ onNavigate }: { onNavigate?: () => void }) {
+function NavItems({ onNavigate, isAdmin }: { onNavigate?: () => void; isAdmin: boolean }) {
   return (
     <div style={{ padding: "0.75rem 0", flex: 1 }}>
-      {NAV_LINKS.map(({ to, label, end, Icon }) => (
+      {NAV_LINKS.filter((l) => !l.adminOnly || isAdmin).map(({ to, label, end, Icon, badge }) => (
         <NavLink
           key={to}
           to={to}
@@ -120,8 +124,51 @@ function NavItems({ onNavigate }: { onNavigate?: () => void }) {
         >
           <Icon size={17} />
           <span>{label}</span>
+          {badge && (
+            <span style={{
+              fontSize: "0.5rem", fontWeight: 700, letterSpacing: "0.06em",
+              color: "#818cf8", background: "rgba(99,102,241,0.2)",
+              borderRadius: "4px", padding: "1px 4px",
+            }}>{badge}</span>
+          )}
         </NavLink>
       ))}
+    </div>
+  )
+}
+
+// Pie con el usuario actual, su rol y el botón de cerrar sesión. El logout es
+// solo de UI por ahora: limpia la "sesión" simulada llevando al login.
+// TODO: cablear backend (invalidar sesión / token real).
+function UserBlock() {
+  const navigate = useNavigate()
+  const me = useCurrentUser()
+  return (
+    <div style={{ padding: "0.875rem 1.5rem", borderTop: BORDER, display: "flex", alignItems: "center", gap: "0.6rem" }}>
+      <span style={{
+        width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontFamily: "'Manrope', sans-serif", fontWeight: 700, fontSize: "0.72rem",
+        background: "rgba(99,102,241,0.18)", border: "1px solid rgba(99,102,241,0.35)", color: "#818cf8",
+      }}>{me.initials}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: "0.78rem", fontWeight: 700, color: "var(--text-strong)", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{me.username}</p>
+        <p style={{ fontFamily: "'Manrope', sans-serif", fontSize: "0.62rem", color: "var(--text-2)", margin: 0 }}>{me.rol === 'admin' ? 'Administrador' : 'Usuario'}</p>
+      </div>
+      <button
+        onClick={() => navigate('/login')}
+        aria-label="Cerrar sesión"
+        title="Cerrar sesión"
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem", flexShrink: 0,
+          fontFamily: "'Manrope', sans-serif", fontSize: "0.74rem", fontWeight: 600, cursor: "pointer",
+          color: "var(--danger)", background: "transparent",
+          border: "1px solid color-mix(in srgb, var(--danger) 30%, transparent)",
+          borderRadius: "var(--r-sm)", padding: "0.45rem 0.6rem",
+        }}
+      >
+        <IconLogout size={14} />
+      </button>
     </div>
   )
 }
@@ -148,6 +195,8 @@ function CloseIcon() {
 export default function Navbar() {
   const [open, setOpen] = useState(false)
   const [dark, toggleDark] = useDarkMode()
+  const me = useCurrentUser()
+  const isAdmin = me.rol === 'admin'
 
   // Gestos táctiles: deslizar desde el borde izquierdo abre el drawer,
   // deslizar hacia la izquierda lo cierra. Solo en mobile.
@@ -287,7 +336,7 @@ export default function Navbar() {
             <CloseIcon />
           </button>
         </div>
-        <NavItems onNavigate={() => setOpen(false)} />
+        <NavItems onNavigate={() => setOpen(false)} isAdmin={isAdmin} />
         <div style={{
           padding: '0.875rem 1.5rem',
           borderTop: BORDER,
@@ -322,6 +371,7 @@ export default function Navbar() {
             {dark ? <SunIcon /> : <MoonIcon />}
           </button>
         </div>
+        <UserBlock />
       </nav>
 
       {/* ── Desktop: left sidebar ────────────────────────────────────────── */}
@@ -336,15 +386,15 @@ export default function Navbar() {
         alignSelf: "flex-start",
       }}>
         <Brand />
-        <NavItems />
+        <NavItems isAdmin={isAdmin} />
         <DolarBlock />
         <div style={{
+          marginTop: 'auto',
           padding: '0.875rem 1.5rem',
           borderTop: BORDER,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginTop: 'auto',
         }}>
           <span style={{
             fontFamily: "'Manrope', sans-serif",
@@ -373,6 +423,7 @@ export default function Navbar() {
             {dark ? <SunIcon /> : <MoonIcon />}
           </button>
         </div>
+        <UserBlock />
       </nav>
     </>
   )

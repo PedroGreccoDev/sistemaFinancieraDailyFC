@@ -15,7 +15,7 @@ Guía de referencia rápida para el asistente de IA. Lee esto antes de tocar cua
 | IA (razonamiento/OCR) | Claude (Anthropic) |
 | IA (transcripción audio) | Whisper (OpenAI) |
 | Bot WhatsApp | WAHA (NOWEB) → webhook FastAPI |
-| Deploy | Railway (monorepo) |
+| Deploy | Railway (monorepo, `railway.toml`) — alternativa VPS vía `docker-compose.yml` + `infra/` |
 
 ---
 
@@ -35,6 +35,7 @@ Guía de referencia rápida para el asistente de IA. Lee esto antes de tocar cua
 - `COBRADO` y `RECHAZADO` son eventos exclusivamente manuales del operador.
 - `FIADO` **solo** se procesa con la transacción atómica `fiar_cheque` (crea cheque FIADO + registro `Fiado` en el mismo commit). **No genera préstamo ni cuotas.**
 - Toda transición manual requiere `operador_id` y `motivo` no vacíos.
+- **Foto del cheque:** los cheques cargados por WhatsApp guardan la imagen (migración `0009`); se visualiza en el panel con `ChequeFotoModal`.
 
 ### 2. Fiados _(módulo agregado 2026-06-09)_
 
@@ -72,6 +73,13 @@ El cliente puede cancelar esa deuda de dos formas:
 - El préstamo pasa a estado `CANCELADO` automáticamente cuando se cobra la última cuota.
 - El monto de cada cuota se divide uniformemente; el centavo sobrante cae en la **última** cuota.
 
+**Cobro de cuotas desde el panel web** (además del bot, intent `COBRAR_CUOTA`):
+- Cobro simple (1 cuota): `POST /prestamos/{id}/cuotas/{cuota_id}/cobros`.
+- Cobro simple en lote (multi-selección): `POST /prestamos/{id}/cuotas/cobrar-lote`.
+- Cobro con cheque (1 cuota): `POST /prestamos/{id}/cuotas/{cuota_id}/cobrar-con-cheque` — genera un cheque `EN_CARTERA`.
+- Cobro con cheque en lote: `POST /prestamos/{id}/cuotas/cobrar-con-cheque-lote`.
+- **Método de pago "Efectivo" vs "Transferencia" es solo una etiqueta de UI**: el backend NO persiste el medio; solo distingue cobro simple (sin cheque) vs cobro con cheque.
+
 ### 4. Movimientos de Efectivo
 
 - Operaciones de compra/venta de divisas (ARS ↔ USD).
@@ -85,6 +93,7 @@ El cliente puede cancelar esa deuda de dos formas:
 - El bot **exige** que el operador indique el concepto; si falta, responde con `ACLARACION_REQUERIDA`.
 - **Cancelación** solo desde el panel web (el bot no puede cancelar pasivos).
 - Estados: `PENDIENTE` → `CANCELADA` (transición única, irreversible).
+- **Pagos parciales:** el pasivo tiene `saldo_pendiente` (migración `0007`); se puede cancelar en partes, en efectivo o con un cheque de cartera. Pasa a `CANCELADA` cuando el saldo llega a 0.
 - Campos: `acreedor`, `concepto`, `monto`, `moneda`, `fecha_vencimiento` (opcional).
 - El cierre de caja incluye un snapshot de pasivos pendientes por moneda, **sin filtro de periodo**.
 - No existe facturación ni concepto fiscal asociado.
@@ -102,9 +111,19 @@ El cliente puede cancelar esa deuda de dos formas:
   - Ganancias de cheques (por `ultimo_evento_manual_at` dentro del periodo).
   - Ganancias de préstamos (por `created_at` del préstamo).
   - Ganancias de movimientos de efectivo (por `fecha_operacion`).
+  - `cobros_cuotas_ars` / `cobros_cuotas_usd`: cobros de cuotas en el periodo, por moneda.
   - `gastos_operativos`: suma de gastos ARS en el periodo.
   - `saldo_pasivos`: snapshot de pasivos PENDIENTE (no filtrado por periodo).
 - `total_ganancias` = suma bruta de ganancias; `neto` = total_ganancias − gastos_operativos.
+- `GET /api/v1/reportes/cobros-cuotas?desde=&hasta=` devuelve el historial detallado de cuotas cobradas.
+- El historial unificado de Movimientos (frontend) incluye también los cobros de cuotas y los gastos.
+
+### 8. Backup / Configuración _(módulo agregado)_
+
+- Página **Configuración** del panel web con export/import de datos.
+- `GET /api/v1/backup/exportar`: snapshot completo en JSON (incluye fotos de cheques embebidas).
+- `GET /api/v1/backup/exportar-excel`: export a XLSX (filtrable por día local ART).
+- `POST /api/v1/backup/importar`: import con **validación de schema** antes de aplicar.
 
 ---
 
@@ -115,8 +134,15 @@ El cliente puede cancelar esa deuda de dos formas:
 - Flujo: mensaje → parser → (audio: Whisper) → Claude → dispatcher → BD → respuesta WA.
 - La sesión de Claude **se limpia tras cada transacción exitosa** (Regla de Limpieza).
 - Los **pasivos** se pueden registrar desde el bot via `REGISTRAR_DEUDA`; la cancelación es solo desde el panel web.
-- Los **gastos operativos** sí son registrables desde el bot via intent `REGISTRAR_GASTO`.
+- Los **gastos operativos** sí son registrables desde el bot via intent `REGISTRAR_GASTO` (editables por concepto/hora/monto desde el chat).
 - Los **fiados** son operables desde el bot: `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
+
+**Intents soportados por el dispatcher** (`services/whatsapp/dispatcher.py`):
+- Cheques: `REGISTRAR_CHEQUE`, `VENDER_CHEQUE`, `FIAR_CHEQUE`, `COBRAR_CHEQUE`, `RECHAZAR_CHEQUE`.
+- Préstamos: `NUEVO_PRESTAMO`, `COBRAR_CUOTA`.
+- Fiados: `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
+- Otros: `REGISTRAR_DEUDA`, `MOVIMIENTO_EFECTIVO`, `REGISTRAR_GASTO`, `EDITAR_OPERACION`.
+- Consultas (lectura): `CONSULTA_CARTERA`, `CONSULTA_CLIENTE`, `CONSULTA_PRESTAMOS`.
 
 ---
 
@@ -127,6 +153,8 @@ El cliente puede cancelar esa deuda de dos formas:
 - Los ENUMs de PostgreSQL se crean en las migraciones Alembic con `create_type=False` en los modelos.
 - Cada tabla tiene trigger `updated_at` vía `fn_set_updated_at()` (creada en migración 0001).
 - Las transacciones críticas usan `SELECT ... FOR UPDATE` para evitar race conditions.
+- **Fechas/horas en hora local de Argentina (ART), no UTC.** Usar los helpers de `app/core/fechas.py` (`hoy_local`, etc.); los gastos guardan `hora_operacion` (migración `0008`).
+- **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad.
 
 ---
 
@@ -158,6 +186,6 @@ Ver `backend/.env.example`. Las críticas para producción:
 
 - `DATABASE_URL`
 - `ANTHROPIC_API_KEY`
-- `OPENAI_API_KEY`
-- `EVOLUTION_API_URL` / `EVOLUTION_API_KEY` / `EVOLUTION_INSTANCE`
-- `WHATSAPP_OPERATOR_PHONE`
+- `OPENAI_API_KEY` (Whisper, para transcribir audios)
+- `WAHA_API_URL` / `WAHA_API_KEY` / `WAHA_SESSION` (gateway WhatsApp, engine NOWEB)
+- `WHATSAPP_OPERATOR_PHONE` (solo dígitos, sin `@s.whatsapp.net`)

@@ -66,3 +66,9 @@ export function IconFileJson({ size = 18, style, strokeWidth = 2 }: P) {
 export function IconTable({ size = 18, style, strokeWidth = 2 }: P) {
   return (<svg {...base(size, strokeWidth)} style={style}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M3 15h18M9 3v18" /></svg>)
 }
+export function IconLogout({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>)
+}
+export function IconUserCog({ size = 18, style, strokeWidth = 2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><circle cx="9" cy="8" r="3" /><path d="M3 20c0-3.3 2.7-6 6-6c1 0 1.9.2 2.8.6" /><circle cx="18" cy="16" r="2.4" /><path d="M18 12.5v1M18 18.5v1M21 16h-1M16 16h-1M20.1 13.9l-.7.7M16.6 17.4l-.7.7M20.1 18.1l-.7-.7M16.6 14.6l-.7-.7" /></svg>)
+}
