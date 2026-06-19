@@ -238,7 +238,7 @@ export default function Dashboard() {
   const fecha = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
 
   return (
-    <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FONT_UI }}>
+    <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FONT_UI }}>
 
       {/* Header */}
       <div style={{ marginBottom: "1.5rem" }}>

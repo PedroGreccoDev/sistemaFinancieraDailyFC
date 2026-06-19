@@ -578,7 +578,7 @@ export default function Usuarios() {
   )
 
   return (
-    <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
+    <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
       <Link
         to="/configuracion"
         style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-2)', textDecoration: 'none', marginBottom: '0.6rem' }}

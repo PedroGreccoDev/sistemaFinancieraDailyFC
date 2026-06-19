@@ -77,7 +77,7 @@ export default function Reportes() {
   })
 
   return (
-    <div className="px-4 py-5 sm:px-8 sm:py-6" style={{ fontFamily: FM }}>
+    <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
       {/* Header + Filtro */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1.5rem' }}>
         <div style={{ minWidth: 0 }}>

@@ -241,7 +241,7 @@ export default function Configuracion() {
   }
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: 760, margin: '0 auto' }}>
+    <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ maxWidth: 760, margin: '0 auto' }}>
       <div style={{ marginBottom: '1.75rem' }}>
         <h1 style={{
           fontFamily: "'Bebas Neue', sans-serif",
