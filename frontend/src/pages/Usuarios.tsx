@@ -493,7 +493,7 @@ export default function Usuarios() {
 
   const cardUsuarios = (
     <div style={{ ...CARD, padding: '1.1rem 1.2rem' }}>
-      <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '0.7rem', alignItems: 'start' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '0.7rem', alignItems: 'stretch' }}>
         {usuarios.map((u) => {
           const esVos = u.username.toLowerCase() === me.username.toLowerCase()
           return (
@@ -501,6 +501,7 @@ export default function Usuarios() {
             background: 'var(--input-bg)', borderRadius: 'var(--r-md)', padding: '0.85rem',
             border: `1px solid ${esVos ? 'rgba(99,102,241,0.25)' : 'var(--bd-006)'}`,
             opacity: u.activo ? 1 : 0.72,
+            display: 'flex', flexDirection: 'column',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.7rem' }}>
               <Avatar initials={iniciales(u.username)} tone={esVos ? 'accent' : 'muted'} />
