@@ -261,6 +261,12 @@ body {
   background-color: var(--bg);
 }
 
+/* Desactiva el swipe-to-navigate horizontal nativo (Chrome/Android): choca con
+   el gesto de borde que abre la nav. El "atrás" sigue por botón del navegador/SO. */
+html, body {
+  overscroll-behavior-x: none;
+}
+
 /* Safe area utilities para iPhone (notch + home indicator) */
 @layer utilities {
   .pt-safe {

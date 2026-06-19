@@ -253,13 +253,16 @@ export default function Navbar() {
         if (Math.abs(dx) < 10) return
         swiping = true
       }
+      // Confirmado swipe horizontal de drawer: cancelamos el gesto nativo de
+      // "atrás" del navegador (solo posible con el listener no-pasivo).
+      if (e.cancelable) e.preventDefault()
       if (!open && dx > THRESHOLD) { setOpen(true); tracking = false }
       else if (open && dx < -THRESHOLD) { setOpen(false); tracking = false }
     }
     function onEnd() { tracking = false; swiping = false }
 
     window.addEventListener('touchstart', onStart, { passive: true })
-    window.addEventListener('touchmove', onMove, { passive: true })
+    window.addEventListener('touchmove', onMove, { passive: false })
     window.addEventListener('touchend', onEnd)
     return () => {
       window.removeEventListener('touchstart', onStart)
