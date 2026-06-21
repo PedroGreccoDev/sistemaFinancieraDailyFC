@@ -1228,12 +1228,30 @@ def _buscar_cliente_o_error(db: Session, nombre: str) -> Cliente:
             select(Cliente).where(Cliente.nombre.ilike(f"%{nombre}%"))
         ).all()
     )
+    return _elegir_cliente_match(resultados, nombre)
+
+
+def _elegir_cliente_match(resultados: list[Cliente], nombre: str) -> Cliente:
+    """Decide el cliente a partir de los candidatos por substring (ILIKE).
+
+    Lógica pura (sin BD) para poder testearla de forma aislada.
+    Lanza ValueError diferenciando "no existe" de "nombre ambiguo".
+    """
+    nombre = nombre.strip()
     if not resultados:
         raise ValueError(f"No encontré ningún cliente llamado '{nombre}'. ¿Cómo se llama exactamente?")
     if len(resultados) == 1:
         return resultados[0]
-    # Varios candidatos: preguntá cuál, aunque uno coincida exacto. Un match exacto
-    # NO debe ganar en silencio si hay otros que también coinciden (ej: "Bono"
+    # Si el texto tecleado coincide EXACTO (case-insensitive) con un único
+    # candidato, gana: evita que un cliente cuyo nombre es substring de otro
+    # (ej. "Rami" dentro de "Ramiro Velez") quede inalcanzable. Solo desambiguamos
+    # cuando NO hay un único match exacto: un match exacto no debe ganar en silencio
+    # frente a OTRO también exacto, pero sí frente a meros substrings más largos.
+    objetivo = nombre.lower()
+    exactos = [c for c in resultados if c.nombre.strip().lower() == objetivo]
+    if len(exactos) == 1:
+        return exactos[0]
+    # Varios candidatos sin match exacto único: preguntá cuál (ej: "Bono"
     # coincide con "Bono" y "Juan Bono"); resolver solo puede cobrarle al equivocado.
     nombres = ", ".join(c.nombre for c in resultados[:5])
     raise ValueError(
