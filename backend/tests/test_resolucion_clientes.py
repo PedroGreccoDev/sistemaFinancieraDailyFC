@@ -48,6 +48,28 @@ def test_dos_matches_exactos_no_ganan_en_silencio() -> None:
         _elegir_cliente_match(candidatos, "Bono")
 
 
+# ── Modo estricto (cobros): el match exacto NO gana en silencio ──────────────
+
+def test_estricto_match_exacto_no_gana_pide_desambiguar() -> None:
+    # Caso reportado: el operador escribe "bono"; existe "Bono" y "Nicolas Bono".
+    # En consultas "Bono" ganaría, pero en un cobro debe preguntar a cuál.
+    candidatos = [_cli("Bono"), _cli("Nicolas Bono")]
+    with pytest.raises(ValueError, match="coinciden con 'bono'"):
+        _elegir_cliente_match(candidatos, "bono", estricto=True)
+
+
+def test_estricto_unico_candidato_se_resuelve_igual() -> None:
+    # Sin ambigüedad no hay nada que confirmar, aunque sea estricto.
+    bono = _cli("Nicolas Bono")
+    assert _elegir_cliente_match([bono], "bono", estricto=True) is bono
+
+
+def test_no_estricto_conserva_atajo_de_match_exacto() -> None:
+    bono = _cli("Bono")
+    candidatos = [bono, _cli("Nicolas Bono")]
+    assert _elegir_cliente_match(candidatos, "bono") is bono
+
+
 # ── Bordes ───────────────────────────────────────────────────────────────────
 
 def test_sin_resultados_lanza_no_existe() -> None:

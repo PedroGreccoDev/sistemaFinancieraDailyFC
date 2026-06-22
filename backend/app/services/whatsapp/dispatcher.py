@@ -319,7 +319,7 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
     except (TypeError, ValueError):
         cantidad = 1
 
-    cliente = _buscar_cliente_o_error(db, cliente_nombre)
+    cliente = _buscar_cliente_o_error(db, cliente_nombre, estricto=True)
 
     # Buscar cuotas por cobrar del cliente (PENDIENTE o EN_MORA).
     stmt = (
@@ -657,7 +657,7 @@ def _buscar_fiado_abierto(db: Session, cliente_nombre: str) -> Fiado | None:
     Raises ValueError si el cliente no existe, hay ambigüedad de nombre,
     o hay múltiples fiados abiertos.
     """
-    cliente = _buscar_cliente_o_error(db, cliente_nombre)
+    cliente = _buscar_cliente_o_error(db, cliente_nombre, estricto=True)
     fiados: list[Fiado] = list(
         db.scalars(
             select(Fiado).where(
@@ -1217,10 +1217,13 @@ def _buscar_cliente_exacto(db: Session, nombre: str) -> Cliente | None:
     )
 
 
-def _buscar_cliente_o_error(db: Session, nombre: str) -> Cliente:
+def _buscar_cliente_o_error(db: Session, nombre: str, *, estricto: bool = False) -> Cliente:
     """Como _buscar_cliente_exacto pero lanza ValueError con mensaje diferenciado.
 
     Diferencia entre "no existe" y "nombre ambiguo" para dar feedback útil al operador.
+    `estricto=True` desactiva el atajo de "match exacto único gana": ante varios
+    candidatos por substring pide desambiguar siempre (se usa en operaciones de plata,
+    donde cobrarle al deudor equivocado es costoso).
     """
     nombre = nombre.strip()
     resultados: list[Cliente] = list(
@@ -1228,14 +1231,20 @@ def _buscar_cliente_o_error(db: Session, nombre: str) -> Cliente:
             select(Cliente).where(Cliente.nombre.ilike(f"%{nombre}%"))
         ).all()
     )
-    return _elegir_cliente_match(resultados, nombre)
+    return _elegir_cliente_match(resultados, nombre, estricto=estricto)
 
 
-def _elegir_cliente_match(resultados: list[Cliente], nombre: str) -> Cliente:
+def _elegir_cliente_match(
+    resultados: list[Cliente], nombre: str, *, estricto: bool = False
+) -> Cliente:
     """Decide el cliente a partir de los candidatos por substring (ILIKE).
 
     Lógica pura (sin BD) para poder testearla de forma aislada.
     Lanza ValueError diferenciando "no existe" de "nombre ambiguo".
+
+    En modo `estricto` (cobros), si hay más de un candidato se pide desambiguar
+    siempre, aunque uno coincida EXACTO con el texto tecleado: el atajo de abajo
+    es cómodo para consultas, pero para mover plata preferimos confirmar el deudor.
     """
     nombre = nombre.strip()
     if not resultados:
@@ -1247,9 +1256,10 @@ def _elegir_cliente_match(resultados: list[Cliente], nombre: str) -> Cliente:
     # (ej. "Rami" dentro de "Ramiro Velez") quede inalcanzable. Solo desambiguamos
     # cuando NO hay un único match exacto: un match exacto no debe ganar en silencio
     # frente a OTRO también exacto, pero sí frente a meros substrings más largos.
+    # En modo estricto el atajo se saltea: ante varios candidatos, siempre preguntamos.
     objetivo = nombre.lower()
     exactos = [c for c in resultados if c.nombre.strip().lower() == objetivo]
-    if len(exactos) == 1:
+    if not estricto and len(exactos) == 1:
         return exactos[0]
     # Varios candidatos sin match exacto único: preguntá cuál (ej: "Bono"
     # coincide con "Bono" y "Juan Bono"); resolver solo puede cobrarle al equivocado.
