@@ -19,6 +19,40 @@ Guía de referencia rápida para el asistente de IA. Lee esto antes de tocar cua
 
 ---
 
+## El libro de caja (`MovimientoCaja`) — la columna vertebral
+
+Toda entrada y salida de plata del negocio se anota como **un renglón** en una única tabla,
+`movimientos_caja` (modelo `MovimientoCaja`, creada en la migración `0013`). Es la **fuente
+única** del reporte de caja diaria (§7): el reporte no recalcula nada, solo **suma estos
+renglones** por moneda y día.
+
+**Cómo se escribe un renglón.** Los servicios de negocio lo asientan con el helper
+`caja.registrar(...)` (`app/services/caja.py`) en el call site de cada operación —no la máquina
+de estados del cheque, porque el significado de caja depende del contexto—. `registrar()`
+**agrega la fila a la sesión sin hacer commit**: se persiste con el commit del propio servicio,
+de modo que el asiento de caja y la operación de negocio son **atómicos** (o ambos o ninguno).
+
+**Qué guarda cada renglón:**
+- `fecha` — día local ART del evento (el reporte filtra por día directo, sin conversión de zona).
+- `moneda` — `ARS` | `USD` (la caja se lleva separada por moneda).
+- `tipo` — `INGRESO` (entra plata) | `EGRESO` (sale plata). El `monto` es **siempre positivo**;
+  el signo lo da el `tipo`.
+- `categoria` — el origen del movimiento: `COBRO_CUOTA`, `COBRO_FIADO`, `VENTA_CHEQUE`,
+  `COBRO_CHEQUE`, `COMPRA_CHEQUE`, `COMPRA_USD`, `VENTA_USD`, `OTORGAMIENTO_PRESTAMO`, `GASTO`,
+  `PAGO_PASIVO`, `VUELTO_PASIVO`.
+- `referencia_tipo` / `referencia_id` — enlace flojo a la entidad que lo originó
+  (cheque/préstamo/cuota/fiado/pasivo/gasto/movimiento).
+- `ganancia` — solo en `VENTA_USD`: ganancia FIFO realizada en ARS. Es dato de **reporte**, no de caja.
+- `detalle` — texto libre con el detalle de la línea.
+
+**"Resincronizar la caja" = rehacer esos renglones.** Cuando un módulo edita una operación ya
+asentada, **borra los renglones de esa entidad** (`caja.borrar_por_referencia(referencia_tipo,
+referencia_id)`) y los vuelve a registrar con los valores corregidos. Eso es exactamente lo que
+hacen los `resync_caja_*` / `_resync_caja_*` que aparecen en cada módulo: mantener el cuaderno
+en sync con la operación de negocio.
+
+---
+
 ## Módulos de negocio
 
 ### 1. Chequera Virtual
@@ -226,6 +260,41 @@ cliente, operación, fecha).
 - Las transacciones críticas usan `SELECT ... FOR UPDATE` para evitar race conditions.
 - **Fechas/horas en hora local de Argentina (ART), no UTC.** Usar los helpers de `app/core/fechas.py` (`hoy_local`, etc.); los gastos guardan `hora_operacion` (migración `0008`).
 - **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad.
+
+---
+
+## Testing
+
+- Los tests (`backend/tests/`) son **unitarios puros**: ejercitan la lógica de negocio
+  en memoria, **sin base de datos ni fixtures** (por eso no hay `conftest.py`). Cada test
+  arma sus objetos con instancias de modelo o funciones puras y, donde hace falta una sesión,
+  usa un stub mínimo (`FakeDB`). Se corren con `pytest` desde `backend/`.
+- Suites:
+  - **`test_business_rules.py`** — máquina de estados de cheques (transiciones válidas y
+    terminales, exige `operador_id`+`motivo`, spread de venta) y armado del cuadro de cuotas
+    (`construir_cuotas`: fechas por frecuencia/fin de mes y centavo sobrante en la última).
+  - **`test_caja_divisas.py`** — ganancia **FIFO** de divisas (`calcular_ganancia_fifo`):
+    consumo de lotes en orden, ventas parciales que cruzan lotes, venta a pérdida y stock
+    insuficiente (`ValidationError`).
+  - **`test_auth.py`** — hash de contraseñas, JWT sin `exp` (`sub`+`ver`), `get_current_user`
+    (inactivo / `token_version` desfasado → 401), `require_admin`, OTP e invitaciones.
+  - **`test_resolucion_clientes.py`** — desambiguación de clientes por nombre en el bot
+    (`_elegir_cliente_match`): atajo de match exacto, modo `estricto` en cobros y casos límite.
+- **Convención:** mantené la lógica de negocio en funciones/métodos testeables sin BD; si una
+  pieza nueva necesita una sesión, extraé la parte pura para poder cubrirla en este estilo.
+
+---
+
+## Migraciones (Alembic)
+
+- Las migraciones viven en `backend/alembic/versions/`, numeradas **secuencialmente**
+  `0001`…`NNNN`. El `revision` y el `down_revision` forman una **cadena lineal** (p. ej. el
+  `down_revision` de `0013` es `0012`); una migración nueva hereda como `down_revision` el head anterior.
+- **Nunca editar una migración ya aplicada en prod (Railway).** Para cualquier cambio de schema,
+  creá **una migración nueva** con el siguiente número, no modifiques una existente.
+- Los **ENUM de PostgreSQL** se crean dentro de la migración; los modelos los referencian con
+  `create_type=False` para que SQLAlchemy no intente recrearlos (ver también §Reglas de código).
+- Aplicar con `alembic upgrade head`.
 
 ---
 
