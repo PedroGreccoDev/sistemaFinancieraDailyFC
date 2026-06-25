@@ -14,6 +14,7 @@ from app.schemas.pasivos import (
     PasivoCancelarRequest,
     PasivoCreate,
     PasivoRead,
+    PasivoUpdate,
 )
 from app.services import pasivos as service
 
@@ -38,6 +39,11 @@ def list_pasivos(
 @router.get("/{pasivo_id}", response_model=PasivoRead)
 def get_pasivo(pasivo_id: UUID, db: DbSession) -> PasivoRead:
     return service.get_pasivo(db, pasivo_id)
+
+
+@router.patch("/{pasivo_id}", response_model=PasivoRead)
+def editar_pasivo(pasivo_id: UUID, payload: PasivoUpdate, db: DbSession) -> PasivoRead:
+    return service.editar_pasivo(db, pasivo_id, payload)
 
 
 @router.post("/{pasivo_id}/cancelar", response_model=PasivoRead)

@@ -30,6 +30,31 @@ class ChequeCreate(BaseModel):
         return self
 
 
+class ChequeUpdate(BaseModel):
+    """Corrección de la carga de un cheque desde el panel.
+
+    Todos los campos son opcionales: se aplican solo los presentes en el body
+    (`exclude_unset`). Los campos que mueven plata (`monto`, `porcentaje_compra`,
+    `porcentaje_venta`) recalculan ganancia/fiado/caja en el servicio. El servicio
+    rechaza editar cheques en estado terminal (COBRADO/RECHAZADO) y fijar
+    `porcentaje_venta`/`cliente_destino_id` en cheques que aún no se vendieron/fiaron.
+    """
+
+    nro_cheque: str | None = Field(default=None, min_length=1, max_length=64)
+    banco: str | None = Field(default=None, max_length=120)
+    monto: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=2)
+    fecha_emision: date | None = None
+    fecha_pago: date | None = None
+    porcentaje_compra: Decimal | None = Field(
+        default=None, ge=0, le=100, max_digits=7, decimal_places=4
+    )
+    porcentaje_venta: Decimal | None = Field(
+        default=None, ge=0, le=100, max_digits=7, decimal_places=4
+    )
+    cliente_origen_id: UUID | None = None
+    cliente_destino_id: UUID | None = None
+
+
 class ChequeManualTransition(BaseModel):
     target_state: ChequeEstado
     operador_id: str = Field(min_length=1, max_length=80)

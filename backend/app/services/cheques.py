@@ -21,7 +21,12 @@ from app.db.models import (
     Moneda,
 )
 from app.core.fechas import fecha_local, hoy_local
-from app.schemas.cheques import ChequeCreate, ChequeFiarRequest, ChequeManualTransition
+from app.schemas.cheques import (
+    ChequeCreate,
+    ChequeFiarRequest,
+    ChequeManualTransition,
+    ChequeUpdate,
+)
 from app.services import caja as svc_caja
 from app.services.exceptions import (
     ConflictError,
@@ -208,6 +213,123 @@ def transition_cheque(
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("No se pudo cambiar el estado del cheque.") from exc
+
+
+def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
+    """Reconstruye el rastro de caja de un cheque desde su estado actual.
+
+    Borra las líneas de caja del cheque y las vuelve a crear: egreso de compra
+    siempre; ingreso de venta/cobro según el estado. Se usa tras editar
+    monto/%compra/%venta. No hace commit (lo hace el caller)."""
+    svc_caja.borrar_por_referencia(db, "cheque", cheque.id)
+    pagado = (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(Decimal("0.01"))
+    if pagado > 0:
+        banco_txt = f" — {cheque.banco}" if cheque.banco else ""
+        svc_caja.registrar(
+            db, fecha=fecha_local(cheque.created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
+            categoria=CajaCategoria.COMPRA_CHEQUE, monto=pagado,
+            referencia_tipo="cheque", referencia_id=cheque.id,
+            detalle=f"Compra cheque Nº {cheque.nro_cheque}{banco_txt}",
+        )
+    if cheque.estado == ChequeEstado.VENDIDO and cheque.porcentaje_venta is not None:
+        ingreso = (cheque.monto * (_CIEN - cheque.porcentaje_venta) / _CIEN).quantize(Decimal("0.01"))
+        if ingreso > 0:
+            svc_caja.registrar(
+                db, fecha=fecha_local(cheque.ultimo_evento_manual_at), moneda=Moneda.ARS,
+                tipo=CajaTipo.INGRESO, categoria=CajaCategoria.VENTA_CHEQUE, monto=ingreso,
+                referencia_tipo="cheque", referencia_id=cheque.id,
+                detalle=f"Venta cheque Nº {cheque.nro_cheque}",
+            )
+    elif cheque.estado == ChequeEstado.COBRADO:
+        svc_caja.registrar(
+            db, fecha=fecha_local(cheque.ultimo_evento_manual_at), moneda=Moneda.ARS,
+            tipo=CajaTipo.INGRESO, categoria=CajaCategoria.COBRO_CHEQUE,
+            monto=cheque.monto.quantize(Decimal("0.01")),
+            referencia_tipo="cheque", referencia_id=cheque.id,
+            detalle=f"Cobro cheque Nº {cheque.nro_cheque}",
+        )
+
+
+def editar_cheque(db: Session, cheque_id: uuid.UUID, payload: ChequeUpdate) -> Cheque:
+    """Corrige la carga de un cheque (panel). Aplica reglas de bloqueo por estado.
+
+    - COBRADO/RECHAZADO: terminal, no editable.
+    - EN_CARTERA: campos base (nro, banco, monto, %compra, fechas, origen).
+    - VENDIDO/FIADO: además %venta y destino; recalcula ganancia, fiado y caja.
+    """
+    cheque = db.scalar(select(Cheque).where(Cheque.id == cheque_id).with_for_update())
+    if cheque is None:
+        raise NotFoundError("Cheque no encontrado.")
+    if cheque.estado in (ChequeEstado.COBRADO, ChequeEstado.RECHAZADO):
+        raise ConflictError(
+            f"El cheque está {cheque.estado.value} (terminal) y no se puede editar."
+        )
+
+    data = payload.model_dump(exclude_unset=True)
+    tiene_venta = cheque.estado in (ChequeEstado.VENDIDO, ChequeEstado.FIADO)
+
+    # Campos solo disponibles tras la venta/fiado.
+    for campo in ("porcentaje_venta", "cliente_destino_id"):
+        if campo in data and data[campo] is not None and not tiene_venta:
+            raise ValidationError(
+                f"No se puede fijar '{campo}' en un cheque {cheque.estado.value}: "
+                "primero hay que venderlo o fiarlo."
+            )
+
+    if "nro_cheque" in data:
+        cheque.nro_cheque = data["nro_cheque"].strip()
+    if "banco" in data:
+        cheque.banco = (data["banco"].strip() or None) if data["banco"] else None
+    if "monto" in data:
+        cheque.monto = data["monto"]
+    if "porcentaje_compra" in data:
+        cheque.porcentaje_compra = data["porcentaje_compra"]
+    if "fecha_emision" in data:
+        cheque.fecha_emision = data["fecha_emision"]
+    if "fecha_pago" in data:
+        cheque.fecha_pago = data["fecha_pago"]
+    if "cliente_origen_id" in data:
+        cheque.cliente_origen_id = data["cliente_origen_id"]
+    if tiene_venta and data.get("porcentaje_venta") is not None:
+        cheque.porcentaje_venta = data["porcentaje_venta"]
+    if tiene_venta and "cliente_destino_id" in data:
+        cheque.cliente_destino_id = data["cliente_destino_id"]
+
+    # Recalcular ganancia (venta) y la deuda del fiado abierto, si aplican.
+    if cheque.estado == ChequeEstado.VENDIDO and cheque.porcentaje_venta is not None:
+        cheque.ganancia = (
+            cheque.monto * (cheque.porcentaje_compra - cheque.porcentaje_venta) / _CIEN
+        ).quantize(Decimal("0.01"))
+    if (
+        cheque.estado == ChequeEstado.FIADO
+        and cheque.fiado_originado is not None
+        and cheque.fiado_originado.estado == FiadoEstado.ABIERTO
+    ):
+        fiado = cheque.fiado_originado
+        # Solo se recalcula la deuda si el fiado todavía no recibió cobros parciales
+        # (saldo == deuda inicial); si ya cobró algo, tocar el monto la desincronizaría.
+        deuda_inicial = (
+            fiado.monto_original * (_CIEN - fiado.porcentaje_venta) / _CIEN
+        ).quantize(Decimal("0.01"))
+        if fiado.saldo_pendiente == deuda_inicial:
+            if cheque.porcentaje_venta is not None:
+                fiado.porcentaje_venta = cheque.porcentaje_venta
+            fiado.monto_original = cheque.monto
+            fiado.saldo_pendiente = (
+                cheque.monto * (_CIEN - fiado.porcentaje_venta) / _CIEN
+            ).quantize(Decimal("0.01"))
+
+    try:
+        resync_caja_cheque(db, cheque)
+        db.commit()
+        db.refresh(cheque)
+        return cheque
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError(_msg_duplicado(db, cheque.nro_cheque, cheque.banco)) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo editar el cheque.") from exc
 
 
 def fiar_cheque(

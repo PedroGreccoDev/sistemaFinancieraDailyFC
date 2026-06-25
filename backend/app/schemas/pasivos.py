@@ -22,6 +22,21 @@ class PasivoCreate(BaseModel):
     observaciones: str | None = None
 
 
+class PasivoUpdate(BaseModel):
+    """Corrección de la carga de una deuda desde el panel.
+
+    Campos opcionales (`exclude_unset`). `acreedor`, `concepto`, `fecha_vencimiento`
+    y `observaciones` se editan siempre. `monto`/`moneda` solo si la deuda está
+    PENDIENTE y sin pagos parciales (saldo == monto); el servicio recalcula el saldo."""
+
+    acreedor: str | None = Field(default=None, min_length=1, max_length=200)
+    concepto: str | None = Field(default=None, min_length=1)
+    monto: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=2)
+    moneda: Moneda | None = None
+    fecha_vencimiento: date | None = None
+    observaciones: str | None = None
+
+
 class PasivoCancelarRequest(BaseModel):
     fecha_cancelacion: date | None = None
 

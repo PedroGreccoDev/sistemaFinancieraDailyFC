@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getGastos, createGasto } from '../api/gastos_operativos'
+import { getGastos, createGasto, editarGasto } from '../api/gastos_operativos'
 import { fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
@@ -81,6 +81,62 @@ function ModalNuevoGasto({ onClose, onSuccess }: { onClose: () => void; onSucces
     </div>
   )
 }
+// ── Modal editar gasto ────────────────────────────────────────────────
+
+function ModalEditarGasto({ gasto, onClose, onSuccess }: { gasto: GastoOperativo; onClose: () => void; onSuccess: () => void }) {
+  const [concepto, setConcepto] = useState(gasto.concepto)
+  const [monto, setMonto] = useState(gasto.monto)
+  const [moneda, setMoneda] = useState<Moneda>(gasto.moneda)
+  const [fechaOperacion, setFechaOperacion] = useState(gasto.fecha_operacion)
+  const [observaciones, setObservaciones] = useState(gasto.observaciones ?? '')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      await editarGasto(gasto.id, {
+        concepto: concepto.trim(),
+        monto: parseFloat(monto),
+        moneda,
+        fecha_operacion: fechaOperacion || null,
+        observaciones: observaciones.trim() || null,
+      })
+      toast('success', 'Gasto actualizado')
+      onSuccess()
+    } catch (err) { setError((err as Error).message) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Editar gasto</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Corregir la carga del gasto</p>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div><label style={LABEL_STYLE}>Concepto</label><input type="text" value={concepto} onChange={(e) => setConcepto(e.target.value)} required autoFocus style={INPUT_STYLE} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div><label style={LABEL_STYLE}>Monto</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required style={INPUT_STYLE} /></div>
+            <div><label style={LABEL_STYLE}>Moneda</label><select value={moneda} onChange={(e) => setMoneda(e.target.value as Moneda)} style={{ ...INPUT_STYLE, cursor: 'pointer' }}><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
+          </div>
+          <div><label style={LABEL_STYLE}>Fecha</label><input type="date" value={fechaOperacion} onChange={(e) => setFechaOperacion(e.target.value)} required style={INPUT_STYLE} /></div>
+          <div><label style={LABEL_STYLE}>Observaciones <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+          <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="submit" disabled={loading} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: loading ? 0.6 : 1 }}>{loading ? 'Guardando…' : 'Guardar cambios'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 const PALETTE = ['#fb923c', '#60a5fa', '#a78bfa', '#4ade80', '#f472b6', '#fbbf24']
 const BAR_MAX = 120 // px, la barra más alta
 
@@ -110,6 +166,7 @@ export default function Gastos() {
   const [customHasta, setCustomHasta] = useState<string | null>(null)
   const [showPicker, setShowPicker]   = useState(false)
   const [mostrarNuevo, setMostrarNuevo] = useState(false)
+  const [gastoEditar, setGastoEditar] = useState<GastoOperativo | null>(null)
   const queryClient = useQueryClient()
 
   const { data: gastos = [], isLoading } = useQuery({
@@ -120,6 +177,11 @@ export default function Gastos() {
 
   function handleNuevoSuccess() {
     setMostrarNuevo(false)
+    queryClient.invalidateQueries({ queryKey: ['gastos'] })
+  }
+
+  function handleEditarSuccess() {
+    setGastoEditar(null)
     queryClient.invalidateQueries({ queryKey: ['gastos'] })
   }
 
@@ -516,6 +578,14 @@ export default function Gastos() {
                     }}>
                       −{fmtMonto(g.monto, g.moneda)}
                     </span>
+
+                    <button
+                      onClick={() => setGastoEditar(g)}
+                      title="Editar gasto"
+                      style={{ ...btnBordered('neutral'), fontSize: '0.66rem', padding: '2px 9px', flexShrink: 0 }}
+                    >
+                      Editar
+                    </button>
                   </div>
                 ))}
               </div>
@@ -556,6 +626,7 @@ export default function Gastos() {
       </div>
 
       {mostrarNuevo && <ModalNuevoGasto onClose={() => setMostrarNuevo(false)} onSuccess={handleNuevoSuccess} />}
+      {gastoEditar && <ModalEditarGasto gasto={gastoEditar} onClose={() => setGastoEditar(null)} onSuccess={handleEditarSuccess} />}
     </div>
   )
 }

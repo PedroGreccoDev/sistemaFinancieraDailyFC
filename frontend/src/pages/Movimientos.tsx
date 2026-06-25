@@ -1,11 +1,13 @@
 import { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { getMovimientos } from '../api/movimientos'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { getMovimientos, editarMovimiento } from '../api/movimientos'
 import { getGastos } from '../api/gastos_operativos'
 import { getCheques } from '../api/cheques'
 import { getPrestamos } from '../api/prestamos'
 import { getClientes } from '../api/clientes'
 import { fmtUSD, fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
+import { btnSolid, btnBordered } from '../lib/ui'
+import { useToast } from '../lib/toast'
 import { SkeletonRows } from '../components/Skeleton'
 import type { MovimientoEfectivo, GastoOperativo, Cheque, Prestamo } from '../types'
 import DateRangePicker from '../components/DateRangePicker'
@@ -23,6 +25,78 @@ const CARD   = {
   border:       '1px solid var(--bd-006)',
   boxShadow:    'var(--shadow-card)',
   borderRadius: 'var(--r-lg)',
+}
+const MODAL_BG = 'var(--modal)'
+const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
+const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
+
+// ── Modal editar divisa (compra/venta USD) ────────────────────────────
+
+function ModalEditarDivisa({ mov, editableDinero, onClose, onSuccess }: { mov: MovimientoEfectivo; editableDinero: boolean; onClose: () => void; onSuccess: () => void }) {
+  const [monto, setMonto] = useState(mov.monto)
+  const [cotiz, setCotiz] = useState(mov.cotizacion_aplicada)
+  const [observaciones, setObservaciones] = useState(mov.observaciones ?? '')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
+
+  const montoNum = parseFloat(monto) || 0
+  const cotizNum = parseFloat(cotiz) || 0
+  const pesos = montoNum * cotizNum
+  const esCompra = mov.tipo === 'COMPRA'
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      await editarMovimiento(mov.id, {
+        observaciones: observaciones.trim() || null,
+        ...(editableDinero ? { monto: montoNum, cotizacion_aplicada: cotizNum } : {}),
+      })
+      toast('success', 'Operación actualizada')
+      onSuccess()
+    } catch (err) { setError((err as Error).message) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '400px', maxHeight: '92dvh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Editar {esCompra ? 'compra' : 'venta'} USD</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Operación de divisas</p>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          {!editableDinero && (
+            <div style={{ background: 'color-mix(in srgb, var(--warning) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--warning) 25%, transparent)', borderRadius: 'var(--r-md)', padding: '0.6rem 0.8rem' }}>
+              <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'var(--warning)', lineHeight: 1.4 }}>
+                {esCompra
+                  ? 'Este lote ya fue consumido por una o más ventas (FIFO): no se puede cambiar el monto ni la cotización. Corregilo con una operación inversa.'
+                  : 'Hay ventas posteriores que dependen de esta imputación FIFO: solo se puede editar la última venta.'}
+              </p>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div><label style={LABEL_STYLE}>Cantidad USD</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required disabled={!editableDinero} style={{ ...INPUT_STYLE, opacity: editableDinero ? 1 : 0.5, cursor: editableDinero ? 'auto' : 'not-allowed' }} /></div>
+            <div><label style={LABEL_STYLE}>Cotización ($/USD)</label><input type="number" step="0.000001" min="0.000001" value={cotiz} onChange={(e) => setCotiz(e.target.value)} required disabled={!editableDinero} style={{ ...INPUT_STYLE, opacity: editableDinero ? 1 : 0.5, cursor: editableDinero ? 'auto' : 'not-allowed' }} /></div>
+          </div>
+          {editableDinero && (
+            <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.6rem 0.9rem', display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
+              <span style={{ color: 'rgba(100,116,139,0.7)' }}>Pesos {esCompra ? 'que salen' : 'que entran'}</span>
+              <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtMonto(pesos, 'ARS')}</span>
+            </div>
+          )}
+          <div><label style={LABEL_STYLE}>Observaciones <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+          <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="submit" disabled={loading} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: loading ? 0.6 : 1 }}>{loading ? 'Guardando…' : 'Guardar cambios'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
 }
 
 interface MovimientoUnificado {
@@ -130,6 +204,8 @@ export default function Movimientos() {
   const [customDesde, setCustomDesde] = useState<string | null>(null)
   const [customHasta, setCustomHasta] = useState<string | null>(null)
   const [showPicker, setShowPicker]   = useState(false)
+  const [editarDivisaId, setEditarDivisaId] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
   const { data: divisas   = [], isLoading: loadingDiv } = useQuery({ queryKey: ['movimientos'],    queryFn: getMovimientos,       refetchInterval: 30_000 })
   const { data: gastos    = [], isLoading: loadingGas } = useQuery({ queryKey: ['gastos'],         queryFn: getGastos,            refetchInterval: 30_000 })
@@ -140,6 +216,28 @@ export default function Movimientos() {
   const isLoading = loadingDiv || loadingGas || loadingChe || loadingPre
 
   const clienteMap = useMemo(() => new Map(clientes.map((c) => [c.id, c.nombre])), [clientes])
+
+  // ID de la última venta de divisas (la única editable en monto/cotización, por FIFO).
+  const ultimaVentaId = useMemo(() => {
+    const ventas = divisas.filter((m) => m.tipo === 'VENTA')
+    if (ventas.length === 0) return null
+    return ventas.reduce((a, b) =>
+      `${b.fecha_operacion}|${b.created_at}` > `${a.fecha_operacion}|${a.created_at}` ? b : a,
+    ).id
+  }, [divisas])
+
+  function dineroEditable(mov: MovimientoEfectivo): boolean {
+    return mov.tipo === 'COMPRA'
+      ? parseFloat(mov.usd_restante) === parseFloat(mov.monto)
+      : mov.id === ultimaVentaId
+  }
+
+  function handleEditDivisa() {
+    setEditarDivisaId(null)
+    queryClient.invalidateQueries({ queryKey: ['movimientos'] })
+  }
+
+  const movEditar = editarDivisaId ? divisas.find((m) => m.id === editarDivisaId) ?? null : null
 
   const todos = useMemo(
     () => normalizar(divisas, gastos, cheques, prestamos, clienteMap),
@@ -371,12 +469,32 @@ export default function Movimientos() {
                     }}>
                       {item.esGasto ? `−${montoFmt}` : montoFmt}
                     </span>
+
+                    {/* Editar — solo divisas (las demás secciones se editan en su página) */}
+                    {item.seccion === 'DIVISAS' && (
+                      <button
+                        onClick={() => setEditarDivisaId(item.id)}
+                        title="Editar operación de divisas"
+                        style={{ ...btnBordered('neutral'), fontSize: '0.66rem', padding: '2px 9px', flexShrink: 0 }}
+                      >
+                        Editar
+                      </button>
+                    )}
                   </div>
                 )
               })}
             </div>
           ))}
         </div>
+      )}
+
+      {movEditar && (
+        <ModalEditarDivisa
+          mov={movEditar}
+          editableDinero={dineroEditable(movEditar)}
+          onClose={() => setEditarDivisaId(null)}
+          onSuccess={handleEditDivisa}
+        />
       )}
     </div>
   )

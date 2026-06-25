@@ -18,6 +18,18 @@ class GastoOperativoCreate(BaseModel):
     observaciones: str | None = None
 
 
+class GastoOperativoUpdate(BaseModel):
+    """Corrección de la carga de un gasto desde el panel. Campos opcionales
+    (`exclude_unset`). Editar monto/moneda/fecha rehace su línea de caja."""
+
+    concepto: str | None = Field(default=None, min_length=1, max_length=300)
+    monto: Decimal | None = Field(default=None, gt=0)
+    moneda: Moneda | None = None
+    fecha_operacion: date | None = None
+    hora_operacion: time | None = None
+    observaciones: str | None = None
+
+
 class GastoOperativoRead(BaseModel):
     id: UUID
     concepto: str

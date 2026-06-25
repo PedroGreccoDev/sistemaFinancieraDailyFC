@@ -26,6 +26,7 @@ from app.schemas.pasivos import (
     PasivoCancelarEfectivoRequest,
     PasivoCancelarRequest,
     PasivoCreate,
+    PasivoUpdate,
 )
 from app.services.exceptions import (
     ConflictError,
@@ -71,6 +72,48 @@ def list_pasivos(db: Session, estado: PasivoEstado | None = None) -> list[Pasivo
         stmt = stmt.where(Pasivo.estado == estado)
     stmt = stmt.order_by(Pasivo.fecha_vencimiento.asc().nulls_last(), Pasivo.created_at.desc())
     return list(db.scalars(stmt).all())
+
+
+def editar_pasivo(
+    db: Session, pasivo_id: uuid.UUID, payload: PasivoUpdate
+) -> Pasivo:
+    """Corrige la carga de una deuda (panel).
+
+    `acreedor`, `concepto`, `fecha_vencimiento` y `observaciones` se editan siempre.
+    `monto`/`moneda` solo si la deuda está PENDIENTE y sin pagos parciales (cambiarlos
+    con pagos hechos desincronizaría la caja); al editar el monto se recalcula el saldo.
+    El alta de un pasivo no genera línea de caja, así que no hay nada que resincronizar."""
+    pasivo = db.scalar(select(Pasivo).where(Pasivo.id == pasivo_id).with_for_update())
+    if pasivo is None:
+        raise NotFoundError(f"Pasivo {pasivo_id} no encontrado.")
+
+    data = payload.model_dump(exclude_unset=True)
+    cambia_dinero = "monto" in data or "moneda" in data
+    tiene_pagos = pasivo.saldo_pendiente != pasivo.monto
+    if cambia_dinero and (pasivo.estado == PasivoEstado.CANCELADA or tiene_pagos):
+        raise ConflictError(
+            "La deuda está cancelada o ya tiene pagos parciales; solo se pueden editar "
+            "acreedor, concepto, vencimiento y observaciones."
+        )
+
+    if "acreedor" in data:
+        pasivo.acreedor = data["acreedor"].strip()
+    if "concepto" in data:
+        pasivo.concepto = data["concepto"].strip()
+    if "fecha_vencimiento" in data:
+        pasivo.fecha_vencimiento = data["fecha_vencimiento"]
+    if "observaciones" in data:
+        pasivo.observaciones = data["observaciones"]
+    if "moneda" in data:
+        pasivo.moneda = data["moneda"]
+    if "monto" in data:
+        # Sin pagos parciales (garantizado arriba): el saldo sigue al monto.
+        pasivo.monto = data["monto"]
+        pasivo.saldo_pendiente = data["monto"]
+
+    db.commit()
+    db.refresh(pasivo)
+    return pasivo
 
 
 def cancelar_pasivo(

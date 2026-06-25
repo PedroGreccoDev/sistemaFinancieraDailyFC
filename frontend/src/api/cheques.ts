@@ -28,3 +28,22 @@ export const fiarCheque = (cheque_id: string, payload: FiarChequePayload): Promi
     method: 'POST',
     body: JSON.stringify(payload),
   })
+
+// Corrección de la carga de un cheque. Solo se mandan los campos a cambiar.
+export interface ChequeUpdatePayload {
+  nro_cheque?: string
+  banco?: string | null
+  monto?: number
+  fecha_emision?: string | null
+  fecha_pago?: string | null
+  porcentaje_compra?: number
+  porcentaje_venta?: number
+  cliente_origen_id?: string | null
+  cliente_destino_id?: string | null
+}
+
+export const editarCheque = (cheque_id: string, payload: ChequeUpdatePayload): Promise<Cheque> =>
+  apiFetch<Cheque>(`/cheques/${encodeURIComponent(cheque_id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })

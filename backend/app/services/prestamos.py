@@ -26,9 +26,15 @@ from app.schemas.prestamos import (
     CuotaCobrarConChequeRequest,
     CuotasLoteCobrarConChequeRequest,
     PrestamoCreate,
+    PrestamoUpdate,
 )
 from app.services import caja as svc_caja
-from app.services.exceptions import ConflictError, DatabaseWriteError, NotFoundError
+from app.services.exceptions import (
+    ConflictError,
+    DatabaseWriteError,
+    NotFoundError,
+    ValidationError,
+)
 
 
 def _registrar_cobro_cuota(db: Session, prestamo: Prestamo, cuota: Cuota) -> None:
@@ -162,6 +168,83 @@ def list_prestamos(db: Session, estado: PrestamoEstado | None = None) -> list[Pr
     if estado is not None:
         query = query.where(Prestamo.estado == estado)
     return list(db.scalars(query.order_by(Prestamo.created_at.desc())))
+
+
+def editar_prestamo(
+    db: Session, prestamo_id: uuid.UUID, payload: PrestamoUpdate
+) -> Prestamo:
+    """Corrige la carga de un préstamo (panel) regenerando el cuadro de cuotas.
+
+    Solo se permite si el préstamo está ACTIVO y NINGUNA cuota fue cobrada: editar
+    capital/total/cantidad/frecuencia/fecha rehace todas las cuotas y el egreso de
+    caja del otorgamiento. Si ya hubo cobros, se rechaza (desincronizaría la caja)."""
+    prestamo = db.scalar(
+        select(Prestamo)
+        .options(selectinload(Prestamo.cuotas_detalle))
+        .where(Prestamo.id == prestamo_id)
+        .with_for_update()
+    )
+    if prestamo is None:
+        raise NotFoundError("Prestamo no encontrado.")
+    if prestamo.estado != PrestamoEstado.ACTIVO:
+        raise ConflictError(
+            f"El préstamo está {prestamo.estado.value} y no se puede editar."
+        )
+    if any(c.estado == CuotaEstado.COBRADA for c in prestamo.cuotas_detalle):
+        raise ConflictError(
+            "El préstamo ya tiene cuotas cobradas; no se puede editar su carga. "
+            "Anulá los cobros o creá un préstamo nuevo."
+        )
+
+    data = payload.model_dump(exclude_unset=True)
+    credito = data.get("credito", prestamo.credito)
+    total = data.get("total_a_cobrar", prestamo.total_a_cobrar)
+    cantidad = data.get("cuotas", prestamo.cuotas)
+    frecuencia = data.get("frecuencia", prestamo.frecuencia)
+    moneda = data.get("moneda", prestamo.moneda)
+    fecha_inicio = data.get("fecha_inicio", prestamo.fecha_inicio)
+    if total < credito:
+        raise ValidationError("El total a cobrar debe ser mayor o igual al capital.")
+
+    prestamo.credito = credito
+    prestamo.total_a_cobrar = total
+    prestamo.cuotas = cantidad
+    prestamo.frecuencia = frecuencia
+    prestamo.moneda = moneda
+    prestamo.fecha_inicio = fecha_inicio
+    prestamo.ganancia = total - credito
+
+    # Regenerar el cuadro de cuotas (borra las viejas vía delete-orphan).
+    prestamo.cuotas_detalle.clear()
+    db.flush()
+    prestamo.cuotas_detalle = construir_cuotas(
+        prestamo=prestamo,
+        fecha_inicio=fecha_inicio,
+        cantidad=cantidad,
+        frecuencia=frecuencia,
+        total_a_cobrar=total,
+    )
+
+    try:
+        # Rehacer el egreso de caja del otorgamiento (monto/moneda/fecha pueden cambiar).
+        svc_caja.borrar_por_referencia(db, "prestamo", prestamo.id)
+        cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
+        svc_caja.registrar(
+            db,
+            fecha=fecha_inicio,
+            moneda=moneda,
+            tipo=CajaTipo.EGRESO,
+            categoria=CajaCategoria.OTORGAMIENTO_PRESTAMO,
+            monto=credito,
+            referencia_tipo="prestamo",
+            referencia_id=prestamo.id,
+            detalle=f"Préstamo a {cliente_nombre}",
+        )
+        db.commit()
+        return get_prestamo(db, prestamo.id)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo editar el prestamo.") from exc
 
 
 def cobrar_cuota(

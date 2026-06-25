@@ -36,6 +36,7 @@ Guía de referencia rápida para el asistente de IA. Lee esto antes de tocar cua
 - `FIADO` **solo** se procesa con la transacción atómica `fiar_cheque` (crea cheque FIADO + registro `Fiado` en el mismo commit). **No genera préstamo ni cuotas.**
 - Toda transición manual requiere `operador_id` y `motivo` no vacíos.
 - **Foto del cheque:** los cheques cargados por WhatsApp guardan la imagen (migración `0009`); se visualiza en el panel con `ChequeFotoModal`.
+- **Editar carga (panel + bot):** `PATCH /cheques/{id}` (`svc_cheques.editar_cheque`) corrige la carga y resincroniza la caja (`resync_caja_cheque`). Reglas: `COBRADO`/`RECHAZADO` son terminales y NO editables; `EN_CARTERA` edita campos base; `VENDIDO`/`FIADO` además `porcentaje_venta` (recalcula ganancia, y el saldo del fiado solo si aún no recibió cobros parciales). En el panel está el botón "Editar" por fila en Cartera (en cartera y en el historial de ventas); el modal permite además reasignar cliente origen/destino (con alta de cliente inline).
 
 ### 2. Fiados _(módulo agregado 2026-06-09)_
 
@@ -78,6 +79,8 @@ El cliente puede cancelar esa deuda de dos formas:
   crédito es un **egreso** del día en que se da. _(Implementación pendiente: hoy el reporte
   suma la ganancia entera por `created_at` del préstamo — ver §7.)_
 
+**Editar carga del préstamo:** `PATCH /prestamos/{id}` (`svc_prestamos.editar_prestamo`) **solo si el préstamo está ACTIVO y ninguna cuota fue cobrada**; cambiar capital/total/cantidad/frecuencia/fecha **regenera el cuadro de cuotas** y rehace el egreso de caja del otorgamiento. En el panel, botón "Editar" en la tarjeta (solo cuando no hay cuotas cobradas).
+
 **Cobro de cuotas desde el panel web** (además del bot, intent `COBRAR_CUOTA`):
 - Cobro simple (1 cuota): `POST /prestamos/{id}/cuotas/{cuota_id}/cobros`.
 - Cobro simple en lote (multi-selección): `POST /prestamos/{id}/cuotas/cobrar-lote`.
@@ -100,6 +103,7 @@ El cliente puede cancelar esa deuda de dos formas:
   La ganancia se realiza en la **venta**; la compra solo incorpora stock a su costo.
   _(Implementación pendiente: hoy `ganancia` se acepta del payload sin calcularse y no hay lotes.)_
 - El widget de Dólar Blue en el frontend es **solo decorativo** (consume DolarAPI externamente).
+- **Editar carga:** `PATCH /movimientos-efectivo/{id}` (`svc_movimientos.editar_movimiento`). `cliente`/`observaciones` siempre; `monto`/`cotizacion_aplicada` solo si la operación no está trabada en la cadena FIFO: una **COMPRA** únicamente si su lote está intacto (`usd_restante == monto`), una **VENTA** únicamente si es la última. Al editar se reimputa toda la cadena (`_reimputar_fifo`) y se resincronizan sus líneas de caja. En el panel, botón "Editar" solo en las filas de Divisas de la página Movimientos (las divisas no tienen página propia).
 
 ### 5. Pasivos _(módulo agregado 2026-06-08)_
 
@@ -115,6 +119,7 @@ El cliente puede cancelar esa deuda de dos formas:
   **(b)** el negocio queda debiendo → se crea **automáticamente un pasivo a favor del cliente**
   por el monto del vuelto. _(Implementación pendiente: hoy el excedente se descarta.)_
 - Campos: `acreedor`, `concepto`, `monto`, `moneda`, `fecha_vencimiento` (opcional).
+- **Editar carga:** `PATCH /pasivos/{id}` (`svc_pasivos.editar_pasivo`). `acreedor`/`concepto`/`fecha_vencimiento`/`observaciones` siempre; `monto`/`moneda` solo si está `PENDIENTE` y sin pagos parciales (`saldo == monto`), y al cambiar el monto se recalcula el saldo. El alta no genera línea de caja, así que no hay nada que resincronizar. En el panel, botón "Editar" por fila en Deudas.
 - El cierre de caja incluye un snapshot de pasivos pendientes por moneda, **sin filtro de periodo**.
 - No existe facturación ni concepto fiscal asociado.
 
@@ -124,6 +129,7 @@ El cliente puede cancelar esa deuda de dos formas:
 - **Carga via bot de WhatsApp** (intent `REGISTRAR_GASTO`) o manual vía API.
 - Campos: `concepto`, `monto`, `moneda` (default ARS), `fecha_operacion`, `observaciones`.
 - Se descuentan como **egreso** en el reporte para obtener el **neto del período**.
+- **Editar carga:** `PATCH /gastos-operativos/{id}` (`svc_gastos.editar_gasto`) corrige concepto/monto/moneda/fecha/observaciones y resincroniza su egreso de caja (`_resync_caja_gasto`). Sin reglas de bloqueo (un gasto es un egreso simple). En el panel, botón "Editar" por fila en la página Gastos.
 - **Por moneda (régimen definido 2026-06-25):** un gasto en USD resta del **neto USD** y un gasto
   en ARS resta del **neto ARS**. La caja se lleva separada por moneda. _(Implementación pendiente:
   hoy el reporte solo resta los gastos ARS y el neto es único.)_

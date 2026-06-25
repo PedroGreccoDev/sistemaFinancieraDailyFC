@@ -21,6 +21,20 @@ export const createPasivo = (payload: PasivoCreatePayload): Promise<Pasivo> =>
 export const cancelarPasivo = (id: string): Promise<Pasivo> =>
   apiFetch<Pasivo>(`/pasivos/${id}/cancelar`, { method: 'POST', body: JSON.stringify({}) })
 
+// Corrección de la carga de una deuda. `monto`/`moneda` solo si está PENDIENTE y
+// sin pagos parciales (lo valida el backend).
+export interface PasivoUpdatePayload {
+  acreedor?: string
+  concepto?: string
+  monto?: number
+  moneda?: Moneda
+  fecha_vencimiento?: string | null
+  observaciones?: string | null
+}
+
+export const editarPasivo = (id: string, payload: PasivoUpdatePayload): Promise<Pasivo> =>
+  apiFetch<Pasivo>(`/pasivos/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+
 export const cancelarPasivoEfectivo = (
   id: string,
   payload: { monto_cobrado: number; fecha_cancelacion?: string | null },

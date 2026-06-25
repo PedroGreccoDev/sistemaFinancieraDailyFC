@@ -33,6 +33,22 @@ class PrestamoCreateFromCheque(PrestamoBase):
     pass
 
 
+class PrestamoUpdate(BaseModel):
+    """Corrección de la carga de un préstamo desde el panel.
+
+    Campos opcionales (`exclude_unset`). El servicio solo permite editar si NINGUNA
+    cuota fue cobrada (el préstamo sigue ACTIVO e intacto); cambiar capital, total,
+    cantidad de cuotas, frecuencia o fecha de inicio **regenera el cuadro de cuotas**
+    y rehace el egreso de caja del otorgamiento."""
+
+    credito: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=2)
+    moneda: Moneda | None = None
+    cuotas: int | None = Field(default=None, gt=0)
+    frecuencia: FrecuenciaCuotas | None = None
+    total_a_cobrar: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=2)
+    fecha_inicio: date | None = None
+
+
 class CuotaRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

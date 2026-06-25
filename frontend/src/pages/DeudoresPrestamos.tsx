@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPrestamos, createPrestamo, cobrarCuotasLote, cobrarCuotasConChequeLote } from '../api/prestamos'
+import { getPrestamos, createPrestamo, cobrarCuotasLote, cobrarCuotasConChequeLote, editarPrestamo } from '../api/prestamos'
 import { getClientes, createCliente } from '../api/clientes'
 import { fmtMonto, fmtDate, daysUntil } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
@@ -481,11 +481,138 @@ function ModalNuevoPrestamo({ onClose, onSuccess }: { onClose: () => void; onSuc
   )
 }
 
+// ── Modal editar préstamo ─────────────────────────────────────────────
+
+function ModalEditarPrestamo({ prestamo, clienteNombre, onClose, onSuccess }: { prestamo: Prestamo; clienteNombre: string; onClose: () => void; onSuccess: () => void }) {
+  const toast = useToast()
+  const [credito, setCredito] = useState(prestamo.credito)
+  const [moneda, setMoneda] = useState<Moneda>(prestamo.moneda)
+  const [cuotas, setCuotas] = useState(String(prestamo.cuotas))
+  const [frecuencia, setFrecuencia] = useState<Frecuencia>(prestamo.frecuencia)
+  const [totalACobrar, setTotalACobrar] = useState(prestamo.total_a_cobrar)
+  const [fechaInicio, setFechaInicio] = useState(prestamo.fecha_inicio)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const creditoNum = parseFloat(credito) || 0
+  const totalNum = parseFloat(totalACobrar) || 0
+  const cuotasNum = parseInt(cuotas) || 0
+  const ganancia = totalNum - creditoNum
+  const montoCuota = cuotasNum > 0 ? totalNum / cuotasNum : 0
+  const showPreview = creditoNum > 0 && totalNum >= creditoNum && cuotasNum > 0
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (totalNum < creditoNum) { setError('El total a cobrar debe ser mayor o igual al capital.'); return }
+    setError(null)
+    setLoading(true)
+    try {
+      await editarPrestamo(prestamo.id, { credito: creditoNum, moneda, cuotas: cuotasNum, frecuencia, total_a_cobrar: totalNum, fecha_inicio: fechaInicio || null })
+      toast('success', 'Préstamo actualizado · cuotas regeneradas')
+      onSuccess()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '400px', maxHeight: '92dvh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 1 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Editar préstamo</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{clienteNombre} · regenera el cuadro de cuotas</p>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div style={{ background: 'color-mix(in srgb, var(--warning) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--warning) 25%, transparent)', borderRadius: 'var(--r-md)', padding: '0.6rem 0.8rem' }}>
+            <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'var(--warning)', lineHeight: 1.4 }}>Cambiar capital, total, cantidad o frecuencia <strong>recalcula todas las cuotas</strong> (incluidas sus fechas).</p>
+          </div>
+
+          <div>
+            <label style={LABEL_STYLE}>Moneda</label>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {(['ARS', 'USD'] as Moneda[]).map((m) => (
+                <button key={m} type="button" onClick={() => setMoneda(m)}
+                  style={{ ...(moneda === m ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.45rem', fontSize: '0.8rem' }}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={LABEL_STYLE}>Capital</label>
+              <input type="number" step="0.01" min="0.01" value={credito} onChange={(e) => setCredito(e.target.value)} required style={INPUT_STYLE} />
+            </div>
+            <div>
+              <label style={LABEL_STYLE}>Total a cobrar</label>
+              <input type="number" step="0.01" min="0.01" value={totalACobrar} onChange={(e) => setTotalACobrar(e.target.value)} required style={INPUT_STYLE} />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={LABEL_STYLE}>Cuotas</label>
+              <input type="number" step="1" min="1" value={cuotas} onChange={(e) => setCuotas(e.target.value)} required style={INPUT_STYLE} />
+            </div>
+            <div>
+              <label style={LABEL_STYLE}>Frecuencia</label>
+              <select value={frecuencia} onChange={(e) => setFrecuencia(e.target.value as Frecuencia)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+                {FRECUENCIAS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label style={LABEL_STYLE}>Fecha de inicio</label>
+            <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} style={INPUT_STYLE} />
+          </div>
+
+          {showPreview && (
+            <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.75rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+              {[
+                { label: 'Capital', value: fmtMonto(creditoNum, moneda) },
+                { label: 'Total a cobrar', value: fmtMonto(totalNum, moneda) },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
+                  <span style={{ color: 'rgba(100,116,139,0.7)' }}>{label}</span>
+                  <span style={{ color: 'var(--text-1)', fontWeight: 600 }}>{value}</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.35rem', borderTop: '1px solid var(--bd-006)' }}>
+                <span style={{ color: 'var(--success)', fontWeight: 700 }}>Ganancia</span>
+                <span style={{ color: 'var(--success)', fontWeight: 700 }}>{fmtMonto(ganancia, moneda)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.72rem' }}>
+                <span style={{ color: 'rgba(100,116,139,0.6)' }}>Cuota aprox.</span>
+                <span style={{ color: 'rgba(100,116,139,0.6)' }}>{fmtMonto(montoCuota, moneda)}</span>
+              </div>
+            </div>
+          )}
+
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="submit" disabled={loading} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: loading ? 0.5 : 1 }}>
+              {loading ? 'Guardando…' : 'Guardar cambios'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── Página principal ──────────────────────────────────────────────────
 
 export default function DeudoresPrestamos() {
   const [creandoPrestamo, setCreandoPrestamo] = useState(false)
   const [cobrandoCuota, setCobrandoCuota] = useState<Prestamo | null>(null)
+  const [editandoPrestamo, setEditandoPrestamo] = useState<Prestamo | null>(null)
   const queryClient = useQueryClient()
 
   const { data: prestamos, isLoading: loadingP, error: errP } = useQuery({
@@ -521,6 +648,11 @@ export default function DeudoresPrestamos() {
 
   function handleCobrarCuota() {
     setCobrandoCuota(null)
+    queryClient.invalidateQueries({ queryKey: ['prestamos'] })
+  }
+
+  function handleEditarPrestamo() {
+    setEditandoPrestamo(null)
     queryClient.invalidateQueries({ queryKey: ['prestamos'] })
   }
 
@@ -619,13 +751,25 @@ export default function DeudoresPrestamos() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setCobrandoCuota(p)}
-                style={{ ...btnSolid('primary'), width: '100%', marginTop: '0.75rem', padding: '0.45rem', fontSize: '0.75rem', textAlign: 'center' }}
-              >
-                Cobrar cuota
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setCobrandoCuota(p)}
+                  style={{ ...btnSolid('primary'), flex: 1, padding: '0.45rem', fontSize: '0.75rem', textAlign: 'center' }}
+                >
+                  Cobrar cuota
+                </button>
+                {cobradas === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setEditandoPrestamo(p)}
+                    title="Corregir la carga del préstamo"
+                    style={{ ...btnBordered('neutral'), padding: '0.45rem 0.8rem', fontSize: '0.75rem' }}
+                  >
+                    Editar
+                  </button>
+                )}
+              </div>
             </div>
           )
         })}
@@ -666,6 +810,14 @@ export default function DeudoresPrestamos() {
           clienteNombre={clienteMap.get(cobrandoCuota.cliente_id) ?? '…'}
           onClose={() => setCobrandoCuota(null)}
           onSuccess={handleCobrarCuota}
+        />
+      )}
+      {editandoPrestamo && (
+        <ModalEditarPrestamo
+          prestamo={editandoPrestamo}
+          clienteNombre={clienteMap.get(editandoPrestamo.cliente_id) ?? '…'}
+          onClose={() => setEditandoPrestamo(null)}
+          onSuccess={handleEditarPrestamo}
         />
       )}
     </div>

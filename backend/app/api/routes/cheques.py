@@ -14,6 +14,7 @@ from app.schemas.cheques import (
     ChequeFiarResponse,
     ChequeManualTransition,
     ChequeRead,
+    ChequeUpdate,
 )
 from app.services import cheques as service
 
@@ -41,6 +42,11 @@ def list_cartera(db: DbSession) -> list[ChequeRead]:
 @router.get("/{cheque_id}", response_model=ChequeRead)
 def get_cheque(cheque_id: UUID, db: DbSession) -> ChequeRead:
     return service.get_cheque(db, cheque_id)
+
+
+@router.patch("/{cheque_id}", response_model=ChequeRead)
+def editar_cheque(cheque_id: UUID, payload: ChequeUpdate, db: DbSession) -> ChequeRead:
+    return service.editar_cheque(db, cheque_id, payload)
 
 
 @router.get("/{cheque_id}/foto")

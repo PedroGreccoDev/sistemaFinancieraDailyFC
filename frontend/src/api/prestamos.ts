@@ -20,6 +20,23 @@ export const createPrestamo = (payload: PrestamoCreate): Promise<Prestamo> =>
     body: JSON.stringify(payload),
   })
 
+// Corrección de la carga de un préstamo. Solo permitido si ninguna cuota fue
+// cobrada (lo valida el backend); regenera el cuadro de cuotas.
+export interface PrestamoUpdatePayload {
+  credito?: number
+  moneda?: Moneda
+  cuotas?: number
+  frecuencia?: Frecuencia
+  total_a_cobrar?: number
+  fecha_inicio?: string | null
+}
+
+export const editarPrestamo = (id: string, payload: PrestamoUpdatePayload): Promise<Prestamo> =>
+  apiFetch<Prestamo>(`/prestamos/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+
 export const cobrarCuotaEfectivo = (
   prestamoId: string,
   cuotaId: string,
