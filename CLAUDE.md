@@ -107,11 +107,13 @@ El cliente puede cancelar esa deuda de dos formas:
 - La ganancia teórica del préstamo es `total_a_cobrar - credito` (se guarda como referencia).
 - El préstamo pasa a estado `CANCELADO` automáticamente cuando se cobra la última cuota.
 - El monto de cada cuota se divide uniformemente; el centavo sobrante cae en la **última** cuota.
-- **Reconocimiento en caja (régimen caja diaria, definido 2026-06-25):** el ingreso se
-  cuenta **al cobrar cada cuota, NO al originar el préstamo**. Cada cuota cobrada suma a la
-  caja diaria del día del cobro, con detalle de cliente/préstamo/cuota. El otorgamiento del
-  crédito es un **egreso** del día en que se da. _(Implementación pendiente: hoy el reporte
-  suma la ganancia entera por `created_at` del préstamo — ver §7.)_
+- **Reconocimiento en caja (régimen caja diaria, definido 2026-06-25 — ✅ implementado):** el
+  ingreso se cuenta **al cobrar cada cuota, NO al originar el préstamo**. Cada cuota cobrada
+  asienta un INGRESO `COBRO_CUOTA` en la `fecha_cobro`, con detalle de cliente/préstamo/cuota
+  (`svc_prestamos._registrar_cobro_cuota`, usado por cobro simple y en lote). El otorgamiento
+  del crédito asienta un EGRESO `OTORGAMIENTO_PRESTAMO` el día en que se da (`create_prestamo`).
+  El cobro **con cheque** no asienta efectivo: el cheque entra a cartera y la plata recién se
+  reconoce al venderlo/cobrarlo. (Migrado en el commit `feat(caja): reporte de caja diaria…`.)
 
 **Editar carga del préstamo:** `PATCH /prestamos/{id}` (`svc_prestamos.editar_prestamo`) **solo si el préstamo está ACTIVO y ninguna cuota fue cobrada**; cambiar capital/total/cantidad/frecuencia/fecha **regenera el cuadro de cuotas** y rehace el egreso de caja del otorgamiento. En el panel, botón "Editar" en la tarjeta (solo cuando no hay cuotas cobradas).
 
@@ -185,15 +187,18 @@ cliente, operación, fecha).
 - `GET /api/v1/reportes/cobros-cuotas?desde=&hasta=` devuelve el historial detallado de cuotas cobradas.
 - El historial unificado de Movimientos (frontend) incluye también los cobros de cuotas y los gastos.
 
-> ⏳ **Estado de implementación:** el endpoint actual `GET /api/v1/reportes/ganancias` todavía
-> funciona en modo devengado y NO cumple este modelo. Hoy consolida:
-> - Ganancias de cheques (por `ultimo_evento_manual_at`), préstamos (por `created_at` del préstamo)
->   y movimientos (por `fecha_operacion`); `total_ganancias` = suma bruta; `neto` = total − gastos ARS.
-> - `cobros_cuotas_ars` / `cobros_cuotas_usd` (informativos, no sumados), `saldo_pasivos` (snapshot
->   de PENDIENTE sin filtro de período).
+> ✅ **Estado de implementación:** el modelo de caja diaria es el **vigente**. El endpoint es
+> `GET /api/v1/reportes/caja?desde=&hasta=` (`svc_reportes.get_reporte_caja`), que lee el libro
+> `movimientos_caja` filtrando por `fecha` y arma **una caja por moneda** (ARS y USD) con sus
+> líneas detalladas, `ingresos_total`, `egresos_total` y `neto`. Expone además `ganancia_divisas`
+> (suma de la ganancia FIFO de las ventas de USD — ver §4) y `saldo_pasivos` (snapshot de
+> `PENDIENTE` por moneda, sin filtro de período). Ya **no existe** el endpoint devengado
+> `…/ganancias`. El frontend consume `/reportes/caja` (`frontend/src/api/reportes.ts`).
 >
-> Migrar a caja diaria por moneda implica: ingreso de préstamos al cobrar (no al originar),
-> egresos (crédito, compras de cheque/USD), ganancia FIFO de divisas y netos ARS/USD separados.
+> **Préstamos** cumplen el régimen (egreso al originar, ingreso al cobrar — ver §3). Lo que
+> todavía figura como pendiente vive en sus módulos y asentará en este mismo libro al
+> implementarse: cálculo FIFO de divisas (§4), gastos en USD restando el neto USD (§6) y el
+> vuelto de pasivos pagados con cheque "de más" (§5).
 
 ### 8. Backup / Configuración _(módulo agregado)_
 
