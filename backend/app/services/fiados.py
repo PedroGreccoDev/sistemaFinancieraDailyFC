@@ -8,7 +8,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.db.models import Cheque, ChequeEstado, Fiado, FiadoEstado
+from app.db.models import (
+    CajaCategoria,
+    CajaTipo,
+    Cheque,
+    ChequeEstado,
+    Fiado,
+    FiadoEstado,
+    Moneda,
+)
+from app.core.fechas import hoy_local
+from app.services import caja as svc_caja
 from app.schemas.cheques import ChequeRead, FiadoCobrarConChequeResponse
 from app.schemas.fiados import (
     FiadoCobrarConChequeRequest,
@@ -56,6 +66,20 @@ def cobrar_con_efectivo(
     fiado.saldo_pendiente = (fiado.saldo_pendiente - payload.monto_cobrado).quantize(Decimal("0.01"))
     if fiado.saldo_pendiente == Decimal("0.00"):
         fiado.estado = FiadoEstado.CANCELADO
+
+    # Cobrar un fiado en efectivo hace entrar plata a la caja ARS (incluye parciales).
+    cliente_nombre = fiado.cliente.nombre if fiado.cliente else "—"
+    svc_caja.registrar(
+        db,
+        fecha=hoy_local(),
+        moneda=Moneda.ARS,
+        tipo=CajaTipo.INGRESO,
+        categoria=CajaCategoria.COBRO_FIADO,
+        monto=payload.monto_cobrado,
+        referencia_tipo="fiado",
+        referencia_id=fiado.id,
+        detalle=f"Cobro fiado - {cliente_nombre}",
+    )
 
     try:
         db.commit()

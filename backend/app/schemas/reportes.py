@@ -13,18 +13,34 @@ class SaldoPasivos(BaseModel):
     pendiente_usd: Decimal
 
 
-class ReporteGananciasRead(BaseModel):
+class CajaLinea(BaseModel):
+    """Una línea de movimiento de caja (ingreso o egreso) dentro del período."""
+    fecha: date
+    categoria: str
+    tipo: str  # INGRESO | EGRESO
+    monto: Decimal
+    detalle: str | None
+    ganancia: Decimal | None  # solo VENTA_USD
+
+
+class CajaMoneda(BaseModel):
+    """Caja de una moneda: totales de ingresos/egresos, neto y detalle de líneas."""
+    moneda: str
+    ingresos_total: Decimal
+    egresos_total: Decimal
+    neto: Decimal
+    lineas: list[CajaLinea]
+
+
+class ReporteCajaRead(BaseModel):
+    """Caja diaria de flujo real: ingresos y egresos efectivos, separados por moneda."""
     desde: date
     hasta: date
-    ganancia_cheques: Decimal
-    ganancia_prestamos: Decimal
-    ganancia_movimientos_efectivo: Decimal
-    gastos_operativos: Decimal
-    total_ganancias: Decimal
-    neto: Decimal
+    ars: CajaMoneda
+    usd: CajaMoneda
+    # Ganancia FIFO realizada por venta de divisas en el período (dato, no movimiento).
+    ganancia_divisas: Decimal
     saldo_pasivos: SaldoPasivos
-    cobros_cuotas_ars: Decimal
-    cobros_cuotas_usd: Decimal
 
 
 class CuotaCobradaHistorialItem(BaseModel):

@@ -11,6 +11,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    CajaCategoria,
+    CajaTipo,
     Cheque,
     Cliente,
     Cuota,
@@ -18,7 +20,6 @@ from app.db.models import (
     Fiado,
     FiadoEstado,
     GastoOperativo,
-    MovimientoEfectivo,
     Pasivo,
     PasivoEstado,
     Prestamo,
@@ -37,6 +38,7 @@ from app.schemas.clientes import ClienteCreate
 from app.schemas.fiados import FiadoCobrarConChequeRequest, FiadoCobrarEfectivoRequest
 from app.schemas.movimientos import MovimientoEfectivoCreate
 from app.schemas.prestamos import PrestamoCreate
+from app.services import caja as svc_caja
 from app.services import cheques as svc_cheques
 from app.services import clientes as svc_clientes
 from app.services import fiados as svc_fiados
@@ -432,7 +434,6 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any], msg_at: datetime | N
     moneda = _req_enum(data, "moneda", Moneda)
     monto = _req_decimal(data, "monto")
     cotizacion = _req_decimal(data, "cotizacion_aplicada")
-    ganancia = _opt_decimal(data, "ganancia") or Decimal("0.00")
     observaciones: str | None = data.get("observaciones")
 
     cliente_id: uuid.UUID | None = None
@@ -440,13 +441,13 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any], msg_at: datetime | N
         cliente = _find_or_create_cliente(db, str(cliente_nombre))
         cliente_id = cliente.id
 
+    # La ganancia NO se pasa: en la venta el servicio la calcula por lotes FIFO.
     payload = MovimientoEfectivoCreate(
         cliente_id=cliente_id,
         tipo=tipo,
         moneda=moneda,
         monto=monto,
         cotizacion_aplicada=cotizacion,
-        ganancia=ganancia,
         fecha_operacion=msg_at,
         observaciones=observaciones,
     )
@@ -458,8 +459,9 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any], msg_at: datetime | N
         f"Monto: {_fmt_num(monto)} {moneda.value}",
         f"Cotización: ${_fmt_num(cotizacion)}",
     ]
-    if mov.ganancia:
-        lines.append(f"Ganancia: {_ars(mov.ganancia)}")
+    if tipo == MovimientoEfectivoTipo.VENTA and mov.ganancia is not None:
+        signo = "Ganancia" if mov.ganancia >= 0 else "Pérdida"
+        lines.append(f"{signo} (FIFO): {_ars(abs(mov.ganancia))}")
     return True, "\n".join(lines)
 
 
@@ -702,6 +704,52 @@ def _editar_operacion(db: Session, data: dict[str, Any]) -> DispatchResult:
     return False, f"⚠️ Tipo de operación no reconocido: '{tipo}'."
 
 
+_CIEN_PCT = Decimal("100")
+
+
+def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
+    """Reconstruye el rastro de caja de un cheque desde su estado actual.
+
+    Se usa tras editar monto/%compra/%venta: borra las líneas de caja del cheque
+    y las vuelve a crear (egreso de compra siempre; ingreso de venta/cobro según estado).
+    """
+    svc_caja.borrar_por_referencia(db, "cheque", cheque.id)
+    pagado = (cheque.monto * (_CIEN_PCT - cheque.porcentaje_compra) / _CIEN_PCT).quantize(Decimal("0.01"))
+    if pagado > 0:
+        svc_caja.registrar(
+            db, fecha=fecha_local(cheque.created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
+            categoria=CajaCategoria.COMPRA_CHEQUE, monto=pagado,
+            referencia_tipo="cheque", referencia_id=cheque.id,
+            detalle=f"Compra cheque Nº {cheque.nro_cheque}",
+        )
+    if cheque.estado == ChequeEstado.VENDIDO and cheque.porcentaje_venta is not None:
+        ingreso = (cheque.monto * (_CIEN_PCT - cheque.porcentaje_venta) / _CIEN_PCT).quantize(Decimal("0.01"))
+        if ingreso > 0:
+            svc_caja.registrar(
+                db, fecha=fecha_local(cheque.ultimo_evento_manual_at), moneda=Moneda.ARS, tipo=CajaTipo.INGRESO,
+                categoria=CajaCategoria.VENTA_CHEQUE, monto=ingreso,
+                referencia_tipo="cheque", referencia_id=cheque.id,
+                detalle=f"Venta cheque Nº {cheque.nro_cheque}",
+            )
+    elif cheque.estado == ChequeEstado.COBRADO:
+        svc_caja.registrar(
+            db, fecha=fecha_local(cheque.ultimo_evento_manual_at), moneda=Moneda.ARS, tipo=CajaTipo.INGRESO,
+            categoria=CajaCategoria.COBRO_CHEQUE, monto=cheque.monto.quantize(Decimal("0.01")),
+            referencia_tipo="cheque", referencia_id=cheque.id,
+            detalle=f"Cobro cheque Nº {cheque.nro_cheque}",
+        )
+
+
+def _resync_caja_gasto(db: Session, gasto: GastoOperativo) -> None:
+    """Reconstruye la línea de caja (egreso) de un gasto tras editar su monto/moneda."""
+    svc_caja.borrar_por_referencia(db, "gasto", gasto.id)
+    svc_caja.registrar(
+        db, fecha=gasto.fecha_operacion, moneda=gasto.moneda, tipo=CajaTipo.EGRESO,
+        categoria=CajaCategoria.GASTO, monto=gasto.monto,
+        referencia_tipo="gasto", referencia_id=gasto.id, detalle=gasto.concepto,
+    )
+
+
 def _editar_cheque(db: Session, nro: str, campo: str, nuevo_valor: Any) -> DispatchResult:
     try:
         cheque = svc_cheques.resolve_cheque(db, nro)
@@ -736,6 +784,7 @@ def _editar_cheque(db: Session, nro: str, campo: str, nuevo_valor: Any) -> Dispa
             f.monto_original = nuevo
             f.saldo_pendiente = (nuevo * (Decimal("100") - f.porcentaje_venta) / Decimal("100")).quantize(Decimal("0.01"))
             notas.append(f"Fiado recalculado — saldo pendiente: {_ars(f.saldo_pendiente)}")
+        _resync_caja_cheque(db, cheque)
         db.commit()
         resp = f"✅ *Cheque Nº {nro}*{estado_tag} — monto corregido.\n{anterior} → {_ars(nuevo)}"
         return True, resp + ("\n" + "\n".join(notas) if notas else "")
@@ -747,6 +796,7 @@ def _editar_cheque(db: Session, nro: str, campo: str, nuevo_valor: Any) -> Dispa
         if cheque.estado == ChequeEstado.VENDIDO and cheque.porcentaje_venta is not None:
             cheque.ganancia = (cheque.monto * (nuevo - cheque.porcentaje_venta) / Decimal("100")).quantize(Decimal("0.01"))
             notas.append(f"Ganancia recalculada: {_ars(cheque.ganancia)}")
+        _resync_caja_cheque(db, cheque)
         db.commit()
         resp = f"✅ *Cheque Nº {nro}*{estado_tag} — % compra corregido.\n{anterior}% → {_pct(nuevo)}%"
         return True, resp + ("\n" + "\n".join(notas) if notas else "")
@@ -763,6 +813,7 @@ def _editar_cheque(db: Session, nro: str, campo: str, nuevo_valor: Any) -> Dispa
             f.porcentaje_venta = nuevo
             f.saldo_pendiente = (cheque.monto * (Decimal("100") - nuevo) / Decimal("100")).quantize(Decimal("0.01"))
             notas.append(f"Fiado recalculado — saldo pendiente: {_ars(f.saldo_pendiente)}")
+        _resync_caja_cheque(db, cheque)
         db.commit()
         resp = f"✅ *Cheque Nº {nro}*{estado_tag} — % venta corregido.\n{anterior}% → {_pct(nuevo)}%"
         return True, resp + ("\n" + "\n".join(notas) if notas else "")
@@ -799,47 +850,13 @@ def _editar_cheque(db: Session, nro: str, campo: str, nuevo_valor: Any) -> Dispa
 
 
 def _editar_movimiento(db: Session, identificador: str, campo: str, nuevo_valor: Any) -> DispatchResult:
-    if identificador.lower() == "ultimo":
-        mov = db.scalars(
-            select(MovimientoEfectivo).order_by(MovimientoEfectivo.created_at.desc()).limit(1)
-        ).first()
-    else:
-        return False, "❓ Para movimientos indicá 'el último' o usá el panel web."
-
-    if mov is None:
-        return False, "❓ No encontré ningún movimiento registrado."
-
-    campos_validos = {"monto", "cotizacion_aplicada", "ganancia", "tipo"}
-    if campo not in campos_validos:
-        return False, (
-            f"⚠️ Campo inválido: '{campo}'. "
-            f"Para movimientos podés corregir: {', '.join(sorted(campos_validos))}."
-        )
-
-    if campo == "tipo":
-        try:
-            nuevo_tipo = MovimientoEfectivoTipo(str(nuevo_valor).lower())
-        except ValueError:
-            try:
-                nuevo_tipo = MovimientoEfectivoTipo(str(nuevo_valor).upper())
-            except ValueError:
-                return False, f"⚠️ Tipo inválido: '{nuevo_valor}'. Válidos: compra, venta."
-        anterior = mov.tipo.value
-        mov.tipo = nuevo_tipo
-        db.commit()
-        return True, f"✅ *Movimiento* — tipo corregido.\n{anterior} → {nuevo_tipo.value}"
-
-    nuevo = _parse_decimal_val(nuevo_valor)
-    anteriores = {
-        "monto": _fmt_num(mov.monto),
-        "cotizacion_aplicada": f"${_fmt_num(mov.cotizacion_aplicada)}",
-        "ganancia": _ars(mov.ganancia),
-    }
-    setattr(mov, campo, nuevo)
-    db.commit()
-    return True, (
-        f"✅ *Movimiento* — {campo} corregido.\n"
-        f"{anteriores[campo]} → {_fmt_num(nuevo)}"
+    # Editar una operación de divisas rompería la imputación FIFO de lotes y el libro
+    # de caja (el stock de USD y la ganancia se calculan en cadena). No se edita desde
+    # el chat: se corrige cargando una operación nueva que compense.
+    return False, (
+        "⚠️ Las operaciones de divisas no se editan desde el chat: afectan el stock "
+        "de dólares (FIFO) y la caja. Si te equivocaste, registrá una operación nueva "
+        "que lo corrija (ej. una venta/compra inversa)."
     )
 
 
@@ -973,6 +990,7 @@ def _editar_gasto(
             return False, f"⚠️ Moneda inválida: '{nuevo_valor}'. Válidas: ARS, USD."
         anterior = gasto.moneda.value
         gasto.moneda = nueva_moneda
+        _resync_caja_gasto(db, gasto)
         db.commit()
         return True, f"✅ *Gasto '{gasto.concepto}'* — moneda corregida.\n{anterior} → {nueva_moneda.value}"
 
@@ -980,6 +998,7 @@ def _editar_gasto(
     simbolo = "$" if gasto.moneda == Moneda.ARS else "U$D"
     anterior = f"{simbolo}{_fmt_num(gasto.monto)}"
     gasto.monto = nuevo
+    _resync_caja_gasto(db, gasto)
     db.commit()
     return True, f"✅ *Gasto '{gasto.concepto}'* — monto corregido.\n{anterior} → {simbolo}{_fmt_num(nuevo)}"
 

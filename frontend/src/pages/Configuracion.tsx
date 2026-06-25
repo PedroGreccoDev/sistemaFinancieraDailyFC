@@ -15,6 +15,7 @@ const TABLA_LABELS: Record<string, string> = {
   fiados:               'Fiados',
   pasivos:              'Pasivos',
   gastos_operativos:    'Gastos',
+  movimientos_caja:     'Caja',
 }
 
 const ALL_TABLAS = Object.keys(TABLA_LABELS)

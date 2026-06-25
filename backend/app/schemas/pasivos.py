@@ -2,17 +2,21 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from app.db.models import Moneda, PasivoEstado
 
+# Qué hacer con el vuelto cuando un cheque cubre de más un pasivo.
+VueltoModo = Literal["SALDAR_EFECTIVO", "QUEDA_DEBIENDO"]
+
 
 class PasivoCreate(BaseModel):
     acreedor: str = Field(min_length=1, max_length=200)
     concepto: str = Field(min_length=1)
-    monto: Decimal = Field(gt=0)
+    monto: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     moneda: Moneda
     fecha_vencimiento: date | None = None
     observaciones: str | None = None
@@ -23,7 +27,7 @@ class PasivoCancelarRequest(BaseModel):
 
 
 class PasivoCancelarEfectivoRequest(BaseModel):
-    monto_cobrado: Decimal = Field(gt=0)
+    monto_cobrado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     fecha_cancelacion: date | None = None
 
 
@@ -33,6 +37,10 @@ class PasivoCancelarConChequeRequest(BaseModel):
     operador_id: str = Field(min_length=1, max_length=80)
     motivo: str = Field(min_length=1)
     fecha_cancelacion: date | None = None
+    # Solo se usa si el cheque cubre de más (diferencia > 0): el operador elige si
+    # paga el vuelto en efectivo/transferencia (SALDAR_EFECTIVO) o queda debiendo
+    # al cliente y se crea un pasivo a su favor (QUEDA_DEBIENDO).
+    vuelto_modo: VueltoModo | None = None
 
 
 class PasivoRead(BaseModel):

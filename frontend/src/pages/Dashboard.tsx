@@ -4,7 +4,7 @@ import { getChequeCartera } from '../api/cheques'
 import { getFiados } from '../api/fiados'
 import { getPrestamos } from '../api/prestamos'
 import { getClientes } from '../api/clientes'
-import { getReporteGanancias } from '../api/reportes'
+import { getReporteCaja } from '../api/reportes'
 import { fmtARS, fmtMonto, fmtDate, daysUntil, monthStartISO, todayISO } from '../lib/fmt'
 import type { Cheque, Prestamo } from '../types'
 import { FinanceDashboardCard } from '../components/FinanceDashboardCard'
@@ -218,7 +218,7 @@ export default function Dashboard() {
   const { data: fiados }    = useQuery({ queryKey: ['fiados', 'ABIERTO'],   queryFn: () => getFiados('ABIERTO'),    refetchInterval: 30_000 })
   const { data: reporte }   = useQuery({
     queryKey: ['reporte', monthStartISO(), todayISO()],
-    queryFn: () => getReporteGanancias(monthStartISO(), todayISO()),
+    queryFn: () => getReporteCaja(monthStartISO(), todayISO()),
   })
 
   const clienteMap       = new Map(clientes?.map((c) => [c.id, c.nombre]) ?? [])
@@ -290,10 +290,10 @@ export default function Dashboard() {
           onClick={() => navigate('/deudores')}
         />
         <FinanceDashboardCard
-          title="Ganancia del mes"
-          value={Number(reporte?.neto ?? 0)}
+          title="Neto del mes (ARS)"
+          value={Number(reporte?.ars?.neto ?? 0)}
           prefix="$"
-          subtitle="Todos los módulos"
+          subtitle="Caja en pesos"
           accentColor="#10b981"
           formatValue={(v) => v.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
           onClick={() => navigate('/reportes')}

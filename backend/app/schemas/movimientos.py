@@ -15,6 +15,8 @@ class MovimientoEfectivoCreate(BaseModel):
     moneda: Moneda
     monto: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     cotizacion_aplicada: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
+    # La ganancia se calcula server-side por lotes FIFO en la venta; este campo de
+    # entrada se acepta por compatibilidad pero se ignora.
     ganancia: Decimal = Field(default=Decimal("0.00"), max_digits=18, decimal_places=2)
     fecha_operacion: datetime | None = None
     observaciones: str | None = None
@@ -30,6 +32,7 @@ class MovimientoEfectivoRead(BaseModel):
     monto: Decimal
     cotizacion_aplicada: Decimal
     ganancia: Decimal
+    usd_restante: Decimal
     fecha_operacion: datetime
     observaciones: str | None
     created_at: datetime

@@ -10,6 +10,8 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
+    CajaCategoria,
+    CajaTipo,
     Cheque,
     ChequeEstado,
     Cliente,
@@ -25,7 +27,24 @@ from app.schemas.prestamos import (
     CuotasLoteCobrarConChequeRequest,
     PrestamoCreate,
 )
+from app.services import caja as svc_caja
 from app.services.exceptions import ConflictError, DatabaseWriteError, NotFoundError
+
+
+def _registrar_cobro_cuota(db: Session, prestamo: Prestamo, cuota: Cuota) -> None:
+    """Asienta en la caja el ingreso por una cuota cobrada (en la moneda del préstamo)."""
+    cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
+    svc_caja.registrar(
+        db,
+        fecha=cuota.fecha_cobro,
+        moneda=prestamo.moneda,
+        tipo=CajaTipo.INGRESO,
+        categoria=CajaCategoria.COBRO_CUOTA,
+        monto=cuota.monto,
+        referencia_tipo="cuota",
+        referencia_id=cuota.id,
+        detalle=f"Cuota #{cuota.numero_cuota} - {cliente_nombre}",
+    )
 
 
 def _add_months(value: date, months: int) -> date:
@@ -106,6 +125,19 @@ def create_prestamo(db: Session, payload: PrestamoCreate) -> Prestamo:
 
     try:
         db.add(prestamo)
+        db.flush()
+        # Otorgar el préstamo es un egreso de caja: sale el crédito entregado.
+        svc_caja.registrar(
+            db,
+            fecha=fecha_inicio,
+            moneda=prestamo.moneda,
+            tipo=CajaTipo.EGRESO,
+            categoria=CajaCategoria.OTORGAMIENTO_PRESTAMO,
+            monto=prestamo.credito,
+            referencia_tipo="prestamo",
+            referencia_id=prestamo.id,
+            detalle=f"Préstamo a {cliente.nombre}",
+        )
         db.commit()
         db.refresh(prestamo)
         return get_prestamo(db, prestamo.id)
@@ -153,6 +185,9 @@ def cobrar_cuota(
 
     try:
         db.flush()
+        prestamo = db.get(Prestamo, prestamo_id)
+        if prestamo is not None:
+            _registrar_cobro_cuota(db, prestamo, cuota)
         # Cualquier cuota no cobrada (PENDIENTE o EN_MORA) mantiene vivo el préstamo.
         pendientes_restantes = db.scalar(
             select(func.count()).select_from(Cuota).where(
@@ -160,10 +195,8 @@ def cobrar_cuota(
                 Cuota.estado != CuotaEstado.COBRADA,
             )
         )
-        if pendientes_restantes == 0:
-            prestamo = db.get(Prestamo, prestamo_id)
-            if prestamo is not None:
-                prestamo.estado = PrestamoEstado.CANCELADO
+        if pendientes_restantes == 0 and prestamo is not None:
+            prestamo.estado = PrestamoEstado.CANCELADO
         db.commit()
         db.refresh(cuota)
         return cuota
@@ -255,16 +288,18 @@ def cobrar_cuotas_lote(
 
     try:
         db.flush()
+        prestamo = db.get(Prestamo, prestamo_id)
+        if prestamo is not None:
+            for cuota in cuotas:
+                _registrar_cobro_cuota(db, prestamo, cuota)
         pendientes_restantes = db.scalar(
             select(func.count()).select_from(Cuota).where(
                 Cuota.prestamo_id == prestamo_id,
                 Cuota.estado != CuotaEstado.COBRADA,
             )
         )
-        if pendientes_restantes == 0:
-            prestamo = db.get(Prestamo, prestamo_id)
-            if prestamo is not None:
-                prestamo.estado = PrestamoEstado.CANCELADO
+        if pendientes_restantes == 0 and prestamo is not None:
+            prestamo.estado = PrestamoEstado.CANCELADO
         db.commit()
         for cuota in cuotas:
             db.refresh(cuota)

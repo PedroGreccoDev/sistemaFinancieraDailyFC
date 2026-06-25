@@ -69,9 +69,14 @@ El cliente puede cancelar esa deuda de dos formas:
 
 - Monedas soportadas: `ARS` y `USD`.
 - Frecuencias: `diaria | semanal | quincenal | mensual | anual`.
-- La ganancia del préstamo se calcula como `total_a_cobrar - credito`.
+- La ganancia teórica del préstamo es `total_a_cobrar - credito` (se guarda como referencia).
 - El préstamo pasa a estado `CANCELADO` automáticamente cuando se cobra la última cuota.
 - El monto de cada cuota se divide uniformemente; el centavo sobrante cae en la **última** cuota.
+- **Reconocimiento en caja (régimen caja diaria, definido 2026-06-25):** el ingreso se
+  cuenta **al cobrar cada cuota, NO al originar el préstamo**. Cada cuota cobrada suma a la
+  caja diaria del día del cobro, con detalle de cliente/préstamo/cuota. El otorgamiento del
+  crédito es un **egreso** del día en que se da. _(Implementación pendiente: hoy el reporte
+  suma la ganancia entera por `created_at` del préstamo — ver §7.)_
 
 **Cobro de cuotas desde el panel web** (además del bot, intent `COBRAR_CUOTA`):
 - Cobro simple (1 cuota): `POST /prestamos/{id}/cuotas/{cuota_id}/cobros`.
@@ -80,10 +85,20 @@ El cliente puede cancelar esa deuda de dos formas:
 - Cobro con cheque en lote: `POST /prestamos/{id}/cuotas/cobrar-con-cheque-lote`.
 - **Método de pago "Efectivo" vs "Transferencia" es solo una etiqueta de UI**: el backend NO persiste el medio; solo distingue cobro simple (sin cheque) vs cobro con cheque.
 
-### 4. Movimientos de Efectivo
+### 4. Movimientos de Efectivo (compra/venta de divisas)
 
 - Operaciones de compra/venta de divisas (ARS ↔ USD).
 - **Regla crítica:** la cotización **siempre** la dicta el operador. El sistema jamás la asume ni la consulta.
+  `cotizacion_aplicada` = **pesos por 1 USD**; `monto` = **cantidad de USD** de la operación.
+  - **COMPRA:** el operador marca a cuánto pagó cada USD. Pesos que salen = `monto × cotizacion`. Es un **egreso** ARS y suma USD al stock.
+  - **VENTA:** el operador marca a cuánto le pagaron cada USD. Pesos que entran = `monto × cotizacion`. Es un **ingreso** ARS y descuenta USD del stock.
+- **Ganancia por lotes FIFO — sin promedios (régimen definido 2026-06-25):** cada compra
+  se guarda como un **lote** con su costo real ($/USD). Cada venta consume lotes en orden
+  **FIFO** (los más viejos primero) y la ganancia es exacta:
+  `ganancia = Σ (precio_venta − costo_lote) × cantidad_consumida_del_lote` (en ARS).
+  Diferencia por dólar positiva → ganancia; negativa → pérdida. **PROHIBIDO promediar costos.**
+  La ganancia se realiza en la **venta**; la compra solo incorpora stock a su costo.
+  _(Implementación pendiente: hoy `ganancia` se acepta del payload sin calcularse y no hay lotes.)_
 - El widget de Dólar Blue en el frontend es **solo decorativo** (consume DolarAPI externamente).
 
 ### 5. Pasivos _(módulo agregado 2026-06-08)_
@@ -94,6 +109,11 @@ El cliente puede cancelar esa deuda de dos formas:
 - **Cancelación** solo desde el panel web (el bot no puede cancelar pasivos).
 - Estados: `PENDIENTE` → `CANCELADA` (transición única, irreversible).
 - **Pagos parciales:** el pasivo tiene `saldo_pendiente` (migración `0007`); se puede cancelar en partes, en efectivo o con un cheque de cartera. Pasa a `CANCELADA` cuando el saldo llega a 0.
+- **Pago con cheque "de más" (régimen definido 2026-06-25):** cuando el valor neto del cheque
+  supera el saldo del pasivo, el operador elige qué hacer con el vuelto:
+  **(a)** paga la diferencia al cliente en efectivo/transferencia y queda saldada, o
+  **(b)** el negocio queda debiendo → se crea **automáticamente un pasivo a favor del cliente**
+  por el monto del vuelto. _(Implementación pendiente: hoy el excedente se descarta.)_
 - Campos: `acreedor`, `concepto`, `monto`, `moneda`, `fecha_vencimiento` (opcional).
 - El cierre de caja incluye un snapshot de pasivos pendientes por moneda, **sin filtro de periodo**.
 - No existe facturación ni concepto fiscal asociado.
@@ -103,20 +123,37 @@ El cliente puede cancelar esa deuda de dos formas:
 - Registro de gastos de caja del negocio (nafta, insumos, comida, parking, etc.).
 - **Carga via bot de WhatsApp** (intent `REGISTRAR_GASTO`) o manual vía API.
 - Campos: `concepto`, `monto`, `moneda` (default ARS), `fecha_operacion`, `observaciones`.
-- Se descuentan del bruto en el reporte de ganancias para obtener el **neto del período**.
+- Se descuentan como **egreso** en el reporte para obtener el **neto del período**.
+- **Por moneda (régimen definido 2026-06-25):** un gasto en USD resta del **neto USD** y un gasto
+  en ARS resta del **neto ARS**. La caja se lleva separada por moneda. _(Implementación pendiente:
+  hoy el reporte solo resta los gastos ARS y el neto es único.)_
 
 ### 7. Reportes y Cierre de Caja
 
-- El endpoint `GET /api/v1/reportes/ganancias?desde=&hasta=` consolida:
-  - Ganancias de cheques (por `ultimo_evento_manual_at` dentro del periodo).
-  - Ganancias de préstamos (por `created_at` del préstamo).
-  - Ganancias de movimientos de efectivo (por `fecha_operacion`).
-  - `cobros_cuotas_ars` / `cobros_cuotas_usd`: cobros de cuotas en el periodo, por moneda.
-  - `gastos_operativos`: suma de gastos ARS en el periodo.
-  - `saldo_pasivos`: snapshot de pasivos PENDIENTE (no filtrado por periodo).
-- `total_ganancias` = suma bruta de ganancias; `neto` = total_ganancias − gastos_operativos.
+**Modelo objetivo (caja diaria, definido 2026-06-25):** el reporte es una **caja de flujo real
+de ingresos y egresos efectivos, separada por moneda (ARS y USD)** — NO un P&L devengado. Para
+cada moneda: `neto = Σ ingresos − Σ egresos` del período. Cada línea va detallada (origen,
+cliente, operación, fecha).
+
+- **Ingresos (entra plata):** cuotas de préstamo cobradas (al cobrar, incluidos cobros parciales),
+  cobros de fiado en efectivo (incluidos parciales), ventas de cheques, ventas de USD (pesos
+  recibidos) y su ganancia FIFO.
+- **Egresos (sale plata):** gastos diarios, compra de cheques, compra de USD (pesos que salen),
+  compra de cualquier activo y otorgamiento de préstamos (crédito entregado).
+- **Cobros parciales cuentan:** si de un fiado de $100.000 entran $100, esos $100 son ingreso
+  del día con su detalle (fiado, cliente, fecha).
 - `GET /api/v1/reportes/cobros-cuotas?desde=&hasta=` devuelve el historial detallado de cuotas cobradas.
 - El historial unificado de Movimientos (frontend) incluye también los cobros de cuotas y los gastos.
+
+> ⏳ **Estado de implementación:** el endpoint actual `GET /api/v1/reportes/ganancias` todavía
+> funciona en modo devengado y NO cumple este modelo. Hoy consolida:
+> - Ganancias de cheques (por `ultimo_evento_manual_at`), préstamos (por `created_at` del préstamo)
+>   y movimientos (por `fecha_operacion`); `total_ganancias` = suma bruta; `neto` = total − gastos ARS.
+> - `cobros_cuotas_ars` / `cobros_cuotas_usd` (informativos, no sumados), `saldo_pasivos` (snapshot
+>   de PENDIENTE sin filtro de período).
+>
+> Migrar a caja diaria por moneda implica: ingreso de préstamos al cobrar (no al originar),
+> egresos (crédito, compras de cheque/USD), ganancia FIFO de divisas y netos ARS/USD separados.
 
 ### 8. Backup / Configuración _(módulo agregado)_
 

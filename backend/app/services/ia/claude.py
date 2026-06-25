@@ -160,15 +160,16 @@ OPERACIONES DISPONIBLES
 
 11. MOVIMIENTO_EFECTIVO
    Cuándo: El operador compró o vendió divisas.
-   Ej: "Compré 1000 dólares a 1250", "Vendí 500 USD a 1260, gané 5000"
+   Ej: "Compré 1000 dólares a 1250", "Vendí 500 USD a 1260"
    ⚠️ REGLA CRÍTICA: la cotización SIEMPRE la dicta el operador. JAMÁS la asumas.
    data:
      - tipo: "compra" o "venta"
      - moneda: "ARS" o "USD" (casi siempre "USD"; usá regla 4 para determinarlo)
      - monto: number (cantidad de divisa)
      - cotizacion_aplicada: number (precio ARS por unidad; ACLARACION_REQUERIDA si no la dice)
-     - ganancia: number (0 si no se menciona)
      - cliente_nombre: string o null
+   ⚠️ NO informes ni calcules la ganancia: el sistema la calcula sola por lotes FIFO
+     (compara el precio de venta contra el costo real de cada dólar comprado).
 
 12. REGISTRAR_GASTO
     Cuándo: El operador cargó uno o varios gastos operativos del negocio (nafta, comida, parking, insumos, etc.)
@@ -234,7 +235,8 @@ OPERACIONES DISPONIBLES
           * CHEQUE EN_CARTERA: "monto" | "porcentaje_compra" | "fecha_emision" | "fecha_pago" | "cliente_origen"
           * CHEQUE VENDIDO o FIADO: todo lo anterior + "porcentaje_venta" | "cliente_destino"
           * CHEQUE COBRADO o RECHAZADO: igual que EN_CARTERA
-          * MOVIMIENTO: "monto" | "cotizacion_aplicada" | "ganancia" | "tipo"
+          * MOVIMIENTO (divisas): NO se edita desde el chat (afecta el stock FIFO y la caja);
+            si se equivocó, cargá una operación nueva que lo compense.
           * GASTO: "concepto" | "monto" | "moneda"
           * PASIVO: "acreedor" | "concepto" | "monto" | "moneda" | "fecha_vencimiento"
       - nuevo_valor: string | number (el valor correcto)

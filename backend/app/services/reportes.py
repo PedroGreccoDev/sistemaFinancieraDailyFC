@@ -1,31 +1,30 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time
+from datetime import date
 from decimal import Decimal
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.models import (
-    Cheque,
-    ChequeEstado,
+    CajaCategoria,
+    CajaTipo,
     Cuota,
     CuotaEstado,
-    GastoOperativo,
     Moneda,
-    MovimientoEfectivo,
+    MovimientoCaja,
     Pasivo,
     PasivoEstado,
     Prestamo,
 )
-from app.schemas.reportes import CuotaCobradaHistorialItem, ReporteGananciasRead, SaldoPasivos
+from app.schemas.reportes import (
+    CajaLinea,
+    CajaMoneda,
+    CuotaCobradaHistorialItem,
+    ReporteCajaRead,
+    SaldoPasivos,
+)
 from app.services.exceptions import ValidationError
-
-# Los eventos se persisten en UTC, pero el operador elige fechas en hora local
-# (Argentina). Convertimos los límites del día local a UTC para no traspapelar
-# operaciones nocturnas al día equivocado en el cierre de caja.
-_TZ_LOCAL = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
 def _money(value: object) -> Decimal:
@@ -36,82 +35,71 @@ def _money(value: object) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"))
 
 
-def get_reporte_ganancias(db: Session, desde: date, hasta: date) -> ReporteGananciasRead:
+def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
+    """Caja diaria de flujo real: ingresos y egresos efectivos por moneda.
+
+    Lee el libro `movimientos_caja` filtrando por `fecha` (día local ART, ya
+    almacenado como Date — sin conversión de zona horaria) y arma una caja por
+    cada moneda con sus líneas detalladas, totales y neto.
+    """
     if desde > hasta:
         raise ValidationError(
             f"El rango es inválido: 'desde' ({desde}) es posterior a 'hasta' ({hasta})."
         )
 
-    # Día local completo [00:00 .. 23:59:59.999999] convertido a UTC para filtrar
-    # las columnas datetime, que se guardan en UTC.
-    desde_dt = datetime.combine(desde, time.min, tzinfo=_TZ_LOCAL).astimezone(UTC)
-    hasta_dt = datetime.combine(hasta, time.max, tzinfo=_TZ_LOCAL).astimezone(UTC)
+    movimientos = list(
+        db.scalars(
+            select(MovimientoCaja)
+            .where(MovimientoCaja.fecha >= desde, MovimientoCaja.fecha <= hasta)
+            .order_by(MovimientoCaja.fecha.asc(), MovimientoCaja.created_at.asc())
+        )
+    )
 
-    ganancia_cheques = _money(
-        db.scalar(
-            select(func.coalesce(func.sum(Cheque.ganancia), 0)).where(
-                Cheque.estado == ChequeEstado.VENDIDO,
-                Cheque.ultimo_evento_manual_at >= desde_dt,
-                Cheque.ultimo_evento_manual_at <= hasta_dt,
-            )
+    def _caja(moneda: Moneda) -> CajaMoneda:
+        propios = [m for m in movimientos if m.moneda == moneda]
+        ingresos = sum(
+            (m.monto for m in propios if m.tipo == CajaTipo.INGRESO), Decimal("0.00")
         )
-    )
-    ganancia_prestamos = _money(
-        db.scalar(
-            select(func.coalesce(func.sum(Prestamo.ganancia), 0)).where(
-                Prestamo.created_at >= desde_dt,
-                Prestamo.created_at <= hasta_dt,
-            )
+        egresos = sum(
+            (m.monto for m in propios if m.tipo == CajaTipo.EGRESO), Decimal("0.00")
         )
-    )
-    ganancia_movimientos = _money(
-        db.scalar(
-            select(func.coalesce(func.sum(MovimientoEfectivo.ganancia), 0)).where(
-                MovimientoEfectivo.fecha_operacion >= desde_dt,
-                MovimientoEfectivo.fecha_operacion <= hasta_dt,
+        lineas = [
+            CajaLinea(
+                fecha=m.fecha,
+                categoria=m.categoria.value,
+                tipo=m.tipo.value,
+                monto=_money(m.monto),
+                detalle=m.detalle,
+                ganancia=None if m.ganancia is None else _money(m.ganancia),
             )
+            for m in propios
+        ]
+        return CajaMoneda(
+            moneda=moneda.value,
+            ingresos_total=_money(ingresos),
+            egresos_total=_money(egresos),
+            neto=_money(ingresos - egresos),
+            lineas=lineas,
         )
-    )
-    gastos = _money(
-        db.scalar(
-            select(func.coalesce(func.sum(GastoOperativo.monto), 0)).where(
-                GastoOperativo.fecha_operacion >= desde,
-                GastoOperativo.fecha_operacion <= hasta,
-                GastoOperativo.moneda == Moneda.ARS,
-            )
-        )
-    )
-    def _cobros_cuotas(moneda: Moneda) -> Decimal:
-        return _money(
-            db.scalar(
-                select(func.coalesce(func.sum(Cuota.monto), 0))
-                .join(Cuota.prestamo)
-                .where(
-                    Cuota.estado == CuotaEstado.COBRADA,
-                    Cuota.fecha_cobro >= desde,
-                    Cuota.fecha_cobro <= hasta,
-                    Prestamo.moneda == moneda,
-                )
-            )
-        )
-    cobros_cuotas_ars = _cobros_cuotas(Moneda.ARS)
-    cobros_cuotas_usd = _cobros_cuotas(Moneda.USD)
 
-    total_ganancias = ganancia_cheques + ganancia_prestamos + ganancia_movimientos
-    saldo_pasivos = _get_saldo_pasivos(db)
+    ganancia_divisas = _money(
+        sum(
+            (
+                m.ganancia
+                for m in movimientos
+                if m.categoria == CajaCategoria.VENTA_USD and m.ganancia is not None
+            ),
+            Decimal("0.00"),
+        )
+    )
 
-    return ReporteGananciasRead(
+    return ReporteCajaRead(
         desde=desde,
         hasta=hasta,
-        ganancia_cheques=ganancia_cheques,
-        ganancia_prestamos=ganancia_prestamos,
-        ganancia_movimientos_efectivo=ganancia_movimientos,
-        gastos_operativos=gastos,
-        total_ganancias=total_ganancias,
-        neto=total_ganancias - gastos,
-        saldo_pasivos=saldo_pasivos,
-        cobros_cuotas_ars=cobros_cuotas_ars,
-        cobros_cuotas_usd=cobros_cuotas_usd,
+        ars=_caja(Moneda.ARS),
+        usd=_caja(Moneda.USD),
+        ganancia_divisas=ganancia_divisas,
+        saldo_pasivos=_get_saldo_pasivos(db),
     )
 
 

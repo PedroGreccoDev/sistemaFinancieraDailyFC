@@ -17,13 +17,14 @@ from app.db.models import (
     Cuota,
     Fiado,
     GastoOperativo,
+    MovimientoCaja,
     MovimientoEfectivo,
     Pasivo,
     Prestamo,
 )
 
 BACKUP_VERSION = 1
-ALEMBIC_REVISION = "0010"
+ALEMBIC_REVISION = "0013"
 
 # ── Columnas por tabla ──────────────────────────────────────────────────────
 
@@ -45,7 +46,7 @@ _CU = [
 ]
 _MO = [
     "id", "cliente_id", "tipo", "moneda", "monto", "cotizacion_aplicada",
-    "ganancia", "fecha_operacion", "observaciones", "created_at", "updated_at",
+    "ganancia", "usd_restante", "fecha_operacion", "observaciones", "created_at", "updated_at",
 ]
 _FI = [
     "id", "cheque_id", "cliente_id", "monto_original", "porcentaje_venta",
@@ -60,6 +61,10 @@ _GA = [
     "id", "concepto", "monto", "moneda", "fecha_operacion", "hora_operacion",
     "observaciones", "created_at", "updated_at",
 ]
+_MC = [
+    "id", "fecha", "moneda", "tipo", "categoria", "monto", "ganancia",
+    "referencia_tipo", "referencia_id", "detalle", "created_at", "updated_at",
+]
 
 # ── Validación de schema ────────────────────────────────────────────────────
 
@@ -72,6 +77,9 @@ _REQUIRED: dict[str, frozenset[str]] = {
     "fiados":               frozenset({"id", "cheque_id", "cliente_id", "monto_original", "saldo_pendiente", "estado"}),
     "pasivos":              frozenset({"id", "acreedor", "concepto", "monto", "moneda", "estado"}),
     "gastos_operativos":    frozenset({"id", "concepto", "monto", "moneda", "fecha_operacion"}),
+    # movimientos_caja es opcional: los backups v1 anteriores no lo traen y deben
+    # seguir importando. Solo validamos sus campos si la tabla viene presente.
+    "movimientos_caja":     frozenset({"id", "fecha", "moneda", "tipo", "categoria", "monto"}),
 }
 
 
@@ -91,12 +99,12 @@ def _validate_schema(tablas: dict) -> list[str]:
 
 _UUID_COLS = frozenset({
     "id", "cliente_id", "cheque_id", "prestamo_id",
-    "cliente_origen_id", "cliente_destino_id",
+    "cliente_origen_id", "cliente_destino_id", "referencia_id",
 })
 _DEC_COLS = frozenset({
     "monto", "credito", "total_a_cobrar", "ganancia",
     "porcentaje_compra", "porcentaje_venta", "cotizacion_aplicada",
-    "monto_original", "saldo_pendiente",
+    "monto_original", "saldo_pendiente", "usd_restante",
 })
 _DT_COLS = frozenset({"created_at", "updated_at", "ultimo_evento_manual_at"})
 _BYTES_COLS = frozenset({"foto"})
@@ -139,6 +147,7 @@ def exportar_json(db: Session) -> dict:
             "fiados":               [_serialize(r, _FI) for r in db.query(Fiado).all()],
             "pasivos":              [_serialize(r, _PA) for r in db.query(Pasivo).all()],
             "gastos_operativos":    [_serialize(r, _GA) for r in db.query(GastoOperativo).all()],
+            "movimientos_caja":     [_serialize(r, _MC) for r in db.query(MovimientoCaja).all()],
         },
     }
 
@@ -180,6 +189,7 @@ _DATE_PA = frozenset({"fecha_vencimiento", "fecha_cancelacion"})
 _DATE_GA = frozenset({"fecha_operacion"})
 _TIME_GA = frozenset({"hora_operacion"})
 _DT_MO   = frozenset({"fecha_operacion"})
+_DATE_MC = frozenset({"fecha"})
 
 
 def importar_json(db: Session, data: dict) -> dict[str, int]:
@@ -201,7 +211,7 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
 
     try:
         for tbl in (
-            "cuotas", "fiados", "movimientos_efectivo", "prestamos",
+            "movimientos_caja", "cuotas", "fiados", "movimientos_efectivo", "prestamos",
             "cheques", "pasivos", "gastos_operativos", "clientes",
         ):
             db.execute(sa.text(f"DELETE FROM {tbl}"))  # noqa: S608
@@ -218,6 +228,7 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         bulk(Fiado,              [_cv(r, date_cols=_DATE_FI) for r in tablas.get("fiados", [])])
         bulk(Pasivo,             [_cv(r, date_cols=_DATE_PA) for r in tablas.get("pasivos", [])])
         bulk(GastoOperativo,     [_cv(r, date_cols=_DATE_GA, time_cols=_TIME_GA) for r in tablas.get("gastos_operativos", [])])
+        bulk(MovimientoCaja,     [_cv(r, date_cols=_DATE_MC) for r in tablas.get("movimientos_caja", [])])
 
         db.commit()
     except Exception:
@@ -227,6 +238,7 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
     tabla_names = (
         "clientes", "cheques", "prestamos", "cuotas",
         "movimientos_efectivo", "fiados", "pasivos", "gastos_operativos",
+        "movimientos_caja",
     )
     return {t: len(tablas.get(t, [])) for t in tabla_names}
 
@@ -408,11 +420,11 @@ def exportar_excel(
         add_sheet(
             "Movimientos",
             ["ID", "Cliente ID", "Tipo", "Moneda", "Monto", "Cotización",
-             "Ganancia", "Fecha Operación", "Observaciones", "Creado"],
+             "Ganancia", "Stock USD restante", "Fecha Operación", "Observaciones", "Creado"],
             [[
                 _fmt_excel(r.id), _fmt_excel(r.cliente_id), _fmt_excel(r.tipo),
                 _fmt_excel(r.moneda), _fmt_excel(r.monto), _fmt_excel(r.cotizacion_aplicada),
-                _fmt_excel(r.ganancia), _fmt_excel(r.fecha_operacion),
+                _fmt_excel(r.ganancia), _fmt_excel(r.usd_restante), _fmt_excel(r.fecha_operacion),
                 r.observaciones, _fmt_excel(r.created_at),
             ] for r in movimientos],
         )
@@ -459,6 +471,20 @@ def exportar_excel(
                 _fmt_excel(r.fecha_operacion), _fmt_excel(r.hora_operacion),
                 r.observaciones, _fmt_excel(r.created_at),
             ] for r in gastos],
+        )
+
+    # ── Caja (libro de movimientos) ───────────────────────────────────────────
+    if _inc("movimientos_caja"):
+        mov_caja = _date_filter(db.query(MovimientoCaja), MovimientoCaja).all()
+        add_sheet(
+            "Caja",
+            ["ID", "Fecha", "Moneda", "Tipo", "Categoría", "Monto", "Ganancia",
+             "Referencia", "Detalle", "Creado"],
+            [[
+                _fmt_excel(r.id), _fmt_excel(r.fecha), _fmt_excel(r.moneda),
+                _fmt_excel(r.tipo), _fmt_excel(r.categoria), _fmt_excel(r.monto),
+                _fmt_excel(r.ganancia), r.referencia_tipo, r.detalle, _fmt_excel(r.created_at),
+            ] for r in mov_caja],
         )
 
     buf = BytesIO()

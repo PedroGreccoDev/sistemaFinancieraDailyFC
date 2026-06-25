@@ -9,6 +9,8 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    CajaCategoria,
+    CajaTipo,
     Cliente,
     Cheque,
     ChequeEstado,
@@ -16,15 +18,19 @@ from app.db.models import (
     FiadoEstado,
     InvalidChequeStateTransition,
     ManualOperationRequired,
+    Moneda,
 )
-from app.core.fechas import hoy_local
+from app.core.fechas import fecha_local, hoy_local
 from app.schemas.cheques import ChequeCreate, ChequeFiarRequest, ChequeManualTransition
+from app.services import caja as svc_caja
 from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
     NotFoundError,
     ValidationError,
 )
+
+_CIEN = Decimal("100")
 
 
 def create_cheque(
@@ -44,6 +50,17 @@ def create_cheque(
         cheque.created_at = created_at
     try:
         db.add(cheque)
+        db.flush()
+        # Comprar el cheque saca plata de la caja ARS: lo pagado = monto·(1−%compra).
+        pagado = (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(Decimal("0.01"))
+        if pagado > 0:
+            banco_txt = f" — {cheque.banco}" if cheque.banco else ""
+            svc_caja.registrar(
+                db, fecha=fecha_local(created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
+                categoria=CajaCategoria.COMPRA_CHEQUE, monto=pagado,
+                referencia_tipo="cheque", referencia_id=cheque.id,
+                detalle=f"Compra cheque Nº {cheque.nro_cheque}{banco_txt}",
+            )
         db.commit()
         db.refresh(cheque)
         return cheque
@@ -164,6 +181,24 @@ def transition_cheque(
             cliente_destino_id=payload.cliente_destino_id,
             event_at=event_at,
         )
+        # Vender o cobrar el cheque hace entrar plata a la caja ARS.
+        #  VENDIDO → lo recibido = monto·(1−%venta);  COBRADO → el nominal completo.
+        ingreso: Decimal | None = None
+        if payload.target_state == ChequeEstado.VENDIDO:
+            ingreso = (cheque.monto * (_CIEN - cheque.porcentaje_venta) / _CIEN).quantize(Decimal("0.01"))
+            categoria = CajaCategoria.VENTA_CHEQUE
+            accion = "Venta"
+        elif payload.target_state == ChequeEstado.COBRADO:
+            ingreso = cheque.monto.quantize(Decimal("0.01"))
+            categoria = CajaCategoria.COBRO_CHEQUE
+            accion = "Cobro"
+        if ingreso is not None and ingreso > 0:
+            svc_caja.registrar(
+                db, fecha=fecha_local(event_at), moneda=Moneda.ARS, tipo=CajaTipo.INGRESO,
+                categoria=categoria, monto=ingreso,
+                referencia_tipo="cheque", referencia_id=cheque.id,
+                detalle=f"{accion} cheque Nº {cheque.nro_cheque}",
+            )
         db.commit()
         db.refresh(cheque)
         return cheque

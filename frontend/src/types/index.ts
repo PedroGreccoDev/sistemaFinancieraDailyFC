@@ -69,18 +69,30 @@ export interface SaldoPasivos {
   pendiente_usd: string
 }
 
-export interface ReporteGanancias {
+export interface CajaLinea {
+  fecha: string
+  categoria: string
+  tipo: 'INGRESO' | 'EGRESO'
+  monto: string
+  detalle: string | null
+  ganancia: string | null
+}
+
+export interface CajaMoneda {
+  moneda: string
+  ingresos_total: string
+  egresos_total: string
+  neto: string
+  lineas: CajaLinea[]
+}
+
+export interface ReporteCaja {
   desde: string
   hasta: string
-  ganancia_cheques: string
-  ganancia_prestamos: string
-  ganancia_movimientos_efectivo: string
-  gastos_operativos: string
-  total_ganancias: string
-  neto: string
+  ars: CajaMoneda
+  usd: CajaMoneda
+  ganancia_divisas: string
   saldo_pasivos: SaldoPasivos
-  cobros_cuotas_ars: string
-  cobros_cuotas_usd: string
 }
 
 export interface CuotaCobradaHistorialItem {
@@ -105,6 +117,7 @@ export interface MovimientoEfectivo {
   monto: string
   cotizacion_aplicada: string
   ganancia: string
+  usd_restante: string
   fecha_operacion: string
   observaciones: string | null
   created_at: string

@@ -66,6 +66,25 @@ class FiadoEstado(str, enum.Enum):
     CANCELADO = "CANCELADO"
 
 
+class CajaTipo(str, enum.Enum):
+    INGRESO = "INGRESO"
+    EGRESO  = "EGRESO"
+
+
+class CajaCategoria(str, enum.Enum):
+    COBRO_CUOTA          = "COBRO_CUOTA"
+    COBRO_FIADO          = "COBRO_FIADO"
+    VENTA_CHEQUE         = "VENTA_CHEQUE"
+    COBRO_CHEQUE         = "COBRO_CHEQUE"
+    COMPRA_CHEQUE        = "COMPRA_CHEQUE"
+    COMPRA_USD           = "COMPRA_USD"
+    VENTA_USD            = "VENTA_USD"
+    OTORGAMIENTO_PRESTAMO = "OTORGAMIENTO_PRESTAMO"
+    GASTO                = "GASTO"
+    PAGO_PASIVO          = "PAGO_PASIVO"
+    VUELTO_PASIVO        = "VUELTO_PASIVO"
+
+
 # ══════════════════════════════════════════════════════════════════════
 #  EXCEPCIONES DE DOMINIO
 # ══════════════════════════════════════════════════════════════════════
@@ -387,6 +406,9 @@ class MovimientoEfectivo(Base):
     monto:               Mapped[Decimal]  = mapped_column(sa.Numeric(18, 2))
     cotizacion_aplicada: Mapped[Decimal]  = mapped_column(sa.Numeric(18, 6))
     ganancia:            Mapped[Decimal]  = mapped_column(sa.Numeric(18, 2), default=Decimal("0.00"))
+    # Stock de USD aún no consumido de esta operación. Solo aplica a las COMPRA:
+    # arranca = monto y se decrementa al imputar ventas FIFO (las VENTA quedan en 0).
+    usd_restante:        Mapped[Decimal]  = mapped_column(sa.Numeric(18, 2), default=Decimal("0.00"))
     fecha_operacion:     Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), index=True
     )
@@ -506,6 +528,51 @@ class GastoOperativo(Base):
     fecha_operacion: Mapped[date]     = mapped_column(sa.Date(), index=True)
     hora_operacion:  Mapped[time | None] = mapped_column(sa.Time(), nullable=True)
     observaciones:   Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: MovimientoCaja  (libro de caja — flujo real de ingresos/egresos)
+# ══════════════════════════════════════════════════════════════════════
+
+class MovimientoCaja(Base):
+    """Cada fila es un movimiento de efectivo real (entra o sale plata).
+
+    Es la fuente única del reporte de caja diaria. Lo escriben los servicios en
+    el call site de cada operación (no la máquina de estados del cheque), porque
+    el significado de caja depende del contexto. `fecha` es el día local (ART)
+    del evento; el reporte filtra por día directo, sin conversión de zona horaria.
+    """
+
+    __tablename__ = "movimientos_caja"
+    __table_args__ = (
+        sa.CheckConstraint("monto > 0", name="ck_movimientos_caja_monto_positive"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    fecha:     Mapped[date]          = mapped_column(sa.Date(), index=True)
+    moneda:    Mapped[Moneda]        = mapped_column(
+        sa.Enum(Moneda, name="moneda", create_type=False), index=True
+    )
+    tipo:      Mapped[CajaTipo]      = mapped_column(
+        sa.Enum(CajaTipo, name="caja_tipo", create_type=False), index=True
+    )
+    categoria: Mapped[CajaCategoria] = mapped_column(
+        sa.Enum(CajaCategoria, name="caja_categoria", create_type=False), index=True
+    )
+    monto:     Mapped[Decimal]       = mapped_column(sa.Numeric(18, 2))
+    # Solo VENTA_USD: ganancia FIFO realizada (en ARS). Dato de reporte, no de caja.
+    ganancia:  Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+
+    # Enlace flojo a la entidad origen (cheque/prestamo/cuota/fiado/pasivo/gasto/movimiento).
+    referencia_tipo: Mapped[str | None]       = mapped_column(sa.String(40), nullable=True)
+    referencia_id:   Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
+    detalle:         Mapped[str | None]       = mapped_column(sa.Text(), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(

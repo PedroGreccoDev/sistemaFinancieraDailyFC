@@ -152,6 +152,7 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
   const saldo = parseFloat(pasivo.saldo_pendiente)
   const [chequeSeleccionado, setChequeSeleccionado] = useState<Cheque | null>(null)
   const [porcentajeVenta, setPorcentajeVenta] = useState('')
+  const [vueltoModo, setVueltoModo] = useState<'SALDAR_EFECTIVO' | 'QUEDA_DEBIENDO'>('SALDAR_EFECTIVO')
   const [operadorId, setOperadorId] = useState('')
   const [motivo, setMotivo] = useState(`Cancelación de deuda con ${pasivo.acreedor}`)
   const [loading, setLoading] = useState(false)
@@ -176,7 +177,7 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
     if (!chequeSeleccionado) return
     setError(null)
     setLoading(true)
-    try { await cancelarPasivoConCheque(pasivo.id, { cheque_id: chequeSeleccionado.id, porcentaje_venta: pctNum, operador_id: operadorId.trim(), motivo: motivo.trim() }); toast('success', 'Deuda pagada con cheque'); onSuccess() }
+    try { await cancelarPasivoConCheque(pasivo.id, { cheque_id: chequeSeleccionado.id, porcentaje_venta: pctNum, operador_id: operadorId.trim(), motivo: motivo.trim(), vuelto_modo: diferencia !== null && diferencia > 0 ? vueltoModo : null }); toast('success', 'Deuda pagada con cheque'); onSuccess() }
     catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
   }
@@ -232,6 +233,17 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
                 <span style={{ fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#fbbf24' }}>{diferencia >= 0 ? 'Cancela la deuda completamente' : 'Saldo restante'}</span>
                 <span style={{ fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#fbbf24' }}>{diferencia >= 0 ? (diferencia > 0 ? `+${fmtARS(diferencia)}` : '✓') : fmtARS(-diferencia)}</span>
               </div>
+            </div>
+          )}
+
+          {/* Vuelto: el cheque cubre de más → el operador decide qué hacer con la diferencia */}
+          {diferencia !== null && diferencia > 0 && (
+            <div>
+              <label style={LABEL_STYLE}>Vuelto a favor del cliente ({fmtARS(diferencia)})</label>
+              <select value={vueltoModo} onChange={(e) => setVueltoModo(e.target.value as 'SALDAR_EFECTIVO' | 'QUEDA_DEBIENDO')} style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+                <option value="SALDAR_EFECTIVO">Le pago el vuelto (efectivo/transferencia)</option>
+                <option value="QUEDA_DEBIENDO">Queda como deuda a favor del cliente</option>
+              </select>
             </div>
           )}
 

@@ -30,12 +30,16 @@ export const cancelarPasivoEfectivo = (
     body: JSON.stringify(payload),
   })
 
+export type VueltoModo = 'SALDAR_EFECTIVO' | 'QUEDA_DEBIENDO'
+
 export interface CancelarConChequePayload {
   cheque_id: string
   porcentaje_venta: number
   operador_id: string
   motivo: string
   fecha_cancelacion?: string | null
+  // Requerido solo si el cheque cubre de más (diferencia > 0).
+  vuelto_modo?: VueltoModo | null
 }
 
 export const cancelarPasivoConCheque = (

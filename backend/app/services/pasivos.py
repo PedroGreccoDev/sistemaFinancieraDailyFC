@@ -9,14 +9,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    CajaCategoria,
+    CajaTipo,
     Cheque,
     ChequeEstado,
     InvalidChequeStateTransition,
     ManualOperationRequired,
+    Moneda,
     Pasivo,
     PasivoEstado,
 )
 from app.core.fechas import hoy_local
+from app.services import caja as svc_caja
 from app.schemas.pasivos import (
     PasivoCancelarConChequeRequest,
     PasivoCancelarEfectivoRequest,
@@ -104,6 +108,19 @@ def cancelar_con_efectivo(
         pasivo.estado = PasivoEstado.CANCELADA
         pasivo.fecha_cancelacion = payload.fecha_cancelacion or hoy_local()
 
+    # Pagar la deuda en efectivo es un egreso de caja en la moneda del pasivo (incluye parciales).
+    svc_caja.registrar(
+        db,
+        fecha=payload.fecha_cancelacion or hoy_local(),
+        moneda=pasivo.moneda,
+        tipo=CajaTipo.EGRESO,
+        categoria=CajaCategoria.PAGO_PASIVO,
+        monto=payload.monto_cobrado,
+        referencia_tipo="pasivo",
+        referencia_id=pasivo.id,
+        detalle=f"Pago deuda a {pasivo.acreedor}",
+    )
+
     db.commit()
     db.refresh(pasivo)
     return pasivo
@@ -136,7 +153,18 @@ def cancelar_con_cheque(
     # diferencia > 0: el cheque cubre de más | diferencia < 0: saldo restante
     diferencia = (valor_neto - pasivo.saldo_pendiente).quantize(Decimal("0.01"))
 
+    # Si el cheque cubre de más, el operador DEBE indicar qué hacer con el vuelto.
+    if diferencia > Decimal("0.00") and payload.vuelto_modo is None:
+        raise ValidationError(
+            "El cheque cubre de más. Indicá qué hacer con el vuelto: "
+            "'SALDAR_EFECTIVO' (le pagás la diferencia) o 'QUEDA_DEBIENDO' "
+            "(queda como deuda a favor del cliente)."
+        )
+
+    fecha_canc = payload.fecha_cancelacion or hoy_local()
     try:
+        # Pagar la deuda entregando un cheque de cartera NO mueve efectivo (el desembolso
+        # ya ocurrió al comprar el cheque); por eso pasa por el modelo, no por svc_cheques.
         cheque.transition_to(
             ChequeEstado.VENDIDO,
             operador_id=payload.operador_id,
@@ -146,7 +174,9 @@ def cancelar_con_cheque(
         if diferencia >= Decimal("0.00"):
             pasivo.saldo_pendiente = Decimal("0.00")
             pasivo.estado = PasivoEstado.CANCELADA
-            pasivo.fecha_cancelacion = payload.fecha_cancelacion or hoy_local()
+            pasivo.fecha_cancelacion = fecha_canc
+            if diferencia > Decimal("0.00"):
+                _aplicar_vuelto(db, cheque, payload.vuelto_modo, diferencia, fecha_canc)
         else:
             pasivo.saldo_pendiente = (-diferencia).quantize(Decimal("0.01"))
 
@@ -159,3 +189,44 @@ def cancelar_con_cheque(
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("No se pudo cancelar la deuda con cheque.") from exc
+
+
+def _aplicar_vuelto(
+    db: Session,
+    cheque: Cheque,
+    modo: str | None,
+    diferencia: Decimal,
+    fecha: date,
+) -> None:
+    """Resuelve el vuelto cuando un cheque cubre de más un pasivo (diferencia > 0).
+
+    El vuelto es en ARS (el cheque es un instrumento en pesos).
+    """
+    cliente = cheque.cliente_origen
+    cliente_nombre = cliente.nombre if cliente else "cliente"
+
+    if modo == "SALDAR_EFECTIVO":
+        # Le pagás el vuelto en efectivo/transferencia: egreso de caja ARS.
+        svc_caja.registrar(
+            db,
+            fecha=fecha,
+            moneda=Moneda.ARS,
+            tipo=CajaTipo.EGRESO,
+            categoria=CajaCategoria.VUELTO_PASIVO,
+            monto=diferencia,
+            referencia_tipo="cheque",
+            referencia_id=cheque.id,
+            detalle=f"Vuelto en efectivo a {cliente_nombre} (cheque Nº {cheque.nro_cheque})",
+        )
+    else:  # QUEDA_DEBIENDO
+        # Quedás debiendo: se crea un pasivo a favor del cliente (sin movimiento de caja).
+        db.add(
+            Pasivo(
+                acreedor=cliente_nombre,
+                concepto=f"Vuelto cheque Nº {cheque.nro_cheque}",
+                monto=diferencia,
+                saldo_pendiente=diferencia,
+                moneda=Moneda.ARS,
+                estado=PasivoEstado.PENDIENTE,
+            )
+        )

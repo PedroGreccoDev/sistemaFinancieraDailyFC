@@ -7,7 +7,7 @@
  */
 import type {
   Cheque, Cliente, Cuota, Fiado, GastoOperativo,
-  MovimientoEfectivo, Pasivo, Prestamo, ReporteGanancias,
+  MovimientoEfectivo, Pasivo, Prestamo, ReporteCaja,
 } from '../types'
 
 const DAY = 86_400_000
@@ -153,23 +153,39 @@ const gastos: GastoOperativo[] = [
 
 // ── Movimientos de efectivo (divisas) ─────────────────────────────────
 const movimientos: MovimientoEfectivo[] = [
-  { id: 'mo-1', cliente_id: 'cli-1', tipo: 'VENTA',  moneda: 'USD', monto: '500', cotizacion_aplicada: '1450.00', ganancia: '25000', fecha_operacion: ts(-2), observaciones: null,           created_at: ts(-2), updated_at: ts(-2) },
-  { id: 'mo-2', cliente_id: 'cli-3', tipo: 'COMPRA', moneda: 'USD', monto: '300', cotizacion_aplicada: '1400.00', ganancia: '12000', fecha_operacion: ts(-4), observaciones: 'Compra mostrador', created_at: ts(-4), updated_at: ts(-4) },
-  { id: 'mo-3', cliente_id: null,    tipo: 'VENTA',  moneda: 'USD', monto: '800', cotizacion_aplicada: '1460.00', ganancia: '40000', fecha_operacion: ts(-6), observaciones: null,           created_at: ts(-6), updated_at: ts(-6) },
+  { id: 'mo-1', cliente_id: 'cli-1', tipo: 'VENTA',  moneda: 'USD', monto: '500', cotizacion_aplicada: '1450.00', ganancia: '25000', usd_restante: '0',   fecha_operacion: ts(-2), observaciones: null,           created_at: ts(-2), updated_at: ts(-2) },
+  { id: 'mo-2', cliente_id: 'cli-3', tipo: 'COMPRA', moneda: 'USD', monto: '300', cotizacion_aplicada: '1400.00', ganancia: '0',     usd_restante: '300', fecha_operacion: ts(-4), observaciones: 'Compra mostrador', created_at: ts(-4), updated_at: ts(-4) },
+  { id: 'mo-3', cliente_id: null,    tipo: 'VENTA',  moneda: 'USD', monto: '800', cotizacion_aplicada: '1460.00', ganancia: '40000', usd_restante: '0',   fecha_operacion: ts(-6), observaciones: null,           created_at: ts(-6), updated_at: ts(-6) },
 ]
 
-// ── Reporte de ganancias (mismo snapshot para cualquier período) ───────
-const reporte: ReporteGanancias = {
+// ── Reporte de caja (mismo snapshot para cualquier período) ────────────
+const reporte: ReporteCaja = {
   desde: d(-30), hasta: d(0),
-  ganancia_cheques: '98800',
-  ganancia_prestamos: '142000',
-  ganancia_movimientos_efectivo: '77000',
-  gastos_operativos: '50000',
-  total_ganancias: '317800',
-  neto: '267800',
+  ars: {
+    moneda: 'ARS',
+    ingresos_total: '430000',
+    egresos_total: '162200',
+    neto: '267800',
+    lineas: [
+      { fecha: d(-2), categoria: 'VENTA_USD',    tipo: 'INGRESO', monto: '725000', detalle: 'Venta de 500 USD @ $1450', ganancia: '25000' },
+      { fecha: d(-3), categoria: 'COBRO_CUOTA',  tipo: 'INGRESO', monto: '50000',  detalle: 'Cuota #1 - Juan Pérez',     ganancia: null },
+      { fecha: d(-4), categoria: 'COMPRA_USD',   tipo: 'EGRESO',  monto: '420000', detalle: 'Compra de 300 USD @ $1400', ganancia: null },
+      { fecha: d(-5), categoria: 'GASTO',        tipo: 'EGRESO',  monto: '50000',  detalle: 'Nafta',                     ganancia: null },
+    ],
+  },
+  usd: {
+    moneda: 'USD',
+    ingresos_total: '300',
+    egresos_total: '1300',
+    neto: '-1000',
+    lineas: [
+      { fecha: d(-2), categoria: 'VENTA_USD',  tipo: 'EGRESO',  monto: '500', detalle: 'Venta de 500 USD @ $1450', ganancia: null },
+      { fecha: d(-4), categoria: 'COMPRA_USD', tipo: 'INGRESO', monto: '300', detalle: 'Compra de 300 USD @ $1400', ganancia: null },
+      { fecha: d(-6), categoria: 'VENTA_USD',  tipo: 'EGRESO',  monto: '800', detalle: 'Venta de 800 USD @ $1460', ganancia: null },
+    ],
+  },
+  ganancia_divisas: '65000',
   saldo_pasivos: { pendiente_ars: '320000', pendiente_usd: '1500' },
-  cobros_cuotas_ars: '0',
-  cobros_cuotas_usd: '0',
 }
 
 // ── Router ────────────────────────────────────────────────────────────
@@ -192,7 +208,7 @@ export async function mockFetch<T>(path: string, options?: RequestInit): Promise
     if (raw === '/gastos-operativos')   return gastos
     if (raw === '/movimientos-efectivo') return movimientos
     if (raw === '/pasivos')             return estado ? pasivos.filter((p) => p.estado === estado) : pasivos
-    if (raw === '/reportes/ganancias')  return reporte
+    if (raw === '/reportes/caja')       return reporte
     throw new Error(`Modo demo (mock): endpoint no simulado: ${raw}`)
   }
 
