@@ -140,7 +140,9 @@ El cliente puede cancelar esa deuda de dos formas:
   `ganancia = Σ (precio_venta − costo_lote) × cantidad_consumida_del_lote` (en ARS).
   Diferencia por dólar positiva → ganancia; negativa → pérdida. **PROHIBIDO promediar costos.**
   La ganancia se realiza en la **venta**; la compra solo incorpora stock a su costo.
-  _(Implementación pendiente: hoy `ganancia` se acepta del payload sin calcularse y no hay lotes.)_
+  **✅ Implementado:** `svc_movimientos.calcular_ganancia_fifo` (cálculo puro) + `create_movimiento`
+  (la compra crea el lote con `usd_restante`; la venta lo consume FIFO y asienta la `ganancia`).
+  Cubierto por `tests/test_caja_divisas.py`.
 - El widget de Dólar Blue en el frontend es **solo decorativo** (consume DolarAPI externamente).
 - **Editar carga:** `PATCH /movimientos-efectivo/{id}` (`svc_movimientos.editar_movimiento`). `cliente`/`observaciones` siempre; `monto`/`cotizacion_aplicada` solo si la operación no está trabada en la cadena FIFO: una **COMPRA** únicamente si su lote está intacto (`usd_restante == monto`), una **VENTA** únicamente si es la última. Al editar se reimputa toda la cadena (`_reimputar_fifo`) y se resincronizan sus líneas de caja. En el panel, botón "Editar" solo en las filas de Divisas de la página Movimientos (las divisas no tienen página propia).
 
@@ -161,7 +163,9 @@ El cliente puede cancelar esa deuda de dos formas:
   supera el saldo del pasivo, el operador elige qué hacer con el vuelto:
   **(a)** paga la diferencia al cliente en efectivo/transferencia y queda saldada, o
   **(b)** el negocio queda debiendo → se crea **automáticamente un pasivo a favor del cliente**
-  por el monto del vuelto. _(Implementación pendiente: hoy el excedente se descarta.)_
+  por el monto del vuelto. **✅ Implementado:** `svc_pasivos.cancelar_con_cheque` exige `vuelto_modo`
+  cuando hay diferencia; `_aplicar_vuelto` resuelve `SALDAR_EFECTIVO` (egreso `VUELTO_PASIVO` en ARS)
+  o `QUEDA_DEBIENDO` (crea el pasivo a favor, sin movimiento de caja).
 - Campos: `acreedor`, `concepto`, `monto`, `moneda`, `fecha_vencimiento` (opcional).
 - **Editar carga:** `PATCH /pasivos/{id}` (`svc_pasivos.editar_pasivo`). `acreedor`/`concepto`/`fecha_vencimiento`/`observaciones` siempre; `monto`/`moneda` solo si está `PENDIENTE` y sin pagos parciales (`saldo == monto`), y al cambiar el monto se recalcula el saldo. El alta no genera línea de caja, así que no hay nada que resincronizar. En el panel, botón "Editar" por fila en Deudas.
 - El cierre de caja incluye un snapshot de pasivos pendientes por moneda, **sin filtro de periodo**.
@@ -175,8 +179,9 @@ El cliente puede cancelar esa deuda de dos formas:
 - Se descuentan como **egreso** en el reporte para obtener el **neto del período**.
 - **Editar carga:** `PATCH /gastos-operativos/{id}` (`svc_gastos.editar_gasto`) corrige concepto/monto/moneda/fecha/observaciones y resincroniza su egreso de caja (`_resync_caja_gasto`). Sin reglas de bloqueo (un gasto es un egreso simple). En el panel, botón "Editar" por fila en la página Gastos.
 - **Por moneda (régimen definido 2026-06-25):** un gasto en USD resta del **neto USD** y un gasto
-  en ARS resta del **neto ARS**. La caja se lleva separada por moneda. _(Implementación pendiente:
-  hoy el reporte solo resta los gastos ARS y el neto es único.)_
+  en ARS resta del **neto ARS**. La caja se lleva separada por moneda. **✅ Implementado:**
+  `svc_gastos.create_gasto` asienta el egreso `GASTO` con `moneda=gasto.moneda`; `_resync_caja_gasto`
+  lo rehace en la moneda correcta al editar.
 
 ### 7. Reportes y Cierre de Caja
 
@@ -203,10 +208,10 @@ cliente, operación, fecha).
 > `PENDIENTE` por moneda, sin filtro de período). Ya **no existe** el endpoint devengado
 > `…/ganancias`. El frontend consume `/reportes/caja` (`frontend/src/api/reportes.ts`).
 >
-> **Préstamos** cumplen el régimen (egreso al originar, ingreso al cobrar — ver §3). Lo que
-> todavía figura como pendiente vive en sus módulos y asentará en este mismo libro al
-> implementarse: cálculo FIFO de divisas (§4), gastos en USD restando el neto USD (§6) y el
-> vuelto de pasivos pagados con cheque "de más" (§5).
+> **Todas las reglas del régimen de caja diaria están implementadas y verificadas (2026-06-26)**
+> y asientan en este mismo libro: préstamos (egreso al originar, ingreso al cobrar — §3), cálculo
+> FIFO de divisas (§4), gastos por moneda restando el neto de su moneda (§6) y el vuelto de pasivos
+> pagados con cheque "de más" (§5).
 
 ### 8. Backup / Configuración _(módulo agregado)_
 
