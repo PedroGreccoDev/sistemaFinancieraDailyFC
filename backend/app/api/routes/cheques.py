@@ -21,6 +21,12 @@ from app.services import cheques as service
 
 router = APIRouter(prefix="/cheques", tags=["cheques"])
 
+# Router público (montado SIN get_current_user en main.py): la foto se sirve por
+# UUID no-adivinable para poder usarse en <img src> directos del panel, que no
+# pueden enviar el header Authorization. La protección efectiva es la entropía
+# del UUID, no la sesión.
+public_router = APIRouter(prefix="/cheques", tags=["cheques"])
+
 DbSession = Annotated[Session, Depends(get_db)]
 
 
@@ -49,7 +55,7 @@ def editar_cheque(cheque_id: UUID, payload: ChequeUpdate, db: DbSession) -> Cheq
     return service.editar_cheque(db, cheque_id, payload)
 
 
-@router.get("/{cheque_id}/foto")
+@public_router.get("/{cheque_id}/foto")
 def get_cheque_foto(cheque_id: UUID, db: DbSession) -> Response:
     foto, mime = service.get_cheque_foto(db, cheque_id)
     return Response(

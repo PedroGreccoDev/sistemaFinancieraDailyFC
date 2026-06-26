@@ -72,6 +72,7 @@ en sync con la operación de negocio.
 - `FIADO` **solo** se procesa con la transacción atómica `fiar_cheque` (crea cheque FIADO + registro `Fiado` en el mismo commit). **No genera préstamo ni cuotas.**
 - Toda transición manual requiere `operador_id` y `motivo` no vacíos.
 - **Foto del cheque:** los cheques cargados por WhatsApp guardan la imagen (migración `0009`); se visualiza en el panel con `ChequeFotoModal`.
+  - El endpoint `GET /cheques/{id}/foto` se monta en un **router público** (`cheques.public_router`, sin `get_current_user`): se sirve por **UUID no-adivinable** para que funcione en `<img src>` directos del panel (p. ej. la miniatura de `Cartera`), que no pueden enviar el header `Authorization`. **La protección es la entropía del UUID, no la sesión** — si esos UUIDs se filtran (logs, links), la foto queda expuesta. El resto de `cheques.router` sigue protegido. Si se necesita cerrar el acceso sin romper los `<img>`, el camino es un token firmado en la query (`?token=`).
 - **Editar carga (panel + bot):** `PATCH /cheques/{id}` (`svc_cheques.editar_cheque`) corrige la carga y resincroniza la caja (`resync_caja_cheque`). Reglas: `COBRADO`/`RECHAZADO` son terminales y NO editables; `EN_CARTERA` edita campos base; `VENDIDO`/`FIADO` además `porcentaje_venta` (recalcula ganancia, y el saldo del fiado solo si aún no recibió cobros parciales). En el panel está el botón "Editar" por fila en Cartera (en cartera y en el historial de ventas); el modal permite además reasignar cliente origen/destino (con alta de cliente inline).
 
 ### 2. Fiados _(módulo agregado 2026-06-09)_
@@ -218,7 +219,7 @@ cliente, operación, fecha).
 
 - Login **por usuario+contraseña** para el panel. La validación es **en el backend**: todos los
   routers de negocio van con `dependencies=[Depends(get_current_user)]` en `app/main.py`. **Públicos:**
-  `/health`, `auth.router` y el `webhook` de WhatsApp.
+  `/health`, `auth.router`, el `webhook` de WhatsApp y `cheques.public_router` (solo `GET /cheques/{id}/foto`; ver Chequera Virtual).
 - **Sesión sin caducidad por tiempo:** el JWT (HS256, `app/core/auth.py`) **no lleva `exp`**; lleva
   `sub` + `ver`. La revocación es por BD: `get_current_user` exige `usuario.activo` y que `ver` del
   token coincida con `usuario.token_version`. Resetear/recuperar la clave **incrementa `token_version`**

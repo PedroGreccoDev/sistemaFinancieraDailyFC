@@ -63,6 +63,10 @@ def health() -> dict[str, str]:
 # Autenticación (login, recuperación, invitaciones, gestión de usuarios) — público
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
 
+# Foto de cheque — pública: se sirve por UUID no-adivinable para poder usarse en
+# <img src> directos del panel (que no pueden mandar el header Authorization).
+app.include_router(cheques.public_router, prefix=settings.api_v1_prefix)
+
 # REST API de negocio — protegida: requiere sesión válida (Bearer token)
 _auth = [Depends(get_current_user)]
 app.include_router(clientes.router, prefix=settings.api_v1_prefix, dependencies=_auth)
