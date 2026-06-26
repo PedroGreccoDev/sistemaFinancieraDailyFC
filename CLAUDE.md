@@ -43,6 +43,8 @@ de modo que el asiento de caja y la operación de negocio son **atómicos** (o a
 - `referencia_tipo` / `referencia_id` — enlace flojo a la entidad que lo originó
   (cheque/préstamo/cuota/fiado/pasivo/gasto/movimiento).
 - `ganancia` — solo en `VENTA_USD`: ganancia FIFO realizada en ARS. Es dato de **reporte**, no de caja.
+- `medio_pago` — solo en `PAGO_PASIVO`: `EFECTIVO` | `TRANSFERENCIA` (enum `medio_pago`, migración `0014`); null en el resto.
+- `cotizacion` — `$/USD` aplicado cuando un pago cruza monedas (deuda y pago en monedas distintas); null si comparten moneda. Dato de reporte/auditoría.
 - `detalle` — texto libre con el detalle de la línea.
 
 **"Resincronizar la caja" = rehacer esos renglones.** Cuando un módulo edita una operación ya
@@ -148,7 +150,12 @@ El cliente puede cancelar esa deuda de dos formas:
 - El bot **exige** que el operador indique el concepto; si falta, responde con `ACLARACION_REQUERIDA`.
 - **Cancelación** solo desde el panel web (el bot no puede cancelar pasivos).
 - Estados: `PENDIENTE` → `CANCELADA` (transición única, irreversible).
-- **Pagos parciales:** el pasivo tiene `saldo_pendiente` (migración `0007`); se puede cancelar en partes, en efectivo o con un cheque de cartera. Pasa a `CANCELADA` cuando el saldo llega a 0.
+- **Pagos parciales:** el pasivo tiene `saldo_pendiente` (migración `0007`); se puede cancelar en partes, en efectivo/transferencia o con un cheque de cartera. Pasa a `CANCELADA` cuando el saldo llega a 0.
+- **Pago en efectivo o transferencia (`POST /pasivos/{id}/pagar`, `svc_pasivos.pagar_pasivo`, régimen definido 2026-06-25):**
+  - El operador ingresa **el monto que paga, en la moneda con la que paga** (`moneda_pago`) y el **medio** (`EFECTIVO` | `TRANSFERENCIA`, enum `medio_pago`). **La caja se descuenta en esa moneda de pago** (un EGRESO `PAGO_PASIVO` con su `medio_pago`), no en la de la deuda.
+  - **La moneda de pago puede diferir de la de la deuda.** Si difiere, el operador ingresa la **cotización (pesos por 1 USD)**, que se usa **solo** para imputar cuánto baja el `saldo_pendiente` (que se lleva en la moneda de la deuda): deuda USD pagada en ARS → `saldo -= monto/cotizacion`; deuda ARS pagada en USD → `saldo -= monto*cotizacion`. La conversión vive en la función pura `calcular_reduccion_saldo` (testeable sin BD).
+  - **La cotización es por pago:** cada cancelación parcial puede usar una distinta. La **primera** se guarda en `pasivos.cotizacion_pago` y el panel la propone como default editable. Cada línea de caja guarda su `cotizacion` aplicada (para reporte/auditoría).
+  - Tolerancia de redondeo: un exceso de hasta un centavo sobre el saldo (por convertir de moneda) se trata como cancelación exacta; más que eso es error.
 - **Pago con cheque "de más" (régimen definido 2026-06-25):** cuando el valor neto del cheque
   supera el saldo del pasivo, el operador elige qué hacer con el vuelto:
   **(a)** paga la diferencia al cliente en efectivo/transferencia y queda saldada, o

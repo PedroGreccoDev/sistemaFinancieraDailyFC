@@ -71,6 +71,11 @@ class CajaTipo(str, enum.Enum):
     EGRESO  = "EGRESO"
 
 
+class MedioPago(str, enum.Enum):
+    EFECTIVO      = "EFECTIVO"
+    TRANSFERENCIA = "TRANSFERENCIA"
+
+
 class CajaCategoria(str, enum.Enum):
     COBRO_CUOTA          = "COBRO_CUOTA"
     COBRO_FIADO          = "COBRO_FIADO"
@@ -500,6 +505,9 @@ class Pasivo(Base):
     fecha_vencimiento: Mapped[date | None]    = mapped_column(sa.Date(), nullable=True, index=True)
     fecha_cancelacion: Mapped[date | None]    = mapped_column(sa.Date(), nullable=True)
     observaciones:     Mapped[str | None]     = mapped_column(sa.Text(), nullable=True)
+    # Cotización ($/USD) de la PRIMERA cancelación en moneda distinta a la deuda.
+    # Se setea una sola vez y sirve de default editable para los pagos siguientes.
+    cotizacion_pago:   Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 4), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -568,6 +576,13 @@ class MovimientoCaja(Base):
     monto:     Mapped[Decimal]       = mapped_column(sa.Numeric(18, 2))
     # Solo VENTA_USD: ganancia FIFO realizada (en ARS). Dato de reporte, no de caja.
     ganancia:  Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+    # Solo pagos de pasivo (PAGO_PASIVO): medio con el que se pagó. Null en el resto.
+    medio_pago: Mapped[MedioPago | None] = mapped_column(
+        sa.Enum(MedioPago, name="medio_pago", create_type=False), nullable=True
+    )
+    # $/USD aplicado cuando un pago cruza monedas (deuda en una moneda, pago en otra).
+    # Null cuando pago y deuda comparten moneda. Solo dato de reporte/auditoría.
+    cotizacion: Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 4), nullable=True)
 
     # Enlace flojo a la entidad origen (cheque/prestamo/cuota/fiado/pasivo/gasto/movimiento).
     referencia_tipo: Mapped[str | None]       = mapped_column(sa.String(40), nullable=True)

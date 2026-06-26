@@ -71,6 +71,8 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
                 monto=_money(m.monto),
                 detalle=m.detalle,
                 ganancia=None if m.ganancia is None else _money(m.ganancia),
+                medio_pago=None if m.medio_pago is None else m.medio_pago.value,
+                cotizacion=None if m.cotizacion is None else m.cotizacion,
             )
             for m in propios
         ]

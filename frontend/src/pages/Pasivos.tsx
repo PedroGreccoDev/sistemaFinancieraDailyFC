@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPasivos, createPasivo, cancelarPasivoEfectivo, cancelarPasivoConCheque, editarPasivo } from '../api/pasivos'
+import { getPasivos, createPasivo, pagarPasivo, cancelarPasivoConCheque, editarPasivo } from '../api/pasivos'
 import { getChequeCartera } from '../api/cheques'
 import { fmtARS, fmtUSD, fmtDate } from '../lib/fmt'
 import { chip, btnSolid, btnBordered, btnFlat } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconPlus, IconRefresh } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
-import type { Cheque, Moneda, Pasivo, PasivoEstado } from '../types'
+import type { Cheque, MedioPago, Moneda, Pasivo, PasivoEstado } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
 
 type Filtro = 'todos' | PasivoEstado
@@ -150,22 +150,49 @@ function ModalEditarDeuda({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onCl
   )
 }
 
-// ── Modal cancelar con efectivo ───────────────────────────────────────
+// ── Modal pagar (efectivo / transferencia, en cualquier moneda) ───────
 
-function ModalCancelarEfectivo({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onClose: () => void; onSuccess: () => void }) {
+function ModalPagar({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onClose: () => void; onSuccess: () => void }) {
   const saldo = parseFloat(pasivo.saldo_pendiente)
-  const [montoCobrado, setMontoCobrado] = useState(pasivo.saldo_pendiente)
+  const [monto, setMonto] = useState('')
+  const [monedaPago, setMonedaPago] = useState<Moneda>(pasivo.moneda)
+  const [medioPago, setMedioPago] = useState<MedioPago>('EFECTIVO')
+  const [cotizacion, setCotizacion] = useState(pasivo.cotizacion_pago ?? '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const montoNum = parseFloat(montoCobrado) || 0
-  const cancelaTotal = montoNum === saldo && saldo > 0
   const toast = useToast()
+
+  const montoNum = parseFloat(monto) || 0
+  const cotizNum = parseFloat(cotizacion) || 0
+  const cross = monedaPago !== pasivo.moneda
+
+  // Equivalente saldado en la moneda de la deuda (solo informativo en el modal).
+  let equivalente: number | null = null
+  if (montoNum > 0 && (!cross || cotizNum > 0)) {
+    if (!cross) equivalente = montoNum
+    else if (pasivo.moneda === 'USD') equivalente = montoNum / cotizNum  // deuda USD, pago ARS
+    else equivalente = montoNum * cotizNum                                // deuda ARS, pago USD
+    equivalente = Math.round(equivalente * 100) / 100
+  }
+  const cancelaTotal = equivalente !== null && Math.abs(equivalente - saldo) < 0.01
+  const superaSaldo = equivalente !== null && equivalente - saldo >= 0.01
+  const faltaCotiz = cross && cotizNum <= 0
+  const puedeEnviar = montoNum > 0 && !faltaCotiz && equivalente !== null && !superaSaldo
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     setLoading(true)
-    try { await cancelarPasivoEfectivo(pasivo.id, { monto_cobrado: montoNum }); toast('success', cancelaTotal ? 'Deuda cancelada' : 'Pago registrado'); onSuccess() }
+    try {
+      await pagarPasivo(pasivo.id, {
+        monto_pagado: montoNum,
+        moneda_pago: monedaPago,
+        medio_pago: medioPago,
+        cotizacion: cross ? cotizNum : null,
+      })
+      toast('success', cancelaTotal ? 'Deuda cancelada' : 'Pago registrado')
+      onSuccess()
+    }
     catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
   }
@@ -174,7 +201,7 @@ function ModalCancelarEfectivo({ pasivo, onClose, onSuccess }: { pasivo: Pasivo;
     <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
       <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '380px' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)' }}>
-          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Pagar con efectivo</h2>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Pagar deuda</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{pasivo.acreedor}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
@@ -189,20 +216,50 @@ function ModalCancelarEfectivo({ pasivo, onClose, onSuccess }: { pasivo: Pasivo;
               </div>
             ))}
           </div>
-          <div>
-            <label style={LABEL_STYLE}>Monto a pagar</label>
-            <input type="number" step="0.01" min="0.01" max={saldo} value={montoCobrado} onChange={(e) => setMontoCobrado(e.target.value)} required style={INPUT_STYLE} />
-            {montoNum > 0 && montoNum <= saldo && (
-              <p style={{ fontFamily: FM, fontSize: '0.7rem', marginTop: '0.3rem', color: cancelaTotal ? '#4ade80' : '#fbbf24' }}>
-                {cancelaTotal ? 'Cancela la deuda completamente' : `Saldo restante: ${fmtMoneda(saldo - montoNum, pasivo.moneda)}`}
-              </p>
-            )}
-            {montoNum > saldo && <p style={{ fontFamily: FM, fontSize: '0.7rem', marginTop: '0.3rem', color: '#f87171' }}>Supera el saldo pendiente</p>}
+
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <div style={{ flex: 1 }}>
+              <label style={LABEL_STYLE}>Medio</label>
+              <select value={medioPago} onChange={(e) => setMedioPago(e.target.value as MedioPago)} style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+                <option value="EFECTIVO">Efectivo</option>
+                <option value="TRANSFERENCIA">Transferencia</option>
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={LABEL_STYLE}>Moneda de pago</label>
+              <select value={monedaPago} onChange={(e) => setMonedaPago(e.target.value as Moneda)} style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+                <option value="ARS">ARS (pesos)</option>
+                <option value="USD">USD</option>
+              </select>
+            </div>
           </div>
+
+          <div>
+            <label style={LABEL_STYLE}>Monto a pagar ({monedaPago})</label>
+            <input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required style={INPUT_STYLE} />
+          </div>
+
+          {cross && (
+            <div>
+              <label style={LABEL_STYLE}>Cotización (pesos por 1 USD)</label>
+              <input type="number" step="0.0001" min="0.0001" value={cotizacion} onChange={(e) => setCotizacion(e.target.value)} required style={INPUT_STYLE} />
+              <p style={{ fontFamily: FM, fontSize: '0.68rem', marginTop: '0.25rem', color: 'rgba(100,116,139,0.55)' }}>
+                Pagás en {monedaPago}; la deuda es en {pasivo.moneda}. La cotización imputa cuánto se salda.
+              </p>
+            </div>
+          )}
+
+          {equivalente !== null && !superaSaldo && (
+            <p style={{ fontFamily: FM, fontSize: '0.7rem', color: cancelaTotal ? '#4ade80' : '#fbbf24' }}>
+              {cross && `Salda ${fmtMoneda(equivalente, pasivo.moneda)} de la deuda · `}
+              {cancelaTotal ? 'Cancela la deuda completamente' : `Saldo restante: ${fmtMoneda(saldo - equivalente, pasivo.moneda)}`}
+            </p>
+          )}
+          {superaSaldo && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171' }}>El pago equivale a {fmtMoneda(equivalente!, pasivo.moneda)} y supera el saldo pendiente</p>}
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Volver</button>
-            <button type="submit" disabled={loading || montoNum <= 0 || montoNum > saldo} style={{ ...btnSolid('success'), flex: 1, padding: '0.55rem', opacity: (loading || montoNum <= 0 || montoNum > saldo) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar pago'}</button>
+            <button type="submit" disabled={loading || !puedeEnviar} style={{ ...btnSolid('success'), flex: 1, padding: '0.55rem', opacity: (loading || !puedeEnviar) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar pago'}</button>
           </div>
         </form>
       </div>
@@ -429,7 +486,7 @@ export default function Pasivos() {
                 <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
                   {pasivo.estado === 'PENDIENTE' && (
                     <>
-                      <button onClick={() => setPasivoEfectivo(pasivo)} style={{ ...btnFlat('success'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Efectivo</button>
+                      <button onClick={() => setPasivoEfectivo(pasivo)} style={{ ...btnFlat('success'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Pagar</button>
                       <button onClick={() => setPasivoCheque(pasivo)} style={{ ...btnFlat('primary'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Con cheque</button>
                     </>
                   )}
@@ -467,7 +524,7 @@ export default function Pasivos() {
                       <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                         {pasivo.estado === 'PENDIENTE' && (
                           <>
-                            <button onClick={() => setPasivoEfectivo(pasivo)} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Efectivo</button>
+                            <button onClick={() => setPasivoEfectivo(pasivo)} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Pagar</button>
                             <button onClick={() => setPasivoCheque(pasivo)} style={{ ...btnFlat('primary'), fontSize: '0.68rem', padding: '2px 8px' }}>Con cheque</button>
                           </>
                         )}
@@ -484,7 +541,7 @@ export default function Pasivos() {
       </div>
 
       {mostrarNueva && <ModalNuevaDeuda onClose={() => setMostrarNueva(false)} onSuccess={handleSuccess} />}
-      {pasivoEfectivo && <ModalCancelarEfectivo pasivo={pasivoEfectivo} onClose={() => setPasivoEfectivo(null)} onSuccess={handleSuccess} />}
+      {pasivoEfectivo && <ModalPagar pasivo={pasivoEfectivo} onClose={() => setPasivoEfectivo(null)} onSuccess={handleSuccess} />}
       {pasivoCheque && <ModalCancelarCheque pasivo={pasivoCheque} onClose={() => setPasivoCheque(null)} onSuccess={handleSuccess} />}
       {pasivoEditar && <ModalEditarDeuda pasivo={pasivoEditar} onClose={() => setPasivoEditar(null)} onSuccess={handleSuccess} />}
     </div>

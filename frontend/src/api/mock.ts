@@ -136,10 +136,10 @@ const prestamos: Prestamo[] = [
 
 // ── Pasivos ───────────────────────────────────────────────────────────
 const pasivos: Pasivo[] = [
-  { id: 'pa-1', acreedor: 'Proveedor Papelería SA', concepto: 'Resma y tóner',       monto: '120000', saldo_pendiente: '120000', moneda: 'ARS', estado: 'PENDIENTE', fecha_vencimiento: d(10), fecha_cancelacion: null,  observaciones: null,            created_at: ts(-12), updated_at: ts(-12) },
-  { id: 'pa-2', acreedor: 'Inmobiliaria Centro',    concepto: 'Alquiler del local',  monto: '200000', saldo_pendiente: '200000', moneda: 'ARS', estado: 'PENDIENTE', fecha_vencimiento: d(3),  fecha_cancelacion: null,  observaciones: 'Mes corriente', created_at: ts(-8),  updated_at: ts(-8) },
-  { id: 'pa-3', acreedor: 'Importadora Global',     concepto: 'Mercadería en USD',   monto: '1500',   saldo_pendiente: '1500',   moneda: 'USD', estado: 'PENDIENTE', fecha_vencimiento: d(20), fecha_cancelacion: null,  observaciones: null,            created_at: ts(-5),  updated_at: ts(-5) },
-  { id: 'pa-4', acreedor: 'Ferretería Norte',       concepto: 'Insumos varios',      monto: '45000',  saldo_pendiente: '0',      moneda: 'ARS', estado: 'CANCELADA', fecha_vencimiento: d(-2), fecha_cancelacion: d(-5), observaciones: null,            created_at: ts(-20), updated_at: ts(-5) },
+  { id: 'pa-1', acreedor: 'Proveedor Papelería SA', concepto: 'Resma y tóner',       monto: '120000', saldo_pendiente: '120000', moneda: 'ARS', estado: 'PENDIENTE', fecha_vencimiento: d(10), fecha_cancelacion: null,  observaciones: null,            cotizacion_pago: null, created_at: ts(-12), updated_at: ts(-12) },
+  { id: 'pa-2', acreedor: 'Inmobiliaria Centro',    concepto: 'Alquiler del local',  monto: '200000', saldo_pendiente: '200000', moneda: 'ARS', estado: 'PENDIENTE', fecha_vencimiento: d(3),  fecha_cancelacion: null,  observaciones: 'Mes corriente', cotizacion_pago: null, created_at: ts(-8),  updated_at: ts(-8) },
+  { id: 'pa-3', acreedor: 'Importadora Global',     concepto: 'Mercadería en USD',   monto: '1500',   saldo_pendiente: '1500',   moneda: 'USD', estado: 'PENDIENTE', fecha_vencimiento: d(20), fecha_cancelacion: null,  observaciones: null,            cotizacion_pago: null, created_at: ts(-5),  updated_at: ts(-5) },
+  { id: 'pa-4', acreedor: 'Ferretería Norte',       concepto: 'Insumos varios',      monto: '45000',  saldo_pendiente: '0',      moneda: 'ARS', estado: 'CANCELADA', fecha_vencimiento: d(-2), fecha_cancelacion: d(-5), observaciones: null,            cotizacion_pago: null, created_at: ts(-20), updated_at: ts(-5) },
 ]
 
 // ── Gastos operativos ─────────────────────────────────────────────────
@@ -167,10 +167,11 @@ const reporte: ReporteCaja = {
     egresos_total: '162200',
     neto: '267800',
     lineas: [
-      { fecha: d(-2), categoria: 'VENTA_USD',    tipo: 'INGRESO', monto: '725000', detalle: 'Venta de 500 USD @ $1450', ganancia: '25000' },
-      { fecha: d(-3), categoria: 'COBRO_CUOTA',  tipo: 'INGRESO', monto: '50000',  detalle: 'Cuota #1 - Juan Pérez',     ganancia: null },
-      { fecha: d(-4), categoria: 'COMPRA_USD',   tipo: 'EGRESO',  monto: '420000', detalle: 'Compra de 300 USD @ $1400', ganancia: null },
-      { fecha: d(-5), categoria: 'GASTO',        tipo: 'EGRESO',  monto: '50000',  detalle: 'Nafta',                     ganancia: null },
+      { fecha: d(-2), categoria: 'VENTA_USD',    tipo: 'INGRESO', monto: '725000', detalle: 'Venta de 500 USD @ $1450', ganancia: '25000', medio_pago: null, cotizacion: null },
+      { fecha: d(-3), categoria: 'COBRO_CUOTA',  tipo: 'INGRESO', monto: '50000',  detalle: 'Cuota #1 - Juan Pérez',     ganancia: null, medio_pago: null, cotizacion: null },
+      { fecha: d(-4), categoria: 'COMPRA_USD',   tipo: 'EGRESO',  monto: '420000', detalle: 'Compra de 300 USD @ $1400', ganancia: null, medio_pago: null, cotizacion: null },
+      { fecha: d(-5), categoria: 'GASTO',        tipo: 'EGRESO',  monto: '50000',  detalle: 'Nafta',                     ganancia: null, medio_pago: null, cotizacion: null },
+      { fecha: d(-5), categoria: 'PAGO_PASIVO',  tipo: 'EGRESO',  monto: '120000', detalle: 'Pago deuda a Proveedor X (100.00 USD @ 1200)', ganancia: null, medio_pago: 'EFECTIVO', cotizacion: '1200.0000' },
     ],
   },
   usd: {
@@ -179,9 +180,9 @@ const reporte: ReporteCaja = {
     egresos_total: '1300',
     neto: '-1000',
     lineas: [
-      { fecha: d(-2), categoria: 'VENTA_USD',  tipo: 'EGRESO',  monto: '500', detalle: 'Venta de 500 USD @ $1450', ganancia: null },
-      { fecha: d(-4), categoria: 'COMPRA_USD', tipo: 'INGRESO', monto: '300', detalle: 'Compra de 300 USD @ $1400', ganancia: null },
-      { fecha: d(-6), categoria: 'VENTA_USD',  tipo: 'EGRESO',  monto: '800', detalle: 'Venta de 800 USD @ $1460', ganancia: null },
+      { fecha: d(-2), categoria: 'VENTA_USD',  tipo: 'EGRESO',  monto: '500', detalle: 'Venta de 500 USD @ $1450', ganancia: null, medio_pago: null, cotizacion: null },
+      { fecha: d(-4), categoria: 'COMPRA_USD', tipo: 'INGRESO', monto: '300', detalle: 'Compra de 300 USD @ $1400', ganancia: null, medio_pago: null, cotizacion: null },
+      { fecha: d(-6), categoria: 'VENTA_USD',  tipo: 'EGRESO',  monto: '800', detalle: 'Venta de 800 USD @ $1460', ganancia: null, medio_pago: null, cotizacion: null },
     ],
   },
   ganancia_divisas: '65000',

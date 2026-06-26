@@ -21,6 +21,8 @@ class CajaLinea(BaseModel):
     monto: Decimal
     detalle: str | None
     ganancia: Decimal | None  # solo VENTA_USD
+    medio_pago: str | None  # solo PAGO_PASIVO: EFECTIVO | TRANSFERENCIA
+    cotizacion: Decimal | None  # $/USD si el pago cruzó monedas
 
 
 class CajaMoneda(BaseModel):

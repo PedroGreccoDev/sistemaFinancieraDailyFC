@@ -15,6 +15,7 @@ from app.db.models import (
     ChequeEstado,
     InvalidChequeStateTransition,
     ManualOperationRequired,
+    MedioPago,
     Moneda,
     Pasivo,
     PasivoEstado,
@@ -23,9 +24,8 @@ from app.core.fechas import hoy_local
 from app.services import caja as svc_caja
 from app.schemas.pasivos import (
     PasivoCancelarConChequeRequest,
-    PasivoCancelarEfectivoRequest,
-    PasivoCancelarRequest,
     PasivoCreate,
+    PasivoPagoRequest,
     PasivoUpdate,
 )
 from app.services.exceptions import (
@@ -116,52 +116,100 @@ def editar_pasivo(
     return pasivo
 
 
-def cancelar_pasivo(
-    db: Session, pasivo_id: uuid.UUID, payload: PasivoCancelarRequest
-) -> Pasivo:
-    pasivo = get_pasivo(db, pasivo_id)
-    if pasivo.estado == PasivoEstado.CANCELADA:
-        raise ConflictError("El pasivo ya está cancelado.")
-    pasivo.estado = PasivoEstado.CANCELADA
-    pasivo.saldo_pendiente = Decimal("0.00")
-    pasivo.fecha_cancelacion = payload.fecha_cancelacion or hoy_local()
-    db.commit()
-    db.refresh(pasivo)
-    return pasivo
+def calcular_reduccion_saldo(
+    moneda_deuda: Moneda,
+    saldo_pendiente: Decimal,
+    moneda_pago: Moneda,
+    monto_pagado: Decimal,
+    cotizacion: Decimal | None,
+) -> Decimal:
+    """Cuánto baja el saldo de la deuda (en su moneda) por un pago.
+
+    El operador paga `monto_pagado` en `moneda_pago` (lo que sale de caja). Si la
+    moneda de pago coincide con la de la deuda, la reducción es directa. Si difiere,
+    se convierte con la cotización (pesos por 1 USD): deuda USD pagada en ARS →
+    `monto/cotizacion`; deuda ARS pagada en USD → `monto*cotizacion`.
+
+    Pura (sin BD): testeable en el estilo de `tests/`. Lanza ValidationError si
+    falta la cotización en un pago cross-moneda o si el pago supera el saldo.
+    """
+    if moneda_pago == moneda_deuda:
+        reduccion = monto_pagado
+    else:
+        if cotizacion is None or cotizacion <= Decimal("0"):
+            raise ValidationError(
+                "El pago es en una moneda distinta a la deuda: indicá la cotización "
+                "(pesos por 1 USD)."
+            )
+        if moneda_deuda == Moneda.USD and moneda_pago == Moneda.ARS:
+            reduccion = monto_pagado / cotizacion
+        else:  # deuda ARS, pago USD
+            reduccion = monto_pagado * cotizacion
+
+    reduccion = reduccion.quantize(Decimal("0.01"))
+    exceso = reduccion - saldo_pendiente
+    # Tolerancia de redondeo: un exceso de hasta un centavo (por convertir de moneda)
+    # se trata como cancelación exacta, para que pagar "el total" no falle ni deje resto.
+    if exceso > Decimal("0.01"):
+        raise ValidationError(
+            f"El pago equivale a {reduccion} {moneda_deuda.value} y supera el saldo "
+            f"pendiente ({saldo_pendiente} {moneda_deuda.value})."
+        )
+    if exceso > Decimal("0"):
+        return saldo_pendiente.quantize(Decimal("0.01"))
+    return reduccion
 
 
-def cancelar_con_efectivo(
-    db: Session, pasivo_id: uuid.UUID, payload: PasivoCancelarEfectivoRequest
+def pagar_pasivo(
+    db: Session, pasivo_id: uuid.UUID, payload: PasivoPagoRequest
 ) -> Pasivo:
+    """Paga una deuda (total o parcial) en efectivo o transferencia.
+
+    La caja se descuenta en la moneda efectivamente pagada (`moneda_pago`); el
+    saldo de la deuda baja por el equivalente en su propia moneda (vía cotización
+    si el pago cruza monedas)."""
     pasivo = db.scalar(select(Pasivo).where(Pasivo.id == pasivo_id).with_for_update())
     if pasivo is None:
         raise NotFoundError(f"Pasivo {pasivo_id} no encontrado.")
     if pasivo.estado == PasivoEstado.CANCELADA:
         raise ConflictError("El pasivo ya está cancelado.")
-    if payload.monto_cobrado > pasivo.saldo_pendiente:
-        raise ValidationError(
-            f"El monto cobrado ({payload.monto_cobrado}) supera el saldo pendiente "
-            f"({pasivo.saldo_pendiente})."
-        )
 
-    pasivo.saldo_pendiente = (pasivo.saldo_pendiente - payload.monto_cobrado).quantize(
-        Decimal("0.01")
+    es_cross = payload.moneda_pago != pasivo.moneda
+    reduccion = calcular_reduccion_saldo(
+        pasivo.moneda,
+        pasivo.saldo_pendiente,
+        payload.moneda_pago,
+        payload.monto_pagado,
+        payload.cotizacion,
     )
+
+    pasivo.saldo_pendiente = (pasivo.saldo_pendiente - reduccion).quantize(Decimal("0.01"))
+    fecha = payload.fecha_cancelacion or hoy_local()
     if pasivo.saldo_pendiente == Decimal("0.00"):
         pasivo.estado = PasivoEstado.CANCELADA
-        pasivo.fecha_cancelacion = payload.fecha_cancelacion or hoy_local()
+        pasivo.fecha_cancelacion = fecha
 
-    # Pagar la deuda en efectivo es un egreso de caja en la moneda del pasivo (incluye parciales).
+    # La primera cotización cross-moneda queda como default editable para próximos pagos.
+    if es_cross and pasivo.cotizacion_pago is None:
+        pasivo.cotizacion_pago = payload.cotizacion
+
+    detalle = f"Pago deuda a {pasivo.acreedor}"
+    if es_cross:
+        detalle += f" ({reduccion} {pasivo.moneda.value} @ {payload.cotizacion})"
+
+    # Pagar la deuda saca dinero de la caja en la moneda efectivamente pagada (incluye parciales).
     svc_caja.registrar(
         db,
-        fecha=payload.fecha_cancelacion or hoy_local(),
-        moneda=pasivo.moneda,
+        fecha=fecha,
+        moneda=payload.moneda_pago,
         tipo=CajaTipo.EGRESO,
         categoria=CajaCategoria.PAGO_PASIVO,
-        monto=payload.monto_cobrado,
+        monto=payload.monto_pagado,
         referencia_tipo="pasivo",
         referencia_id=pasivo.id,
-        detalle=f"Pago deuda a {pasivo.acreedor}",
+        detalle=detalle,
+        medio_pago=payload.medio_pago,
+        cotizacion=payload.cotizacion if es_cross else None,
     )
 
     db.commit()

@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Moneda, Pasivo, PasivoEstado } from '../types'
+import type { MedioPago, Moneda, Pasivo, PasivoEstado } from '../types'
 
 export interface PasivoCreatePayload {
   acreedor: string
@@ -18,9 +18,6 @@ export const getPasivos = (estado?: PasivoEstado): Promise<Pasivo[]> => {
 export const createPasivo = (payload: PasivoCreatePayload): Promise<Pasivo> =>
   apiFetch<Pasivo>('/pasivos', { method: 'POST', body: JSON.stringify(payload) })
 
-export const cancelarPasivo = (id: string): Promise<Pasivo> =>
-  apiFetch<Pasivo>(`/pasivos/${id}/cancelar`, { method: 'POST', body: JSON.stringify({}) })
-
 // Corrección de la carga de una deuda. `monto`/`moneda` solo si está PENDIENTE y
 // sin pagos parciales (lo valida el backend).
 export interface PasivoUpdatePayload {
@@ -35,11 +32,17 @@ export interface PasivoUpdatePayload {
 export const editarPasivo = (id: string, payload: PasivoUpdatePayload): Promise<Pasivo> =>
   apiFetch<Pasivo>(`/pasivos/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
 
-export const cancelarPasivoEfectivo = (
-  id: string,
-  payload: { monto_cobrado: number; fecha_cancelacion?: string | null },
-): Promise<Pasivo> =>
-  apiFetch<Pasivo>(`/pasivos/${id}/cancelar-efectivo`, {
+export interface PagarPasivoPayload {
+  monto_pagado: number
+  moneda_pago: Moneda
+  medio_pago: MedioPago
+  // Requerida solo si moneda_pago difiere de la moneda de la deuda ($/USD).
+  cotizacion?: number | null
+  fecha_cancelacion?: string | null
+}
+
+export const pagarPasivo = (id: string, payload: PagarPasivoPayload): Promise<Pasivo> =>
+  apiFetch<Pasivo>(`/pasivos/${id}/pagar`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })

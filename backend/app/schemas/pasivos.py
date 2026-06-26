@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.db.models import Moneda, PasivoEstado
+from app.db.models import MedioPago, Moneda, PasivoEstado
 
 # Qué hacer con el vuelto cuando un cheque cubre de más un pasivo.
 VueltoModo = Literal["SALDAR_EFECTIVO", "QUEDA_DEBIENDO"]
@@ -37,12 +37,18 @@ class PasivoUpdate(BaseModel):
     observaciones: str | None = None
 
 
-class PasivoCancelarRequest(BaseModel):
-    fecha_cancelacion: date | None = None
+class PasivoPagoRequest(BaseModel):
+    """Pago de una deuda (total o parcial) en efectivo o transferencia.
 
+    `monto_pagado` es el dinero que sale de caja, en `moneda_pago` (la moneda con
+    la que se paga, que puede diferir de la moneda de la deuda). `cotizacion`
+    ($/USD) es obligatoria solo cuando `moneda_pago` ≠ moneda de la deuda; se usa
+    para imputar cuánto de la deuda quedó saldado."""
 
-class PasivoCancelarEfectivoRequest(BaseModel):
-    monto_cobrado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    monto_pagado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    moneda_pago: Moneda
+    medio_pago: MedioPago
+    cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     fecha_cancelacion: date | None = None
 
 
@@ -69,6 +75,8 @@ class PasivoRead(BaseModel):
     fecha_vencimiento: date | None
     fecha_cancelacion: date | None
     observaciones: str | None
+    # Cotización de la primera cancelación cross-moneda; default para los pagos siguientes.
+    cotizacion_pago: Decimal | None
     created_at: datetime
     updated_at: datetime
 

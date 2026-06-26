@@ -15,7 +15,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.db.models import CajaCategoria, CajaTipo, Moneda, MovimientoCaja
+from app.db.models import CajaCategoria, CajaTipo, MedioPago, Moneda, MovimientoCaja
 
 
 def registrar(
@@ -30,11 +30,16 @@ def registrar(
     referencia_id: uuid.UUID | None = None,
     detalle: str | None = None,
     ganancia: Decimal | None = None,
+    medio_pago: MedioPago | None = None,
+    cotizacion: Decimal | None = None,
 ) -> MovimientoCaja:
     """Agrega (sin commit) un movimiento de caja a la sesión y lo devuelve.
 
     `monto` siempre positivo; el sentido lo da `tipo` (INGRESO/EGRESO).
     `ganancia` solo se usa en VENTA_USD (ganancia FIFO en ARS).
+    `medio_pago` solo en pagos de pasivo (efectivo/transferencia).
+    `cotizacion` ($/USD) solo cuando un pago cruza monedas (deuda y pago en
+    monedas distintas); null si comparten moneda.
     """
     mov = MovimientoCaja(
         fecha=fecha,
@@ -46,6 +51,8 @@ def registrar(
         referencia_tipo=referencia_tipo,
         referencia_id=referencia_id,
         detalle=detalle,
+        medio_pago=medio_pago,
+        cotizacion=None if cotizacion is None else Decimal(cotizacion).quantize(Decimal("0.0001")),
     )
     db.add(mov)
     return mov

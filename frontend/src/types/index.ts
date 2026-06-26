@@ -76,6 +76,8 @@ export interface CajaLinea {
   monto: string
   detalle: string | null
   ganancia: string | null
+  medio_pago: MedioPago | null
+  cotizacion: string | null
 }
 
 export interface CajaMoneda {
@@ -124,6 +126,8 @@ export interface MovimientoEfectivo {
   updated_at: string
 }
 
+export type MedioPago = 'EFECTIVO' | 'TRANSFERENCIA'
+
 export interface Pasivo {
   id: string
   acreedor: string
@@ -135,6 +139,7 @@ export interface Pasivo {
   fecha_vencimiento: string | null
   fecha_cancelacion: string | null
   observaciones: string | null
+  cotizacion_pago: string | null
   created_at: string
   updated_at: string
 }

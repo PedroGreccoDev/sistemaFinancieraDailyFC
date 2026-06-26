@@ -10,9 +10,8 @@ from app.db.models import PasivoEstado
 from app.db.session import get_db
 from app.schemas.pasivos import (
     PasivoCancelarConChequeRequest,
-    PasivoCancelarEfectivoRequest,
-    PasivoCancelarRequest,
     PasivoCreate,
+    PasivoPagoRequest,
     PasivoRead,
     PasivoUpdate,
 )
@@ -46,22 +45,13 @@ def editar_pasivo(pasivo_id: UUID, payload: PasivoUpdate, db: DbSession) -> Pasi
     return service.editar_pasivo(db, pasivo_id, payload)
 
 
-@router.post("/{pasivo_id}/cancelar", response_model=PasivoRead)
-def cancelar_pasivo(
+@router.post("/{pasivo_id}/pagar", response_model=PasivoRead)
+def pagar_pasivo(
     pasivo_id: UUID,
-    payload: PasivoCancelarRequest,
+    payload: PasivoPagoRequest,
     db: DbSession,
 ) -> PasivoRead:
-    return service.cancelar_pasivo(db, pasivo_id, payload)
-
-
-@router.post("/{pasivo_id}/cancelar-efectivo", response_model=PasivoRead)
-def cancelar_pasivo_efectivo(
-    pasivo_id: UUID,
-    payload: PasivoCancelarEfectivoRequest,
-    db: DbSession,
-) -> PasivoRead:
-    return service.cancelar_con_efectivo(db, pasivo_id, payload)
+    return service.pagar_pasivo(db, pasivo_id, payload)
 
 
 @router.post("/{pasivo_id}/cancelar-con-cheque", response_model=PasivoRead)

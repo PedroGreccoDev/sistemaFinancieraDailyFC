@@ -111,6 +111,12 @@ function CajaBloque({ caja, simbolo }: { caja: CajaMoneda; simbolo: 'ARS' | 'USD
                     </td>
                     <td style={{ fontFamily: FM, fontSize: '0.8rem', padding: '0.55rem 1.1rem', borderBottom: '1px solid var(--ov-004)', color: 'var(--text-1)' }}>
                       <span style={{ fontWeight: 600 }}>{CATEGORIA_LABEL[l.categoria] ?? l.categoria}</span>
+                      {l.medio_pago && (
+                        <span style={{ marginLeft: '0.4rem', fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.65)' }}>
+                          {l.medio_pago === 'TRANSFERENCIA' ? 'transferencia' : 'efectivo'}
+                          {l.cotizacion != null && ` · @ ${l.cotizacion}`}
+                        </span>
+                      )}
                       {l.detalle && (
                         <span style={{ display: 'block', fontSize: '0.68rem', color: 'rgba(100,116,139,0.55)' }}>{l.detalle}</span>
                       )}
