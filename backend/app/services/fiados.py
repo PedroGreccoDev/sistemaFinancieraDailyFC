@@ -19,6 +19,7 @@ from app.db.models import (
 )
 from app.core.fechas import hoy_local
 from app.services import caja as svc_caja
+from app.services.conversion import calcular_reduccion_saldo
 from app.schemas.cheques import ChequeRead, FiadoCobrarConChequeResponse
 from app.schemas.fiados import (
     FiadoCobrarConChequeRequest,
@@ -29,7 +30,6 @@ from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
     NotFoundError,
-    ValidationError,
 )
 
 
@@ -57,28 +57,39 @@ def cobrar_con_efectivo(
         raise NotFoundError("Fiado no encontrado.")
     if fiado.estado == FiadoEstado.CANCELADO:
         raise ConflictError("El fiado ya está cancelado.")
-    if payload.monto_cobrado > fiado.saldo_pendiente:
-        raise ValidationError(
-            f"El monto cobrado ({payload.monto_cobrado}) supera el saldo pendiente "
-            f"({fiado.saldo_pendiente})."
-        )
 
-    fiado.saldo_pendiente = (fiado.saldo_pendiente - payload.monto_cobrado).quantize(Decimal("0.01"))
+    # La deuda del fiado siempre está en ARS; el pago puede venir en otra moneda.
+    # calcular_reduccion_saldo valida la cotización y que el pago no supere el saldo.
+    es_cross = payload.moneda_pago != Moneda.ARS
+    reduccion = calcular_reduccion_saldo(
+        Moneda.ARS,
+        fiado.saldo_pendiente,
+        payload.moneda_pago,
+        payload.monto_cobrado,
+        payload.cotizacion,
+    )
+
+    fiado.saldo_pendiente = (fiado.saldo_pendiente - reduccion).quantize(Decimal("0.01"))
     if fiado.saldo_pendiente == Decimal("0.00"):
         fiado.estado = FiadoEstado.CANCELADO
 
-    # Cobrar un fiado en efectivo hace entrar plata a la caja ARS (incluye parciales).
+    # Cobrar un fiado hace entrar plata a la caja en la moneda efectivamente cobrada
+    # (incluye parciales); la cotización queda para reporte/auditoría en el cruce.
     cliente_nombre = fiado.cliente.nombre if fiado.cliente else "—"
+    detalle = f"Cobro fiado - {cliente_nombre}"
+    if es_cross:
+        detalle += f" ({reduccion} ARS @ {payload.cotizacion})"
     svc_caja.registrar(
         db,
         fecha=hoy_local(),
-        moneda=Moneda.ARS,
+        moneda=payload.moneda_pago,
         tipo=CajaTipo.INGRESO,
         categoria=CajaCategoria.COBRO_FIADO,
         monto=payload.monto_cobrado,
         referencia_tipo="fiado",
         referencia_id=fiado.id,
-        detalle=f"Cobro fiado - {cliente_nombre}",
+        detalle=detalle,
+        cotizacion=payload.cotizacion if es_cross else None,
     )
 
     try:

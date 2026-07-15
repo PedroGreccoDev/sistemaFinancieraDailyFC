@@ -41,10 +41,12 @@ de modo que el asiento de caja y la operación de negocio son **atómicos** (o a
   `COBRO_CHEQUE`, `COMPRA_CHEQUE`, `COMPRA_USD`, `VENTA_USD`, `OTORGAMIENTO_PRESTAMO`, `GASTO`,
   `PAGO_PASIVO`, `VUELTO_PASIVO`.
 - `referencia_tipo` / `referencia_id` — enlace flojo a la entidad que lo originó
-  (cheque/préstamo/cuota/fiado/pasivo/gasto/movimiento).
+  (cheque/préstamo/cuota/fiado/pasivo/gasto/movimiento). `COBRO_CUOTA` referencia la `cuota`
+  cuando se cobra una cuota entera, o el `prestamo` cuando es un pago de **importe libre** (§3).
 - `ganancia` — solo en `VENTA_USD`: ganancia FIFO realizada en ARS. Es dato de **reporte**, no de caja.
 - `medio_pago` — solo en `PAGO_PASIVO`: `EFECTIVO` | `TRANSFERENCIA` (enum `medio_pago`, migración `0014`); null en el resto.
-- `cotizacion` — `$/USD` aplicado cuando un pago cruza monedas (deuda y pago en monedas distintas); null si comparten moneda. Dato de reporte/auditoría.
+- `cotizacion` — `$/USD` aplicado cuando un pago cruza monedas (deuda y pago en monedas distintas);
+  la usan `PAGO_PASIVO` (§5), `COBRO_FIADO` (§2) y `COBRO_CUOTA` (§3). Null si comparten moneda. Dato de reporte/auditoría.
 - `detalle` — texto libre con el detalle de la línea.
 
 **"Resincronizar la caja" = rehacer esos renglones.** Cuando un módulo edita una operación ya
@@ -88,6 +90,12 @@ El cliente puede cancelar esa deuda de dos formas:
 - Se registra con `POST /fiados/{id}/cobrar-efectivo` (`monto_cobrado`).
 - El monto debe ser ≤ `saldo_pendiente`. Se puede pagar en partes.
 - Cuando `saldo_pendiente` llega a 0, el fiado pasa a `CANCELADO`.
+- **Pago en moneda distinta (cross-currency):** la deuda del fiado es **siempre ARS**, pero
+  el cobro puede venir en USD. El payload acepta `moneda_pago` (default `ARS`) y `cotizacion`
+  ($/USD, obligatoria si `moneda_pago` ≠ ARS). El saldo (ARS) baja por el equivalente
+  (`monto × cotizacion`) vía la función pura `conversion.calcular_reduccion_saldo`; **la caja
+  recibe la plata en la moneda efectivamente cobrada** (INGRESO `COBRO_FIADO` en esa moneda,
+  con la `cotizacion` guardada para auditoría).
 
 **b) Con otro cheque:**
 - Se registra con `POST /fiados/{id}/cobrar-con-cheque`.
@@ -127,6 +135,18 @@ El cliente puede cancelar esa deuda de dos formas:
 - Cobro con cheque en lote: `POST /prestamos/{id}/cuotas/cobrar-con-cheque-lote`.
 - **Método de pago "Efectivo" vs "Transferencia" es solo una etiqueta de UI**: el backend NO persiste el medio; solo distingue cobro simple (sin cheque) vs cobro con cheque.
 
+**Pago de importe libre (parcial o total) — régimen definido 2026-07-14 (✅ implementado):** además del
+cobro por cuota entera, existe `POST /prestamos/{id}/pagar` (`svc_prestamos.pagar_prestamo`) que
+imputa **cualquier importe** contra el préstamo. Para soportarlo, cada `Cuota` lleva `monto_pagado`
+(migración `0015`): el saldo de una cuota es `monto − monto_pagado` y la cuota queda `COBRADA` solo
+cuando `monto_pagado == monto`. El pago **se imputa a las cuotas más viejas primero** (helper puro
+`repartir_pago_en_cuotas`), llenando cada una; al saldarse la última, el préstamo pasa a `CANCELADO`.
+Soporta **cross-currency** (mismo `conversion.calcular_reduccion_saldo`): la cotización define cuánto
+del préstamo —en su moneda— se salda, pero **la caja recibe una sola línea INGRESO `COBRO_CUOTA` por
+el efectivo real, en la moneda pagada** (ref. `prestamo`). Los cobros por cuota entera existentes
+asientan solo el **restante** de la cuota (por si traía un pago parcial previo), y todos los flujos
+que marcan `COBRADA` fijan `monto_pagado = monto`.
+
 ### 4. Movimientos de Efectivo (compra/venta de divisas)
 
 - Operaciones de compra/venta de divisas (ARS ↔ USD).
@@ -156,7 +176,7 @@ El cliente puede cancelar esa deuda de dos formas:
 - **Pagos parciales:** el pasivo tiene `saldo_pendiente` (migración `0007`); se puede cancelar en partes, en efectivo/transferencia o con un cheque de cartera. Pasa a `CANCELADA` cuando el saldo llega a 0.
 - **Pago en efectivo o transferencia (`POST /pasivos/{id}/pagar`, `svc_pasivos.pagar_pasivo`, régimen definido 2026-06-25):**
   - El operador ingresa **el monto que paga, en la moneda con la que paga** (`moneda_pago`) y el **medio** (`EFECTIVO` | `TRANSFERENCIA`, enum `medio_pago`). **La caja se descuenta en esa moneda de pago** (un EGRESO `PAGO_PASIVO` con su `medio_pago`), no en la de la deuda.
-  - **La moneda de pago puede diferir de la de la deuda.** Si difiere, el operador ingresa la **cotización (pesos por 1 USD)**, que se usa **solo** para imputar cuánto baja el `saldo_pendiente` (que se lleva en la moneda de la deuda): deuda USD pagada en ARS → `saldo -= monto/cotizacion`; deuda ARS pagada en USD → `saldo -= monto*cotizacion`. La conversión vive en la función pura `calcular_reduccion_saldo` (testeable sin BD).
+  - **La moneda de pago puede diferir de la de la deuda.** Si difiere, el operador ingresa la **cotización (pesos por 1 USD)**, que se usa **solo** para imputar cuánto baja el `saldo_pendiente` (que se lleva en la moneda de la deuda): deuda USD pagada en ARS → `saldo -= monto/cotizacion`; deuda ARS pagada en USD → `saldo -= monto*cotizacion`. La conversión vive en la función pura `calcular_reduccion_saldo` (testeable sin BD), en `app/services/conversion.py` — **compartida** por pasivos, fiados y préstamos (se re-exporta desde `svc_pasivos` por compatibilidad).
   - **La cotización es por pago:** cada cancelación parcial puede usar una distinta. La **primera** se guarda en `pasivos.cotizacion_pago` y el panel la propone como default editable. Cada línea de caja guarda su `cotizacion` aplicada (para reporte/auditoría).
   - Tolerancia de redondeo: un exceso de hasta un centavo sobre el saldo (por convertir de moneda) se trata como cancelación exacta; más que eso es error.
 - **Pago con cheque "de más" (régimen definido 2026-06-25):** cuando el valor neto del cheque
@@ -197,7 +217,10 @@ cliente, operación, fecha).
   compra de cualquier activo y otorgamiento de préstamos (crédito entregado).
 - **Cobros parciales cuentan:** si de un fiado de $100.000 entran $100, esos $100 son ingreso
   del día con su detalle (fiado, cliente, fecha).
-- `GET /api/v1/reportes/cobros-cuotas?desde=&hasta=` devuelve el historial detallado de cuotas cobradas.
+- `GET /api/v1/reportes/cobros-cuotas?desde=&hasta=` devuelve el historial detallado de cuotas
+  **COBRADA** (por su `monto` total). Un pago de **importe libre** que deja una cuota a medias
+  (§3) todavía no la lista —hasta que se complete—, pero **su efectivo sí figura en el reporte de
+  caja** (`/reportes/caja`), que es la fuente de verdad: la línea `COBRO_CUOTA` referencia al `prestamo`.
 - El historial unificado de Movimientos (frontend) incluye también los cobros de cuotas y los gastos.
 
 > ✅ **Estado de implementación:** el modelo de caja diaria es el **vigente**. El endpoint es
@@ -278,6 +301,7 @@ cliente, operación, fecha).
 - Las transacciones críticas usan `SELECT ... FOR UPDATE` para evitar race conditions.
 - **Fechas/horas en hora local de Argentina (ART), no UTC.** Usar los helpers de `app/core/fechas.py` (`hoy_local`, etc.); los gastos guardan `hora_operacion` (migración `0008`).
 - **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad.
+- **Sección "Deudores" (frontend):** agrupa lo que los **clientes** le deben al negocio (≠ "Deudas"/Pasivos, que es al revés). Tres pestañas: **General** (índice, `/deudores` → `DeudoresGeneral`), **Préstamos** (`/deudores/prestamos`) y **Cheques fiados** (`/deudores/cheques-fiados`). La pestaña **General** es una **vista consolidada por cliente** (total ARS y USD sumando préstamos + fiados) armada **en el front** desde `/prestamos` y `/fiados` (no hay endpoint de agregación): desde ahí se imputa un pago —parcial o total, cross-currency— a una deuda concreta (llama a `pagar_prestamo` o `cobrar_con_efectivo`). No reemplaza el cobro directo desde las otras dos pestañas.
 
 ---
 
@@ -298,6 +322,10 @@ cliente, operación, fecha).
     (inactivo / `token_version` desfasado → 401), `require_admin`, OTP e invitaciones.
   - **`test_resolucion_clientes.py`** — desambiguación de clientes por nombre en el bot
     (`_elegir_cliente_match`): atajo de match exacto, modo `estricto` en cobros y casos límite.
+  - **`test_pasivos_pago.py`** — `conversion.calcular_reduccion_saldo`: mismo/otra moneda,
+    tolerancia de un centavo y pago que supera el saldo.
+  - **`test_prestamos_pago.py`** — `repartir_pago_en_cuotas` (imputación a la cuota más vieja
+    primero, parcial/total, saltea saldadas, no reparte de más) + cross-currency del préstamo.
 - **Convención:** mantené la lógica de negocio en funciones/métodos testeables sin BD; si una
   pieza nueva necesita una sesión, extraé la parte pura para poder cubrirla en este estilo.
 

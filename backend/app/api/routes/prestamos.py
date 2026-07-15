@@ -17,6 +17,7 @@ from app.schemas.prestamos import (
     CuotasLoteCobrarConChequeResponse,
     CuotasLoteCobrarRequest,
     PrestamoCreate,
+    PrestamoPagoRequest,
     PrestamoRead,
     PrestamoUpdate,
 )
@@ -53,6 +54,15 @@ def editar_prestamo(
     db: DbSession,
 ) -> PrestamoRead:
     return service.editar_prestamo(db, prestamo_id, payload)
+
+
+@router.post("/{prestamo_id}/pagar", response_model=PrestamoRead)
+def pagar_prestamo(
+    prestamo_id: UUID,
+    payload: PrestamoPagoRequest,
+    db: DbSession,
+) -> PrestamoRead:
+    return service.pagar_prestamo(db, prestamo_id, payload)
 
 
 @router.post("/{prestamo_id}/cuotas/{cuota_id}/cobros", response_model=CuotaRead)

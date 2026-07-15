@@ -57,6 +57,7 @@ class CuotaRead(BaseModel):
     numero_cuota: int
     fecha_vencimiento: date
     monto: Decimal
+    monto_pagado: Decimal
     estado: CuotaEstado
     fecha_cobro: date | None
     created_at: datetime
@@ -82,6 +83,21 @@ class PrestamoRead(BaseModel):
 
 
 class CuotaCobroRequest(BaseModel):
+    fecha_cobro: date | None = None
+
+
+class PrestamoPagoRequest(BaseModel):
+    """Pago de importe libre (parcial o total) contra un préstamo, en efectivo.
+
+    El operador paga `monto_pagado` en `moneda_pago` (lo que entra a caja). El
+    importe se imputa a las cuotas más viejas primero (llenando cada una). Si la
+    moneda de pago difiere de la del préstamo, `cotizacion` ($/USD) es obligatoria
+    y define cuánto del préstamo (en su moneda) queda saldado.
+    """
+
+    monto_pagado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    moneda_pago: Moneda
+    cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     fecha_cobro: date | None = None
 
 

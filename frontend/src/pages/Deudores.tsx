@@ -12,7 +12,8 @@ export default function Deudores() {
         </h1>
         <div style={{ display: 'flex', gap: 0, marginTop: '0.75rem' }}>
           {[
-            { to: '/deudores', label: 'Préstamos', end: true },
+            { to: '/deudores', label: 'General', end: true },
+            { to: '/deudores/prestamos', label: 'Préstamos', end: false },
             { to: '/deudores/cheques-fiados', label: 'Cheques fiados', end: false },
           ].map(({ to, label, end }) => (
             <NavLink

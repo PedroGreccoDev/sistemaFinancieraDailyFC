@@ -37,6 +37,22 @@ export const editarPrestamo = (id: string, payload: PrestamoUpdatePayload): Prom
     body: JSON.stringify(payload),
   })
 
+// Pago de importe libre (parcial o total) contra un préstamo, en efectivo. Se
+// imputa a las cuotas más viejas primero. `moneda_pago` puede diferir de la del
+// préstamo; en ese caso `cotizacion` (pesos por 1 USD) es obligatoria.
+export interface PrestamoPagoPayload {
+  monto_pagado: number
+  moneda_pago: Moneda
+  cotizacion?: number | null
+  fecha_cobro?: string | null
+}
+
+export const pagarPrestamo = (id: string, payload: PrestamoPagoPayload): Promise<Prestamo> =>
+  apiFetch<Prestamo>(`/prestamos/${encodeURIComponent(id)}/pagar`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
 export const cobrarCuotaEfectivo = (
   prestamoId: string,
   cuotaId: string,

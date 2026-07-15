@@ -79,7 +79,9 @@ const fiados: Fiado[] = [
 function cuotas(prestamoId: string, specs: { venc: number; monto: string; estado: Cuota['estado']; cobro?: number }[]): Cuota[] {
   return specs.map((s, i) => ({
     id: `${prestamoId}-c${i + 1}`, prestamo_id: prestamoId, numero_cuota: i + 1,
-    fecha_vencimiento: d(s.venc), monto: s.monto, estado: s.estado,
+    fecha_vencimiento: d(s.venc), monto: s.monto,
+    monto_pagado: s.estado === 'COBRADA' ? s.monto : '0',
+    estado: s.estado,
     fecha_cobro: s.cobro != null ? d(s.cobro) : null,
     created_at: ts(-90), updated_at: ts(-5),
   }))

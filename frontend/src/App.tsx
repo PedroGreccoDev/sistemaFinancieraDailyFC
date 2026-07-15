@@ -5,6 +5,7 @@ import Navbar from './components/Navbar'
 import Dashboard from './pages/Dashboard'
 import Cartera from './pages/Cartera'
 import Deudores from './pages/Deudores'
+import DeudoresGeneral from './pages/DeudoresGeneral'
 import DeudoresPrestamos from './pages/DeudoresPrestamos'
 import Pasivos from './pages/Pasivos'
 import Reportes from './pages/Reportes'
@@ -96,7 +97,8 @@ export default function App() {
               <Route path="/"          element={<Dashboard />} />
               <Route path="/cartera"      element={<Cartera />} />
               <Route path="/deudores" element={<Deudores />}>
-                <Route index element={<DeudoresPrestamos />} />
+                <Route index element={<DeudoresGeneral />} />
+                <Route path="prestamos" element={<DeudoresPrestamos />} />
                 <Route path="cheques-fiados" element={<Fiados />} />
               </Route>
               <Route path="/pasivos"      element={<Pasivos />} />

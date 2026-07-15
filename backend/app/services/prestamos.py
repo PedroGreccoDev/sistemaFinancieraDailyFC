@@ -26,9 +26,11 @@ from app.schemas.prestamos import (
     CuotaCobrarConChequeRequest,
     CuotasLoteCobrarConChequeRequest,
     PrestamoCreate,
+    PrestamoPagoRequest,
     PrestamoUpdate,
 )
 from app.services import caja as svc_caja
+from app.services.conversion import calcular_reduccion_saldo
 from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
@@ -37,8 +39,16 @@ from app.services.exceptions import (
 )
 
 
-def _registrar_cobro_cuota(db: Session, prestamo: Prestamo, cuota: Cuota) -> None:
-    """Asienta en la caja el ingreso por una cuota cobrada (en la moneda del préstamo)."""
+def _registrar_cobro_cuota(
+    db: Session, prestamo: Prestamo, cuota: Cuota, monto: Decimal
+) -> None:
+    """Asienta en la caja el ingreso por lo cobrado de una cuota (en la moneda del préstamo).
+
+    `monto` es lo efectivamente cobrado ahora: para una cuota entera es su `monto`,
+    pero si venía con un pago parcial previo es solo el restante. No asienta nada si
+    `monto` no es positivo (la caja rechaza montos ≤ 0)."""
+    if monto <= Decimal("0.00"):
+        return
     cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
     svc_caja.registrar(
         db,
@@ -46,7 +56,7 @@ def _registrar_cobro_cuota(db: Session, prestamo: Prestamo, cuota: Cuota) -> Non
         moneda=prestamo.moneda,
         tipo=CajaTipo.INGRESO,
         categoria=CajaCategoria.COBRO_CUOTA,
-        monto=cuota.monto,
+        monto=monto,
         referencia_tipo="cuota",
         referencia_id=cuota.id,
         detalle=f"Cuota #{cuota.numero_cuota} - {cliente_nombre}",
@@ -263,6 +273,9 @@ def cobrar_cuota(
     if cuota.estado == CuotaEstado.COBRADA:
         raise ConflictError("La cuota ya fue cobrada.")
 
+    # Cobrar la cuota entera salda lo que le falte (puede traer un pago parcial previo).
+    restante = (cuota.monto - cuota.monto_pagado).quantize(Decimal("0.01"))
+    cuota.monto_pagado = cuota.monto
     cuota.estado = CuotaEstado.COBRADA
     cuota.fecha_cobro = fecha_cobro or hoy_local()
 
@@ -270,7 +283,7 @@ def cobrar_cuota(
         db.flush()
         prestamo = db.get(Prestamo, prestamo_id)
         if prestamo is not None:
-            _registrar_cobro_cuota(db, prestamo, cuota)
+            _registrar_cobro_cuota(db, prestamo, cuota, restante)
         # Cualquier cuota no cobrada (PENDIENTE o EN_MORA) mantiene vivo el préstamo.
         pendientes_restantes = db.scalar(
             select(func.count()).select_from(Cuota).where(
@@ -315,6 +328,8 @@ def cobrar_cuota_con_cheque(
         estado=ChequeEstado.EN_CARTERA,
     )
 
+    # El cheque entra a cartera y salda la cuota completa (no mueve efectivo en caja).
+    cuota.monto_pagado = cuota.monto
     cuota.estado = CuotaEstado.COBRADA
     cuota.fecha_cobro = payload.fecha_cobro or hoy_local()
 
@@ -365,7 +380,10 @@ def cobrar_cuotas_lote(
             raise ConflictError(f"La cuota {cuota.numero_cuota} ya fue cobrada.")
 
     hoy = fecha_cobro or hoy_local()
+    restantes: dict[uuid.UUID, Decimal] = {}
     for cuota in cuotas:
+        restantes[cuota.id] = (cuota.monto - cuota.monto_pagado).quantize(Decimal("0.01"))
+        cuota.monto_pagado = cuota.monto
         cuota.estado = CuotaEstado.COBRADA
         cuota.fecha_cobro = hoy
 
@@ -374,7 +392,7 @@ def cobrar_cuotas_lote(
         prestamo = db.get(Prestamo, prestamo_id)
         if prestamo is not None:
             for cuota in cuotas:
-                _registrar_cobro_cuota(db, prestamo, cuota)
+                _registrar_cobro_cuota(db, prestamo, cuota, restantes[cuota.id])
         pendientes_restantes = db.scalar(
             select(func.count()).select_from(Cuota).where(
                 Cuota.prestamo_id == prestamo_id,
@@ -423,6 +441,7 @@ def cobrar_cuotas_con_cheque_lote(
 
     hoy = payload.fecha_cobro or hoy_local()
     for cuota in cuotas:
+        cuota.monto_pagado = cuota.monto
         cuota.estado = CuotaEstado.COBRADA
         cuota.fecha_cobro = hoy
 
@@ -450,4 +469,109 @@ def cobrar_cuotas_con_cheque_lote(
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("No se pudo registrar el cobro con cheque.") from exc
+
+
+def repartir_pago_en_cuotas(
+    saldos: list[Decimal], monto: Decimal
+) -> list[Decimal]:
+    """Reparte `monto` entre cuotas (por su saldo, en orden) llenando cada una.
+
+    `saldos` es el saldo pendiente de cada cuota, ordenado como se quiera imputar
+    (la más vieja primero). Devuelve cuánto se aplica a cada cuota, en el mismo
+    orden. La suma de lo devuelto es `min(monto, Σ saldos)`: no reparte de más.
+    Pura (sin BD): testeable en el estilo de `tests/`."""
+    restante = monto
+    aplicado: list[Decimal] = []
+    for saldo in saldos:
+        cuota_saldo = saldo if saldo > Decimal("0.00") else Decimal("0.00")
+        aplica = min(restante, cuota_saldo) if restante > Decimal("0.00") else Decimal("0.00")
+        aplica = aplica.quantize(Decimal("0.01"))
+        aplicado.append(aplica)
+        restante = (restante - aplica).quantize(Decimal("0.01"))
+    return aplicado
+
+
+def pagar_prestamo(
+    db: Session, prestamo_id: uuid.UUID, payload: PrestamoPagoRequest
+) -> Prestamo:
+    """Paga un importe libre (parcial o total) contra un préstamo, en efectivo.
+
+    El importe se imputa a las cuotas no saldadas, de la más vieja a la más nueva,
+    llenando el `monto_pagado` de cada una (la que se completa pasa a COBRADA). El
+    pago puede venir en otra moneda que la del préstamo: la cotización define cuánto
+    del préstamo (en su moneda) queda saldado, pero la caja recibe la plata en la
+    moneda efectivamente pagada. Cuando no queda ninguna cuota pendiente, el préstamo
+    pasa a CANCELADO."""
+    prestamo = db.scalar(
+        select(Prestamo)
+        .options(selectinload(Prestamo.cuotas_detalle))
+        .where(Prestamo.id == prestamo_id)
+        .with_for_update()
+    )
+    if prestamo is None:
+        raise NotFoundError("Prestamo no encontrado.")
+    if prestamo.estado == PrestamoEstado.CANCELADO:
+        raise ConflictError("El préstamo ya está cancelado.")
+
+    pendientes = [
+        c for c in prestamo.cuotas_detalle if c.estado != CuotaEstado.COBRADA
+    ]
+    pendientes.sort(key=lambda c: c.numero_cuota)
+    saldo_total = sum(
+        ((c.monto - c.monto_pagado) for c in pendientes), Decimal("0.00")
+    ).quantize(Decimal("0.01"))
+    if saldo_total <= Decimal("0.00"):
+        raise ConflictError("El préstamo no tiene saldo pendiente.")
+
+    es_cross = payload.moneda_pago != prestamo.moneda
+    # Cuánto del préstamo (en su moneda) salda este pago; valida cotización y tope.
+    reduccion = calcular_reduccion_saldo(
+        prestamo.moneda,
+        saldo_total,
+        payload.moneda_pago,
+        payload.monto_pagado,
+        payload.cotizacion,
+    )
+
+    fecha = payload.fecha_cobro or hoy_local()
+    aplicado = repartir_pago_en_cuotas(
+        [(c.monto - c.monto_pagado).quantize(Decimal("0.01")) for c in pendientes],
+        reduccion,
+    )
+    for cuota, aplica in zip(pendientes, aplicado):
+        if aplica <= Decimal("0.00"):
+            continue
+        cuota.monto_pagado = (cuota.monto_pagado + aplica).quantize(Decimal("0.01"))
+        if cuota.monto_pagado >= cuota.monto:
+            cuota.monto_pagado = cuota.monto
+            cuota.estado = CuotaEstado.COBRADA
+            cuota.fecha_cobro = fecha
+
+    if all(c.estado == CuotaEstado.COBRADA for c in prestamo.cuotas_detalle):
+        prestamo.estado = PrestamoEstado.CANCELADO
+
+    # Una sola línea de caja por el efectivo real que entró, en la moneda pagada.
+    cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
+    detalle = f"Pago préstamo - {cliente_nombre}"
+    if es_cross:
+        detalle += f" ({reduccion} {prestamo.moneda.value} @ {payload.cotizacion})"
+    svc_caja.registrar(
+        db,
+        fecha=fecha,
+        moneda=payload.moneda_pago,
+        tipo=CajaTipo.INGRESO,
+        categoria=CajaCategoria.COBRO_CUOTA,
+        monto=payload.monto_pagado,
+        referencia_tipo="prestamo",
+        referencia_id=prestamo.id,
+        detalle=detalle,
+        cotizacion=payload.cotizacion if es_cross else None,
+    )
+
+    try:
+        db.commit()
+        return get_prestamo(db, prestamo.id)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo registrar el pago del préstamo.") from exc
 

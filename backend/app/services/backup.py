@@ -41,7 +41,7 @@ _PR = [
     "total_a_cobrar", "ganancia", "estado", "fecha_inicio", "created_at", "updated_at",
 ]
 _CU = [
-    "id", "prestamo_id", "numero_cuota", "fecha_vencimiento", "monto",
+    "id", "prestamo_id", "numero_cuota", "fecha_vencimiento", "monto", "monto_pagado",
     "estado", "fecha_cobro", "created_at", "updated_at",
 ]
 _MO = [
@@ -102,7 +102,7 @@ _UUID_COLS = frozenset({
     "cliente_origen_id", "cliente_destino_id", "referencia_id",
 })
 _DEC_COLS = frozenset({
-    "monto", "credito", "total_a_cobrar", "ganancia",
+    "monto", "monto_pagado", "credito", "total_a_cobrar", "ganancia",
     "porcentaje_compra", "porcentaje_venta", "cotizacion_aplicada",
     "monto_original", "saldo_pendiente", "usd_restante",
 })
@@ -405,12 +405,12 @@ def exportar_excel(
         cuotas = _date_filter(db.query(Cuota), Cuota).all()
         add_sheet(
             "Cuotas",
-            ["ID", "Préstamo ID", "Nro Cuota", "Vencimiento", "Monto", "Estado",
+            ["ID", "Préstamo ID", "Nro Cuota", "Vencimiento", "Monto", "Pagado", "Estado",
              "Fecha Cobro", "Creado"],
             [[
                 _fmt_excel(r.id), _fmt_excel(r.prestamo_id), r.numero_cuota,
-                _fmt_excel(r.fecha_vencimiento), _fmt_excel(r.monto), _fmt_excel(r.estado),
-                _fmt_excel(r.fecha_cobro), _fmt_excel(r.created_at),
+                _fmt_excel(r.fecha_vencimiento), _fmt_excel(r.monto), _fmt_excel(r.monto_pagado),
+                _fmt_excel(r.estado), _fmt_excel(r.fecha_cobro), _fmt_excel(r.created_at),
             ] for r in cuotas],
         )
 

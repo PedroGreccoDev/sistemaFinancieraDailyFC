@@ -357,6 +357,10 @@ class Cuota(Base):
     __table_args__ = (
         sa.CheckConstraint("monto > 0",        name="ck_cuotas_monto_positive"),
         sa.CheckConstraint("numero_cuota > 0", name="ck_cuotas_numero_positive"),
+        sa.CheckConstraint(
+            "monto_pagado >= 0 AND monto_pagado <= monto",
+            name="ck_cuotas_monto_pagado_range",
+        ),
         sa.UniqueConstraint("prestamo_id", "numero_cuota", name="uq_cuotas_prestamo_numero"),
     )
 
@@ -370,6 +374,10 @@ class Cuota(Base):
     numero_cuota:      Mapped[int]         = mapped_column(sa.Integer())
     fecha_vencimiento: Mapped[date]        = mapped_column(sa.Date(), index=True)
     monto:             Mapped[Decimal]     = mapped_column(sa.Numeric(18, 2))
+    # Cuánto de la cuota ya se cobró. La cuota es COBRADA solo cuando iguala a `monto`;
+    # el saldo pendiente de la cuota es `monto - monto_pagado`. Permite pagos parciales
+    # de importe libre imputados a nivel préstamo (ver svc_prestamos.pagar_prestamo).
+    monto_pagado:      Mapped[Decimal]     = mapped_column(sa.Numeric(18, 2), default=Decimal("0.00"))
     estado:            Mapped[CuotaEstado] = mapped_column(
         sa.Enum(CuotaEstado, name="cuota_estado", create_type=False),
         default=CuotaEstado.PENDIENTE, index=True,

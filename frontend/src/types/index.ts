@@ -33,6 +33,7 @@ export interface Cuota {
   numero_cuota: number
   fecha_vencimiento: string
   monto: string
+  monto_pagado: string
   estado: CuotaEstado
   fecha_cobro: string | null
   created_at: string

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.models import FiadoEstado
+from app.db.models import FiadoEstado, Moneda
 
 
 class FiadoRead(BaseModel):
@@ -25,8 +25,17 @@ class FiadoRead(BaseModel):
 
 
 class FiadoCobrarEfectivoRequest(BaseModel):
+    """Cobro de un fiado (total o parcial) en efectivo.
+
+    La deuda del fiado está siempre en ARS (los cheques son en pesos). `monto_cobrado`
+    es lo que entra a caja, en `moneda_pago` (que puede diferir de la deuda). `cotizacion`
+    ($/USD) es obligatoria solo cuando `moneda_pago` ≠ ARS; imputa cuánto baja el saldo.
+    """
+
     monto_cobrado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     operador_id: str = Field(min_length=1, max_length=80)
+    moneda_pago: Moneda = Moneda.ARS
+    cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
 
 
 class FiadoCobrarConChequeRequest(BaseModel):
