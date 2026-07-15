@@ -7,6 +7,7 @@ import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { Skeleton } from '../components/Skeleton'
 import { IconPlus } from '../components/icons'
+import ModalPagarDeuda, { type DeudaItem } from '../components/ModalPagarDeuda'
 import type { Prestamo, Cuota, Moneda, Frecuencia, Cliente } from '../types'
 
 type Semaforo = 'mora' | 'proximo' | 'ok' | 'cancelado'
@@ -34,6 +35,14 @@ function proximaCuota(prestamo: Prestamo): Cuota | null {
       .filter((c) => c.estado !== 'COBRADA')
       .sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento))[0] ?? null
   )
+}
+
+// Saldo pendiente del préstamo = suma del saldo (monto − monto_pagado) de las
+// cuotas no cobradas, en la moneda del préstamo.
+function saldoPrestamo(prestamo: Prestamo): number {
+  return prestamo.cuotas_detalle
+    .filter((c) => c.estado !== 'COBRADA')
+    .reduce((acc, c) => acc + (parseFloat(c.monto) - parseFloat(c.monto_pagado || '0')), 0)
 }
 
 const semaforoConfig: Record<Semaforo, { accent: string; borderColor: string; badgeBg: string; label: string }> = {
@@ -612,6 +621,7 @@ function ModalEditarPrestamo({ prestamo, clienteNombre, onClose, onSuccess }: { 
 export default function DeudoresPrestamos() {
   const [creandoPrestamo, setCreandoPrestamo] = useState(false)
   const [cobrandoCuota, setCobrandoCuota] = useState<Prestamo | null>(null)
+  const [pagoLibre, setPagoLibre] = useState<DeudaItem | null>(null)
   const [editandoPrestamo, setEditandoPrestamo] = useState<Prestamo | null>(null)
   const queryClient = useQueryClient()
 
@@ -648,6 +658,11 @@ export default function DeudoresPrestamos() {
 
   function handleCobrarCuota() {
     setCobrandoCuota(null)
+    queryClient.invalidateQueries({ queryKey: ['prestamos'] })
+  }
+
+  function handlePagoLibre() {
+    setPagoLibre(null)
     queryClient.invalidateQueries({ queryKey: ['prestamos'] })
   }
 
@@ -751,20 +766,35 @@ export default function DeudoresPrestamos() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.75rem' }}>
                 <button
                   type="button"
                   onClick={() => setCobrandoCuota(p)}
-                  style={{ ...btnSolid('primary'), flex: 1, padding: '0.45rem', fontSize: '0.75rem', textAlign: 'center' }}
+                  style={{ ...btnSolid('primary'), flex: '1 1 8rem', padding: '0.45rem', fontSize: '0.75rem', textAlign: 'center' }}
                 >
                   Cobrar cuota
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPagoLibre({
+                    tipo: 'prestamo',
+                    id: p.id,
+                    clienteNombre: nombre,
+                    label: `Préstamo · ${p.cuotas - cobradas}/${p.cuotas} cuota${p.cuotas > 1 ? 's' : ''} pend.`,
+                    saldo: saldoPrestamo(p),
+                    moneda: p.moneda,
+                  })}
+                  title="Pagar un importe libre (parcial o total), en cualquier moneda"
+                  style={{ ...btnBordered('primary'), flex: '1 1 8rem', padding: '0.45rem', fontSize: '0.75rem', textAlign: 'center' }}
+                >
+                  Pago libre
                 </button>
                 {cobradas === 0 && (
                   <button
                     type="button"
                     onClick={() => setEditandoPrestamo(p)}
                     title="Corregir la carga del préstamo"
-                    style={{ ...btnBordered('neutral'), padding: '0.45rem 0.8rem', fontSize: '0.75rem' }}
+                    style={{ ...btnBordered('neutral'), flex: '1 1 100%', padding: '0.45rem 0.8rem', fontSize: '0.75rem', textAlign: 'center' }}
                   >
                     Editar
                   </button>
@@ -810,6 +840,13 @@ export default function DeudoresPrestamos() {
           clienteNombre={clienteMap.get(cobrandoCuota.cliente_id) ?? '…'}
           onClose={() => setCobrandoCuota(null)}
           onSuccess={handleCobrarCuota}
+        />
+      )}
+      {pagoLibre && (
+        <ModalPagarDeuda
+          deuda={pagoLibre}
+          onClose={() => setPagoLibre(null)}
+          onSuccess={handlePagoLibre}
         />
       )}
       {editandoPrestamo && (
