@@ -11,6 +11,24 @@ export const getChequeCartera = (): Promise<Cheque[]> =>
 export const getCheques = (estado?: string): Promise<Cheque[]> =>
   apiFetch<Cheque[]>(`/cheques${estado ? `?estado=${estado}` : ''}`)
 
+// Alta manual de un cheque desde el panel (equivale al REGISTRAR_CHEQUE del bot).
+// El cheque entra siempre EN_CARTERA y su compra descuenta la caja ARS en el backend.
+export interface ChequeCreatePayload {
+  nro_cheque: string
+  banco?: string | null
+  monto: number
+  fecha_emision?: string | null
+  fecha_pago?: string | null
+  porcentaje_compra: number
+  cliente_origen_id?: string | null
+}
+
+export const crearCheque = (payload: ChequeCreatePayload): Promise<Cheque> =>
+  apiFetch<Cheque>('/cheques', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
 interface FiarChequePayload {
   cliente_destino_id: string
   porcentaje_venta: number

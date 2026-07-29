@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getChequeCartera, getCheques, chequeFotoUrl, editarCheque } from '../api/cheques'
+import { getChequeCartera, getCheques, chequeFotoUrl, editarCheque, crearCheque } from '../api/cheques'
 import { getClientes, createCliente } from '../api/clientes'
 import { fmtARS, fmtDate, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
 import { btnBordered, btnSolid } from '../lib/ui'
@@ -59,6 +59,83 @@ function ClienteSelect({ label, value, onChange, clientes }: { label: string; va
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Modal nuevo cheque (alta manual) ──────────────────────────────────
+
+function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [nroCheque, setNroCheque] = useState('')
+  const [banco, setBanco] = useState('')
+  const [monto, setMonto] = useState('')
+  const [pctCompra, setPctCompra] = useState('')
+  const [fechaEmision, setFechaEmision] = useState('')
+  const [fechaPago, setFechaPago] = useState('')
+  const [clienteOrigenId, setClienteOrigenId] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
+
+  const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: getClientes, staleTime: 60_000 })
+
+  const montoNum = parseFloat(monto) || 0
+  const compraNum = parseFloat(pctCompra) || 0
+  // Lo que sale de la caja ARS al comprar el cheque = monto·(1−%compra).
+  const pagado = montoNum > 0 ? montoNum * (100 - compraNum) / 100 : null
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      await crearCheque({
+        nro_cheque: nroCheque.trim(),
+        banco: banco.trim() || null,
+        monto: montoNum,
+        porcentaje_compra: compraNum,
+        fecha_emision: fechaEmision || null,
+        fecha_pago: fechaPago || null,
+        cliente_origen_id: clienteOrigenId || null,
+      })
+      toast('success', 'Cheque cargado en cartera')
+      onSuccess()
+    } catch (err) { setError((err as Error).message) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Nuevo cheque</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Ingresa a cartera y descuenta la compra de la caja ARS</p>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div><label style={LABEL_STYLE}>Nº de cheque</label><input type="text" value={nroCheque} onChange={(e) => setNroCheque(e.target.value)} required autoFocus style={INPUT_STYLE} /></div>
+            <div><label style={LABEL_STYLE}>Banco <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opc.)</span></label><input type="text" value={banco} onChange={(e) => setBanco(e.target.value)} style={INPUT_STYLE} /></div>
+          </div>
+          <div><label style={LABEL_STYLE}>Monto nominal</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required placeholder="0.00" style={INPUT_STYLE} /></div>
+          <div><label style={LABEL_STYLE}>% compra</label><input type="number" step="0.0001" min="0" max="100" value={pctCompra} onChange={(e) => setPctCompra(e.target.value)} required placeholder="0" style={INPUT_STYLE} /></div>
+          {pagado !== null && (
+            <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.6rem 0.9rem', display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
+              <span style={{ color: 'rgba(100,116,139,0.7)' }}>Sale de caja (compra)</span>
+              <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(pagado)}</span>
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div><label style={LABEL_STYLE}>Fecha emisión</label><input type="date" value={fechaEmision} onChange={(e) => setFechaEmision(e.target.value)} style={INPUT_STYLE} /></div>
+            <div><label style={LABEL_STYLE}>Fecha de pago</label><input type="date" value={fechaPago} onChange={(e) => setFechaPago(e.target.value)} style={INPUT_STYLE} /></div>
+          </div>
+          <ClienteSelect label="Cliente origen (de quién lo recibí)" value={clienteOrigenId} onChange={setClienteOrigenId} clientes={clientes} />
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+          <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="submit" disabled={loading} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: loading ? 0.6 : 1 }}>{loading ? 'Cargando…' : 'Cargar cheque'}</button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
@@ -217,12 +294,18 @@ export default function Cartera() {
   const [showPicker, setShowPicker] = useState(false)
   const [fotoCheque, setFotoCheque] = useState<Cheque | null>(null)
   const [chequeEditar, setChequeEditar] = useState<Cheque | null>(null)
+  const [nuevoCheque, setNuevoCheque] = useState(false)
   const queryClient = useQueryClient()
 
   function handleEditSuccess() {
     setChequeEditar(null)
     queryClient.invalidateQueries({ queryKey: ['cartera'] })
     queryClient.invalidateQueries({ queryKey: ['cheques-vendidos'] })
+  }
+
+  function handleNuevoSuccess() {
+    setNuevoCheque(false)
+    queryClient.invalidateQueries({ queryKey: ['cartera'] })
   }
 
   function handlePreset(p: FilterPreset) {
@@ -262,9 +345,14 @@ export default function Cartera() {
           <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Cartera</h1>
           <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Cheques en stock</p>
         </div>
-        <button onClick={() => refetch()} style={{ ...btnBordered('neutral'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, padding: '0.45rem 0.875rem' }}>
-          <IconRefresh size={14} />Actualizar
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <button onClick={() => refetch()} style={{ ...btnBordered('neutral'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, padding: '0.45rem 0.875rem' }}>
+            <IconRefresh size={14} />Actualizar
+          </button>
+          <button onClick={() => setNuevoCheque(true)} style={{ ...btnSolid('primary'), fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.04em', padding: '0.45rem 0.95rem' }}>
+            + Nuevo
+          </button>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -483,6 +571,7 @@ export default function Cartera() {
 
       {fotoCheque && <ChequeFotoModal cheque={fotoCheque} onClose={() => setFotoCheque(null)} />}
       {chequeEditar && <ModalEditarCheque cheque={chequeEditar} onClose={() => setChequeEditar(null)} onSuccess={handleEditSuccess} />}
+      {nuevoCheque && <ModalNuevoCheque onClose={() => setNuevoCheque(false)} onSuccess={handleNuevoSuccess} />}
     </div>
   )
 }
