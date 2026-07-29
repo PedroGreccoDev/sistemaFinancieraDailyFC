@@ -254,7 +254,17 @@ cliente, operación, fecha).
   **COBRADA** (por su `monto` total). Un pago de **importe libre** que deja una cuota a medias
   (§3) todavía no la lista —hasta que se complete—, pero **su efectivo sí figura en el reporte de
   caja** (`/reportes/caja`), que es la fuente de verdad: la línea `COBRO_CUOTA` referencia al `prestamo`.
-- El historial unificado de Movimientos (frontend) incluye también los cobros de cuotas y los gastos.
+- **Historial unificado de Movimientos (`GET /api/v1/reportes/movimientos?desde=&hasta=`,
+  `svc_reportes.get_movimientos_unificados`):** feed con **TODA operación** del período, venga
+  del bot o del panel. Fuente principal: el libro `movimientos_caja` completo (cobros parciales
+  y totales, ventas/compras/cobros de cheque, compra/venta USD, otorgamientos, gastos, pagos de
+  pasivo y vueltos). Se le suma el **ingreso de cheques a cartera** (tabla `cheques`), un evento
+  **sin efectivo** (`flujo=NEUTRO`) que por eso no vive en el libro de caja. Cada ítem trae
+  `grupo` (COBROS/CHEQUES/DIVISAS/GASTOS/OTORGAMIENTOS/PASIVOS), `flujo` (INGRESO/EGRESO/NEUTRO)
+  y `referencia_tipo/id`. El front (`pages/Movimientos.tsx`) lo consume vía
+  `getMovimientosUnificados` con filtro combinado grupo × flujo; el botón "Editar" sigue solo en
+  las filas de divisas (referencia_tipo `movimiento`). **Al agregar una operación nueva que
+  asiente en el libro de caja, aparece sola en Movimientos —no hay que tocar esta pantalla.**
 
 > ✅ **Estado de implementación:** el modelo de caja diaria es el **vigente**. El endpoint es
 > `GET /api/v1/reportes/caja?desde=&hasta=` (`svc_reportes.get_reporte_caja`), que lee el libro

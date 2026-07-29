@@ -7,7 +7,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.reportes import CuotaCobradaHistorialItem, ReporteCajaRead
+from app.schemas.reportes import (
+    CuotaCobradaHistorialItem,
+    MovimientoUnificadoRead,
+    ReporteCajaRead,
+)
 from app.services import reportes as service
 
 
@@ -23,6 +27,15 @@ def get_reporte_caja(
     hasta: date = Query(...),
 ) -> ReporteCajaRead:
     return service.get_reporte_caja(db, desde, hasta)
+
+
+@router.get("/movimientos", response_model=list[MovimientoUnificadoRead])
+def get_movimientos_unificados(
+    db: DbSession,
+    desde: date = Query(...),
+    hasta: date = Query(...),
+) -> list[MovimientoUnificadoRead]:
+    return service.get_movimientos_unificados(db, desde, hasta)
 
 
 @router.get("/cobros-cuotas", response_model=list[CuotaCobradaHistorialItem])

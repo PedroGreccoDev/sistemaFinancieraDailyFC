@@ -1,19 +1,17 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getMovimientos, editarMovimiento } from '../api/movimientos'
-import { getGastos } from '../api/gastos_operativos'
-import { getCheques } from '../api/cheques'
-import { getPrestamos } from '../api/prestamos'
-import { getClientes } from '../api/clientes'
+import { getMovimientosUnificados } from '../api/reportes'
 import { fmtUSD, fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { SkeletonRows } from '../components/Skeleton'
-import type { MovimientoEfectivo, GastoOperativo, Cheque, Prestamo } from '../types'
+import type { MovimientoEfectivo, MovimientoUnificado, MovimientoGrupo, MovimientoFlujo } from '../types'
 import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
 
-type Seccion = 'TODOS' | 'DIVISAS' | 'GASTOS' | 'CHEQUES' | 'PRESTAMOS' | 'COBROS'
+type GrupoFiltro = 'TODOS' | MovimientoGrupo
+type FlujoFiltro = 'TODOS' | MovimientoFlujo
 type PresetFecha = 'HOY' | 'SEMANA' | 'MES' | 'PERSONALIZADO'
 
 const FM     = "'Manrope', sans-serif"
@@ -99,87 +97,49 @@ function ModalEditarDivisa({ mov, editableDinero, onClose, onSuccess }: { mov: M
   )
 }
 
-interface MovimientoUnificado {
-  id: string
-  seccion: Exclude<Seccion, 'TODOS'>
-  fecha: string
-  descripcion: string
-  detalle: string
-  monto: string
-  moneda: 'ARS' | 'USD'
-  esGasto: boolean
+// ── Config de presentación por grupo de operación ─────────────────────
+
+const GRUPO_CONFIG: Record<MovimientoGrupo, { label: string; color: string; bg: string; initial: string }> = {
+  COBROS:        { label: 'Cobros',        color: '#34d399', bg: 'rgba(52,211,153,0.13)', initial: 'Q' },
+  CHEQUES:       { label: 'Cheques',       color: '#a78bfa', bg: 'rgba(167,139,250,0.13)', initial: 'C' },
+  DIVISAS:       { label: 'Divisas',       color: '#60a5fa', bg: 'rgba(96,165,250,0.13)', initial: 'D' },
+  GASTOS:        { label: 'Gastos',        color: '#fb923c', bg: 'rgba(251,146,60,0.13)', initial: 'G' },
+  OTORGAMIENTOS: { label: 'Otorgamientos', color: '#f472b6', bg: 'rgba(244,114,182,0.13)', initial: 'O' },
+  PASIVOS:       { label: 'Pasivos',       color: '#f87171', bg: 'rgba(248,113,113,0.13)', initial: 'P' },
+  OTROS:         { label: 'Otros',         color: '#94a3b8', bg: 'rgba(148,163,184,0.13)', initial: '•' },
 }
 
-const SECCION_CONFIG: Record<Exclude<Seccion, 'TODOS'>, { label: string; color: string; bg: string; initial: string }> = {
-  DIVISAS:   { label: 'Divisas',   color: '#60a5fa', bg: 'rgba(96,165,250,0.13)',  initial: 'D' },
-  GASTOS:    { label: 'Gastos',    color: '#fb923c', bg: 'rgba(251,146,60,0.13)',   initial: 'G' },
-  CHEQUES:   { label: 'Cheques',   color: '#a78bfa', bg: 'rgba(167,139,250,0.13)', initial: 'C' },
-  PRESTAMOS: { label: 'Préstamos', color: '#4ade80', bg: 'rgba(74,222,128,0.13)',  initial: 'P' },
-  COBROS:    { label: 'Cobros',    color: '#34d399', bg: 'rgba(52,211,153,0.13)',   initial: 'Q' },
+// Etiqueta corta de cada categoría, para la línea secundaria de detalle.
+const CATEGORIA_LABEL: Record<string, string> = {
+  COBRO_CUOTA:           'Cobro de cuota',
+  COBRO_FIADO:           'Cobro de fiado',
+  COBRO_DEUDA:           'Cobro de deuda',
+  VENTA_CHEQUE:          'Venta de cheque',
+  COMPRA_CHEQUE:         'Compra de cheque',
+  COBRO_CHEQUE:          'Cobro de cheque',
+  COMPRA_USD:            'Compra de USD',
+  VENTA_USD:             'Venta de USD',
+  GASTO:                 'Gasto',
+  OTORGAMIENTO_PRESTAMO: 'Préstamo otorgado',
+  OTORGAMIENTO_DEUDA:    'Deuda otorgada',
+  PAGO_PASIVO:           'Pago de pasivo',
+  VUELTO_PASIVO:         'Vuelto de pasivo',
+  INGRESO_CHEQUE:        'Ingreso a cartera',
 }
 
-function normalizar(
-  divisas: MovimientoEfectivo[],
-  gastos: GastoOperativo[],
-  cheques: Cheque[],
-  prestamos: Prestamo[],
-  clienteMap: Map<string, string>,
-): MovimientoUnificado[] {
-  const items: MovimientoUnificado[] = []
-
-  for (const m of divisas) {
-    const ganancia = parseFloat(m.ganancia)
-    const cotiz = parseFloat(m.cotizacion_aplicada).toLocaleString('es-AR', { minimumFractionDigits: 2 })
-    items.push({
-      id: m.id, seccion: 'DIVISAS', fecha: m.fecha_operacion.slice(0, 10),
-      descripcion: m.tipo === 'COMPRA' ? 'Compra USD' : 'Venta USD',
-      detalle: `${fmtUSD(m.monto)} · cotiz. $${cotiz}`,
-      monto: m.ganancia, moneda: 'ARS', esGasto: ganancia < 0,
-    })
+function detalleSecundario(m: MovimientoUnificado): string {
+  const partes: string[] = [CATEGORIA_LABEL[m.categoria] ?? m.categoria]
+  if (m.flujo === 'NEUTRO') partes.push('sin movimiento de efectivo')
+  if (m.medio_pago) partes.push(m.medio_pago === 'EFECTIVO' ? 'efectivo' : 'transferencia')
+  if (m.cotizacion) {
+    const c = parseFloat(m.cotizacion).toLocaleString('es-AR', { minimumFractionDigits: 2 })
+    partes.push(`cotiz. $${c}`)
   }
-
-  for (const g of gastos) {
-    const hora = g.hora_operacion ? g.hora_operacion.slice(0, 5) : ''
-    const detalle = [hora, g.observaciones ?? ''].filter(Boolean).join(' · ')
-    items.push({
-      id: g.id, seccion: 'GASTOS', fecha: g.fecha_operacion,
-      descripcion: g.concepto, detalle,
-      monto: g.monto, moneda: g.moneda, esGasto: true,
-    })
+  if (m.categoria === 'VENTA_USD' && m.ganancia) {
+    const g = parseFloat(m.ganancia)
+    partes.push(`${g >= 0 ? 'ganancia' : 'pérdida'} ${fmtMonto(Math.abs(g).toString(), 'ARS')}`)
   }
-
-  for (const c of cheques) {
-    items.push({
-      id: c.id, seccion: 'CHEQUES', fecha: c.created_at.slice(0, 10),
-      descripcion: `Nº ${c.nro_cheque}${c.banco ? ` · ${c.banco}` : ''}`,
-      detalle: `${c.estado.replace('_', ' ')} · compra ${parseFloat(c.porcentaje_compra.toString()).toLocaleString('es-AR', { maximumFractionDigits: 2 })}%`,
-      monto: c.monto, moneda: 'ARS', esGasto: false,
-    })
-  }
-
-  for (const p of prestamos) {
-    const freq: Record<string, string> = {
-      DIARIA: 'diarias', SEMANAL: 'semanales', QUINCENAL: 'quincenales', MENSUAL: 'mensuales', ANUAL: 'anuales',
-    }
-    items.push({
-      id: p.id, seccion: 'PRESTAMOS', fecha: p.fecha_inicio,
-      descripcion: 'Préstamo',
-      detalle: `${p.cuotas} cuotas ${freq[p.frecuencia] ?? p.frecuencia.toLowerCase()} · ${p.estado}`,
-      monto: p.credito, moneda: p.moneda, esGasto: false,
-    })
-    for (const c of p.cuotas_detalle) {
-      if (c.estado === 'COBRADA' && c.fecha_cobro) {
-        items.push({
-          id: c.id, seccion: 'COBROS', fecha: c.fecha_cobro,
-          descripcion: clienteMap.get(p.cliente_id) ?? '–',
-          detalle: `Cuota ${c.numero_cuota} / ${p.cuotas}`,
-          monto: c.monto, moneda: p.moneda, esGasto: false,
-        })
-      }
-    }
-  }
-
-  return items.sort((a, b) => b.fecha.localeCompare(a.fecha))
+  return partes.join(' · ')
 }
 
 function getRango(preset: PresetFecha, customDesde: string | null, customHasta: string | null) {
@@ -192,14 +152,14 @@ function getRango(preset: PresetFecha, customDesde: string | null, customHasta: 
   }
 }
 
-function enRango(fecha: string, desde: string | null, hasta: string | null): boolean {
-  if (desde && fecha < desde) return false
-  if (hasta && fecha > hasta) return false
-  return true
+interface ResumenDia {
+  ingresosARS: number; egresosARS: number
+  ingresosUSD: number; egresosUSD: number
 }
 
 export default function Movimientos() {
-  const [seccion, setSeccion]         = useState<Seccion>('TODOS')
+  const [grupo, setGrupo]             = useState<GrupoFiltro>('TODOS')
+  const [flujo, setFlujo]             = useState<FlujoFiltro>('TODOS')
   const [preset, setPreset]           = useState<PresetFecha>('MES')
   const [customDesde, setCustomDesde] = useState<string | null>(null)
   const [customHasta, setCustomHasta] = useState<string | null>(null)
@@ -207,15 +167,19 @@ export default function Movimientos() {
   const [editarDivisaId, setEditarDivisaId] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
-  const { data: divisas   = [], isLoading: loadingDiv } = useQuery({ queryKey: ['movimientos'],    queryFn: getMovimientos,       refetchInterval: 30_000 })
-  const { data: gastos    = [], isLoading: loadingGas } = useQuery({ queryKey: ['gastos'],         queryFn: getGastos,            refetchInterval: 30_000 })
-  const { data: cheques   = [], isLoading: loadingChe } = useQuery({ queryKey: ['cheques-todos'],  queryFn: () => getCheques(),   refetchInterval: 30_000 })
-  const { data: prestamos = [], isLoading: loadingPre } = useQuery({ queryKey: ['prestamos-todos'], queryFn: () => getPrestamos(), refetchInterval: 30_000 })
-  const { data: clientes  = [] }                        = useQuery({ queryKey: ['clientes'],        queryFn: getClientes,          staleTime: 60_000 })
+  const { desde, hasta } = getRango(preset, customDesde, customHasta)
+  const rangoListo = Boolean(desde && hasta)
 
-  const isLoading = loadingDiv || loadingGas || loadingChe || loadingPre
+  // Feed unificado (libro de caja + ingresos de cheques), filtrado por fecha en el backend.
+  const { data: movimientos = [], isLoading, isFetching } = useQuery({
+    queryKey: ['movimientos-unificados', desde, hasta],
+    queryFn: () => getMovimientosUnificados(desde as string, hasta as string),
+    enabled: rangoListo,
+    refetchInterval: 30_000,
+  })
 
-  const clienteMap = useMemo(() => new Map(clientes.map((c) => [c.id, c.nombre])), [clientes])
+  // Solo para el modal de edición de divisas: necesita el MovimientoEfectivo completo (FIFO).
+  const { data: divisas = [] } = useQuery({ queryKey: ['movimientos'], queryFn: getMovimientos, staleTime: 30_000 })
 
   // ID de la última venta de divisas (la única editable en monto/cotización, por FIFO).
   const ultimaVentaId = useMemo(() => {
@@ -235,36 +199,33 @@ export default function Movimientos() {
   function handleEditDivisa() {
     setEditarDivisaId(null)
     queryClient.invalidateQueries({ queryKey: ['movimientos'] })
+    queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
   }
 
   const movEditar = editarDivisaId ? divisas.find((m) => m.id === editarDivisaId) ?? null : null
 
-  const todos = useMemo(
-    () => normalizar(divisas, gastos, cheques, prestamos, clienteMap),
-    [divisas, gastos, cheques, prestamos, clienteMap],
-  )
-
-  const { desde, hasta } = getRango(preset, customDesde, customHasta)
-
   const filtrados = useMemo(() =>
-    todos.filter(item => {
-      if (seccion !== 'TODOS' && item.seccion !== seccion) return false
-      return enRango(item.fecha, desde, hasta)
+    movimientos.filter((m) => {
+      if (grupo !== 'TODOS' && m.grupo !== grupo) return false
+      if (flujo !== 'TODOS' && m.flujo !== flujo) return false
+      return true
     }),
-    [todos, seccion, desde, hasta],
+    [movimientos, grupo, flujo],
   )
 
   const porDia = useMemo(() => {
-    const map = new Map<string, { subtotalGastos: number; items: MovimientoUnificado[] }>()
-    for (const item of filtrados) {
-      const ex = map.get(item.fecha) ?? { subtotalGastos: 0, items: [] }
-      map.set(item.fecha, {
-        subtotalGastos: ex.subtotalGastos + (item.esGasto ? parseFloat(item.monto) : 0),
-        items: [...ex.items, item],
-      })
+    const map = new Map<string, { resumen: ResumenDia; items: MovimientoUnificado[] }>()
+    for (const m of filtrados) {
+      const ex = map.get(m.fecha) ?? { resumen: { ingresosARS: 0, egresosARS: 0, ingresosUSD: 0, egresosUSD: 0 }, items: [] }
+      const monto = parseFloat(m.monto) || 0
+      const r = ex.resumen
+      if (m.flujo === 'INGRESO') { if (m.moneda === 'ARS') r.ingresosARS += monto; else r.ingresosUSD += monto }
+      else if (m.flujo === 'EGRESO') { if (m.moneda === 'ARS') r.egresosARS += monto; else r.egresosUSD += monto }
+      ex.items.push(m)
+      map.set(m.fecha, ex)
     }
     return Array.from(map.entries())
-      .map(([fecha, { subtotalGastos, items }]) => ({ fecha, subtotalGastos, items }))
+      .map(([fecha, v]) => ({ fecha, ...v }))
       .sort((a, b) => b.fecha.localeCompare(a.fecha))
   }, [filtrados])
 
@@ -280,7 +241,7 @@ export default function Movimientos() {
     setShowPicker(p === 'PERSONALIZADO')
   }
 
-  const secciones: Seccion[] = ['TODOS', 'DIVISAS', 'GASTOS', 'CHEQUES', 'PRESTAMOS', 'COBROS']
+  const gruposFiltro: GrupoFiltro[] = ['TODOS', 'COBROS', 'CHEQUES', 'DIVISAS', 'GASTOS', 'OTORGAMIENTOS', 'PASIVOS']
 
   return (
     <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
@@ -312,17 +273,28 @@ export default function Movimientos() {
             color: 'rgba(100,116,139,0.5)',
             whiteSpace: 'nowrap',
           }}>
-            {rangoLabel}
+            {rangoLabel}{isFetching && !isLoading ? ' · actualizando…' : ''}
           </span>
         </div>
 
         {/* Derecha: filtros */}
         <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
           <DropdownFilter
-            label="Sección"
-            value={seccion}
-            options={secciones.map(s => ({ value: s, label: s === 'TODOS' ? 'Todos' : SECCION_CONFIG[s].label }))}
-            onChange={setSeccion}
+            label="Operación"
+            value={grupo}
+            options={gruposFiltro.map(g => ({ value: g, label: g === 'TODOS' ? 'Todas' : GRUPO_CONFIG[g].label }))}
+            onChange={setGrupo}
+          />
+          <DropdownFilter
+            label="Flujo"
+            value={flujo}
+            options={[
+              { value: 'TODOS'   as FlujoFiltro, label: 'Todos' },
+              { value: 'INGRESO' as FlujoFiltro, label: 'Ingresos' },
+              { value: 'EGRESO'  as FlujoFiltro, label: 'Egresos' },
+              { value: 'NEUTRO'  as FlujoFiltro, label: 'Sin efectivo' },
+            ]}
+            onChange={setFlujo}
           />
           <DropdownFilter
             label="Período"
@@ -346,35 +318,45 @@ export default function Movimientos() {
       </div>
 
       {/* ── Loading ──────────────────────────────────────────────────────── */}
-      {isLoading && (
+      {rangoListo && isLoading && (
         <div style={{ ...CARD, overflow: 'hidden' }}>
           <SkeletonRows rows={6} />
         </div>
       )}
 
+      {/* ── Rango incompleto (personalizado sin fechas) ──────────────────── */}
+      {!rangoListo && (
+        <div style={{ ...CARD, padding: '3rem', textAlign: 'center' }}>
+          <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📅</p>
+          <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>
+            Elegí un rango de fechas
+          </p>
+        </div>
+      )}
+
       {/* ── Sin movimientos ───────────────────────────────────────────────── */}
-      {!isLoading && filtrados.length === 0 && (
+      {rangoListo && !isLoading && filtrados.length === 0 && (
         <div style={{ ...CARD, padding: '3rem', textAlign: 'center' }}>
           <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📭</p>
           <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>
             Sin movimientos en el período
           </p>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.4)', marginTop: '0.25rem' }}>
-            Probá cambiando el filtro de fecha o sección
+            Probá cambiando el filtro de fecha, operación o flujo
           </p>
         </div>
       )}
 
       {/* ── Lista agrupada por día ───────────────────────────────────────── */}
-      {!isLoading && filtrados.length > 0 && (
+      {rangoListo && !isLoading && filtrados.length > 0 && (
         <div style={{ ...CARD, overflow: 'hidden' }}>
-          {porDia.map(({ fecha, subtotalGastos, items }) => (
+          {porDia.map(({ fecha, resumen, items }) => (
             <div key={fecha}>
 
               {/* Franja de encabezado del día */}
               <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '0.5rem 1rem',
+                padding: '0.5rem 1rem', gap: '0.5rem', flexWrap: 'wrap',
                 background: 'var(--ov-0025)',
                 borderBottom: '1px solid var(--bd-006)',
               }}>
@@ -392,26 +374,24 @@ export default function Movimientos() {
                     · {items.length} movimiento{items.length !== 1 ? 's' : ''}
                   </span>
                 </div>
-                {subtotalGastos > 0 && (
-                  <span style={{
-                    fontFamily: FN, fontSize: '1rem', letterSpacing: '0.02em',
-                    color: 'rgba(248,113,113,0.7)',
-                  }}>
-                    −{fmtMonto(subtotalGastos, 'ARS')}
-                  </span>
-                )}
+                <ResumenChips resumen={resumen} />
               </div>
 
               {/* Ítems del día */}
-              {items.map(item => {
-                const cfg = SECCION_CONFIG[item.seccion]
-                const initial = item.seccion === 'GASTOS'
-                  ? item.descripcion.charAt(0).toUpperCase()
+              {items.map(m => {
+                const cfg = GRUPO_CONFIG[m.grupo]
+                const initial = m.grupo === 'GASTOS'
+                  ? m.descripcion.charAt(0).toUpperCase()
                   : cfg.initial
-                const montoFmt = fmtMonto(item.monto, item.moneda)
+                const montoFmt = fmtMonto(m.monto, m.moneda)
+                const esDivisaEditable = m.grupo === 'DIVISAS' && m.referencia_tipo === 'movimiento' && m.referencia_id != null
+                const color = m.flujo === 'EGRESO' ? '#f87171'
+                  : m.flujo === 'NEUTRO' ? 'rgba(100,116,139,0.7)'
+                  : 'var(--text-1)'
+                const prefijo = m.flujo === 'EGRESO' ? '−' : m.flujo === 'INGRESO' ? '+' : ''
                 return (
                   <div
-                    key={`${item.seccion}-${item.id}`}
+                    key={`${m.id}`}
                     onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--ov-002)' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
                     style={{
@@ -420,7 +400,7 @@ export default function Movimientos() {
                       borderBottom: '1px solid var(--ov-004)',
                     }}
                   >
-                    {/* Avatar con inicial de sección */}
+                    {/* Avatar con inicial de grupo */}
                     <div style={{
                       width: '34px', height: '34px', flexShrink: 0,
                       borderRadius: 'var(--r-sm)',
@@ -432,14 +412,14 @@ export default function Movimientos() {
                       {initial}
                     </div>
 
-                    {/* Descripción + badge de sección + detalle */}
+                    {/* Descripción + badge de grupo + detalle */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '2px' }}>
                         <p style={{
                           fontFamily: FM, fontSize: '0.82rem', fontWeight: 600,
                           color: 'var(--text-1)', margin: 0, wordBreak: 'break-word',
                         }}>
-                          {item.descripcion}
+                          {m.descripcion}
                         </p>
                         <span style={{
                           fontFamily: FM, fontSize: '0.58rem', fontWeight: 700,
@@ -450,30 +430,27 @@ export default function Movimientos() {
                           {cfg.label}
                         </span>
                       </div>
-                      {item.detalle && (
-                        <p style={{
-                          fontFamily: FM, fontSize: '0.68rem',
-                          color: 'rgba(100,116,139,0.5)', margin: 0, wordBreak: 'break-word',
-                        }}>
-                          {item.detalle}
-                        </p>
-                      )}
+                      <p style={{
+                        fontFamily: FM, fontSize: '0.68rem',
+                        color: 'rgba(100,116,139,0.5)', margin: 0, wordBreak: 'break-word',
+                      }}>
+                        {detalleSecundario(m)}
+                      </p>
                     </div>
 
                     {/* Monto */}
                     <span style={{
                       fontFamily: FN, fontSize: '1.1rem', letterSpacing: '0.02em',
-                      color: item.esGasto ? '#f87171' : 'var(--text-1)',
-                      whiteSpace: 'nowrap', flexShrink: 0,
+                      color, whiteSpace: 'nowrap', flexShrink: 0,
                       fontVariantNumeric: 'tabular-nums',
                     }}>
-                      {item.esGasto ? `−${montoFmt}` : montoFmt}
+                      {prefijo}{montoFmt}
                     </span>
 
-                    {/* Editar — solo divisas (las demás secciones se editan en su página) */}
-                    {item.seccion === 'DIVISAS' && (
+                    {/* Editar — solo divisas (las demás operaciones se editan en su página) */}
+                    {esDivisaEditable && (
                       <button
-                        onClick={() => setEditarDivisaId(item.id)}
+                        onClick={() => setEditarDivisaId(m.referencia_id)}
                         title="Editar operación de divisas"
                         style={{ ...btnBordered('neutral'), fontSize: '0.66rem', padding: '2px 9px', flexShrink: 0 }}
                       >
@@ -496,6 +473,25 @@ export default function Movimientos() {
           onSuccess={handleEditDivisa}
         />
       )}
+    </div>
+  )
+}
+
+// Chips compactos de ingresos/egresos del día, por moneda (solo los no-cero).
+function ResumenChips({ resumen }: { resumen: ResumenDia }) {
+  const chips: { texto: string; color: string }[] = []
+  if (resumen.ingresosARS > 0) chips.push({ texto: `+${fmtMonto(resumen.ingresosARS.toString(), 'ARS')}`, color: '#34d399' })
+  if (resumen.egresosARS > 0)  chips.push({ texto: `−${fmtMonto(resumen.egresosARS.toString(), 'ARS')}`, color: '#f87171' })
+  if (resumen.ingresosUSD > 0) chips.push({ texto: `+${fmtUSD(resumen.ingresosUSD.toString())}`, color: '#34d399' })
+  if (resumen.egresosUSD > 0)  chips.push({ texto: `−${fmtUSD(resumen.egresosUSD.toString())}`, color: '#f87171' })
+  if (chips.length === 0) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+      {chips.map((c, i) => (
+        <span key={i} style={{ fontFamily: FN, fontSize: '1rem', letterSpacing: '0.02em', color: c.color }}>
+          {c.texto}
+        </span>
+      ))}
     </div>
   )
 }

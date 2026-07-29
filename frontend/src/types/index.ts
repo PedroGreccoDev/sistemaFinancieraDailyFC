@@ -111,6 +111,28 @@ export interface CuotaCobradaHistorialItem {
   fecha_vencimiento: string
 }
 
+// Feed unificado de Movimientos: TODA operación (libro de caja + ingresos de
+// cheques a cartera), venga del bot o del panel. Lo sirve GET /reportes/movimientos.
+export type MovimientoGrupo =
+  | 'COBROS' | 'CHEQUES' | 'DIVISAS' | 'GASTOS' | 'OTORGAMIENTOS' | 'PASIVOS' | 'OTROS'
+export type MovimientoFlujo = 'INGRESO' | 'EGRESO' | 'NEUTRO'
+
+export interface MovimientoUnificado {
+  id: string
+  fecha: string
+  moneda: Moneda
+  grupo: MovimientoGrupo
+  categoria: string
+  flujo: MovimientoFlujo
+  descripcion: string
+  monto: string
+  ganancia: string | null
+  medio_pago: MedioPago | null
+  cotizacion: string | null
+  referencia_tipo: string | null
+  referencia_id: string | null
+}
+
 export type MovimientoTipo = 'COMPRA' | 'VENTA'
 
 export interface MovimientoEfectivo {
