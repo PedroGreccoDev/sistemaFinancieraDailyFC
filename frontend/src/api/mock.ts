@@ -6,7 +6,7 @@
  * Las fechas se generan relativas a "hoy" para que siempre se vean actuales.
  */
 import type {
-  Cheque, Cliente, Cuota, Fiado, GastoOperativo,
+  Cheque, Cliente, Cuota, DeudaSimple, Fiado, GastoOperativo,
   MovimientoEfectivo, Pasivo, Prestamo, ReporteCaja,
 } from '../types'
 
@@ -73,6 +73,12 @@ const fiados: Fiado[] = [
   { id: 'fi-2', cheque_nro: '00055222', cliente_id: 'cli-4', monto_original: '180000', porcentaje_venta: '10.00', saldo_pendiente: '120000', estado: 'ABIERTO',   fecha_fiado: d(-15), created_at: ts(-15), updated_at: ts(-4) },
   { id: 'fi-3', cheque_nro: '00055333', cliente_id: 'cli-1', monto_original: '500000', porcentaje_venta: '6.00',  saldo_pendiente: '470000', estado: 'ABIERTO',   fecha_fiado: d(-3),  created_at: ts(-3),  updated_at: ts(-3) },
   { id: 'fi-4', cheque_nro: '00055444', cliente_id: 'cli-5', monto_original: '90000',  porcentaje_venta: '9.00',  saldo_pendiente: '0',      estado: 'CANCELADO', fecha_fiado: d(-40), created_at: ts(-40), updated_at: ts(-12) },
+]
+
+// ── Deudas libres (sin cuotas ni cheque) ──────────────────────────────
+const deudasSimples: DeudaSimple[] = [
+  { id: 'ds-1', cliente_id: 'cli-3', concepto: 'Mercadería a cuenta', monto: '85000', saldo_pendiente: '85000', moneda: 'ARS', estado: 'ABIERTA', fecha: d(-5), fecha_cancelacion: null, observaciones: null, cotizacion_pago: null, created_at: ts(-5), updated_at: ts(-5) },
+  { id: 'ds-2', cliente_id: 'cli-1', concepto: 'Adelanto en dólares', monto: '200', saldo_pendiente: '120', moneda: 'USD', estado: 'ABIERTA', fecha: d(-12), fecha_cancelacion: null, observaciones: 'Paga de a poco', cotizacion_pago: null, created_at: ts(-12), updated_at: ts(-2) },
 ]
 
 // ── Préstamos ─────────────────────────────────────────────────────────
@@ -211,6 +217,7 @@ export async function mockFetch<T>(path: string, options?: RequestInit): Promise
     if (raw === '/gastos-operativos')   return gastos
     if (raw === '/movimientos-efectivo') return movimientos
     if (raw === '/pasivos')             return estado ? pasivos.filter((p) => p.estado === estado) : pasivos
+    if (raw === '/deudas-simples')      return estado ? deudasSimples.filter((d) => d.estado === estado) : deudasSimples
     if (raw === '/reportes/caja')       return reporte
     throw new Error(`Modo demo (mock): endpoint no simulado: ${raw}`)
   }

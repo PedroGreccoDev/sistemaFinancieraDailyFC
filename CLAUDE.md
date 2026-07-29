@@ -39,9 +39,10 @@ de modo que el asiento de caja y la operación de negocio son **atómicos** (o a
   el signo lo da el `tipo`.
 - `categoria` — el origen del movimiento: `COBRO_CUOTA`, `COBRO_FIADO`, `VENTA_CHEQUE`,
   `COBRO_CHEQUE`, `COMPRA_CHEQUE`, `COMPRA_USD`, `VENTA_USD`, `OTORGAMIENTO_PRESTAMO`, `GASTO`,
-  `PAGO_PASIVO`, `VUELTO_PASIVO`.
+  `PAGO_PASIVO`, `VUELTO_PASIVO`, `OTORGAMIENTO_DEUDA`, `COBRO_DEUDA`.
 - `referencia_tipo` / `referencia_id` — enlace flojo a la entidad que lo originó
-  (cheque/préstamo/cuota/fiado/pasivo/gasto/movimiento). `COBRO_CUOTA` referencia la `cuota`
+  (cheque/préstamo/cuota/fiado/pasivo/gasto/movimiento/deuda_simple/deuda_simple_cobro).
+  `COBRO_CUOTA` referencia la `cuota`
   cuando se cobra una cuota entera, o el `prestamo` cuando es un pago de **importe libre** (§3).
 - `ganancia` — solo en `VENTA_USD`: ganancia FIFO realizada en ARS. Es dato de **reporte**, no de caja.
 - `medio_pago` — solo en `PAGO_PASIVO`: `EFECTIVO` | `TRANSFERENCIA` (enum `medio_pago`, migración `0014`); null en el resto.
@@ -108,6 +109,37 @@ El cliente puede cancelar esa deuda de dos formas:
 **Estados:** `ABIERTO` → `CANCELADO` (único estado terminal).
 **Restricción:** un cheque solo puede originar un fiado (`UNIQUE` en `cheque_nro`).
 **Bot WhatsApp:** intents `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
+
+---
+
+### 2.b Deudas simples _(deuda libre de cliente — módulo agregado 2026-07-18)_
+
+Cuenta por cobrar de un cliente que **no** es un préstamo con cuotas ni un fiado de
+cheque: una **deuda libre** con su **razón** (`concepto`), monto, moneda (`ARS`|`USD`)
+y fecha. Conceptualmente "un fiado sin cheque y con divisa". Tabla `deudas_simples`
+(modelo `DeudaSimple`, migración `0016`), servicio `svc_deudas_simples`, router
+`/deudas-simples`.
+
+- **Ciclo de caja completo (régimen definido 2026-07-18):** al **registrarla** sale un
+  **EGRESO** `OTORGAMIENTO_DEUDA` en su moneda y fecha (se entregó la plata, sin cuotas);
+  al **cobrarla** entra un **INGRESO** `COBRO_DEUDA` en la moneda efectivamente cobrada.
+- **Cobros parciales y totales:** lleva `saldo_pendiente`; se cobra en partes con
+  `POST /deudas-simples/{id}/cobrar` (`monto_cobrado`). Cuando el saldo llega a 0 pasa a
+  `CANCELADA` (con `fecha_cancelacion`). Soporta **cross-currency** vía la función pura
+  compartida `conversion.calcular_reduccion_saldo`: la cotización imputa cuánto baja el
+  saldo (en la moneda de la deuda), pero la caja recibe la plata en la moneda pagada. La
+  primera cotización cross-moneda se guarda en `cotizacion_pago` como default editable.
+- **Estados:** `ABIERTA` → `CANCELADA` (transición única, irreversible).
+- **Dos `referencia_tipo` de caja:** el egreso de origen usa `deuda_simple` y cada cobro
+  usa `deuda_simple_cobro`, para que la edición resincronice **solo** el egreso de origen
+  (`_registrar_egreso_origen`) sin tocar las líneas de los cobros ya hechos.
+- **Editar carga:** `PATCH /deudas-simples/{id}` (`svc_deudas_simples.editar_deuda_simple`).
+  `concepto`/`fecha`/`observaciones` siempre; `monto`/`moneda` solo si está `ABIERTA` y sin
+  cobros parciales (`saldo == monto`); al editar se resincroniza el egreso de origen.
+- **Solo panel web** (no hay intent de bot). En el panel vive en la pestaña **"Otras
+  deudas"** de Deudores y en el consolidado **General** (botón "Nuevo"); se cobra con el
+  modal compartido `ModalPagarDeuda` (tipo `deuda_simple`) y el alta con
+  `ModalNuevaDeudaSimple`. Incluida en el backup JSON export/import.
 
 ---
 
@@ -211,10 +243,11 @@ cada moneda: `neto = Σ ingresos − Σ egresos` del período. Cada línea va de
 cliente, operación, fecha).
 
 - **Ingresos (entra plata):** cuotas de préstamo cobradas (al cobrar, incluidos cobros parciales),
-  cobros de fiado en efectivo (incluidos parciales), ventas de cheques, ventas de USD (pesos
-  recibidos) y su ganancia FIFO.
+  cobros de fiado en efectivo (incluidos parciales), cobros de deudas simples (§2.b, incluidos
+  parciales), ventas de cheques, ventas de USD (pesos recibidos) y su ganancia FIFO.
 - **Egresos (sale plata):** gastos diarios, compra de cheques, compra de USD (pesos que salen),
-  compra de cualquier activo y otorgamiento de préstamos (crédito entregado).
+  compra de cualquier activo, otorgamiento de préstamos (crédito entregado) y otorgamiento de
+  deudas simples (§2.b).
 - **Cobros parciales cuentan:** si de un fiado de $100.000 entran $100, esos $100 son ingreso
   del día con su detalle (fiado, cliente, fecha).
 - `GET /api/v1/reportes/cobros-cuotas?desde=&hasta=` devuelve el historial detallado de cuotas
@@ -301,7 +334,7 @@ cliente, operación, fecha).
 - Las transacciones críticas usan `SELECT ... FOR UPDATE` para evitar race conditions.
 - **Fechas/horas en hora local de Argentina (ART), no UTC.** Usar los helpers de `app/core/fechas.py` (`hoy_local`, etc.); los gastos guardan `hora_operacion` (migración `0008`).
 - **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad.
-- **Sección "Deudores" (frontend):** agrupa lo que los **clientes** le deben al negocio (≠ "Deudas"/Pasivos, que es al revés). Tres pestañas: **General** (índice, `/deudores` → `DeudoresGeneral`), **Préstamos** (`/deudores/prestamos`) y **Cheques fiados** (`/deudores/cheques-fiados`). La pestaña **General** es una **vista consolidada por cliente** (total ARS y USD sumando préstamos + fiados) armada **en el front** desde `/prestamos` y `/fiados` (no hay endpoint de agregación). El **pago de importe libre** (parcial o total, cross-currency) vive en el componente compartido `components/ModalPagarDeuda.tsx` (llama a `pagar_prestamo` o `cobrar_con_efectivo` según el `tipo` de deuda) y se usa **tanto en la pestaña General como en la de Préstamos** (botón "Pago libre", además del cobro por cuota entera). No reemplaza el cobro directo desde las otras pestañas.
+- **Sección "Deudores" (frontend):** agrupa lo que los **clientes** le deben al negocio (≠ "Deudas"/Pasivos, que es al revés). Cuatro pestañas: **General** (índice, `/deudores` → `DeudoresGeneral`), **Préstamos** (`/deudores/prestamos`), **Cheques fiados** (`/deudores/cheques-fiados`) y **Otras deudas** (`/deudores/otras` → `DeudoresOtras`, las deudas simples — ver §2.b). La pestaña **General** es una **vista consolidada por cliente** (total ARS y USD sumando préstamos + fiados + deudas simples) armada **en el front** desde `/prestamos`, `/fiados` y `/deudas-simples` (no hay endpoint de agregación); tiene un botón **"Nuevo"** que abre `ModalNuevaDeudaSimple`. El **pago de importe libre** (parcial o total, cross-currency) vive en el componente compartido `components/ModalPagarDeuda.tsx` (llama a `pagar_prestamo`, `cobrar_con_efectivo` o `cobrar_deuda_simple` según el `tipo` de deuda) y se usa en General, Préstamos y Otras deudas (botón "Pago libre"/"Cobrar", además del cobro por cuota entera). No reemplaza el cobro directo desde las otras pestañas.
 
 ---
 
@@ -326,6 +359,8 @@ cliente, operación, fecha).
     tolerancia de un centavo y pago que supera el saldo.
   - **`test_prestamos_pago.py`** — `repartir_pago_en_cuotas` (imputación a la cuota más vieja
     primero, parcial/total, saltea saldadas, no reparte de más) + cross-currency del préstamo.
+  - **`test_deudas_simples.py`** — `aplicar_cobro` de una deuda simple (§2.b): nuevo saldo y
+    transición a cancelada en cobros parciales/totales, sin dejar saldo negativo.
 - **Convención:** mantené la lógica de negocio en funciones/métodos testeables sin BD; si una
   pieza nueva necesita una sesión, extraé la parte pura para poder cubrirla en este estilo.
 

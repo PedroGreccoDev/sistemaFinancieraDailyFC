@@ -5,6 +5,7 @@ export type Moneda = 'ARS' | 'USD'
 export type Frecuencia = 'DIARIA' | 'SEMANAL' | 'QUINCENAL' | 'MENSUAL' | 'ANUAL'
 export type PasivoEstado = 'PENDIENTE' | 'CANCELADA'
 export type FiadoEstado = 'ABIERTO' | 'CANCELADO'
+export type DeudaSimpleEstado = 'ABIERTA' | 'CANCELADA'
 
 export interface Cheque {
   id: string
@@ -174,6 +175,24 @@ export interface CobrarConChequeResult {
   fiado: Fiado
   cheque_ingresado: Cheque
   diferencia: string
+}
+
+// Deuda libre de un cliente (sin cuotas ni cheque). Al registrarla sale un egreso
+// de caja; al cobrarla (total/parcial, cross-currency) entra un ingreso.
+export interface DeudaSimple {
+  id: string
+  cliente_id: string
+  concepto: string
+  monto: string
+  saldo_pendiente: string
+  moneda: Moneda
+  estado: DeudaSimpleEstado
+  fecha: string
+  fecha_cancelacion: string | null
+  observaciones: string | null
+  cotizacion_pago: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface CuotaCobrarConChequeResult {

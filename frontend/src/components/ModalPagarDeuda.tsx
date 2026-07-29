@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { pagarPrestamo } from '../api/prestamos'
 import { cobrarEfectivo } from '../api/fiados'
+import { cobrarDeudaSimple } from '../api/deudas_simples'
 import { fmtARS, fmtUSD } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
@@ -13,10 +14,10 @@ const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)
 const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
 
 // Una deuda concreta a la que se puede imputar un pago de importe libre (parcial
-// o total): un préstamo o un fiado. `saldo` y `moneda` son de la deuda (los fiados
-// son siempre ARS; los préstamos, en su moneda).
+// o total): un préstamo, un fiado o una deuda libre. `saldo` y `moneda` son de la
+// deuda (los fiados son siempre ARS; préstamos y deudas libres, en su moneda).
 export interface DeudaItem {
-  tipo: 'prestamo' | 'fiado'
+  tipo: 'prestamo' | 'fiado' | 'deuda_simple'
   id: string
   clienteNombre: string
   label: string
@@ -68,6 +69,12 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
       if (deuda.tipo === 'prestamo') {
         await pagarPrestamo(deuda.id, {
           monto_pagado: montoNum,
+          moneda_pago: monedaPago,
+          cotizacion: cross ? cotizNum : null,
+        })
+      } else if (deuda.tipo === 'deuda_simple') {
+        await cobrarDeudaSimple(deuda.id, {
+          monto_cobrado: montoNum,
           moneda_pago: monedaPago,
           cotizacion: cross ? cotizNum : null,
         })

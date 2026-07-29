@@ -2,13 +2,15 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getPrestamos } from '../api/prestamos'
 import { getFiados } from '../api/fiados'
+import { getDeudasSimples } from '../api/deudas_simples'
 import { getClientes } from '../api/clientes'
 import { fmtARS, fmtUSD } from '../lib/fmt'
-import { chip, btnBordered, btnFlat } from '../lib/ui'
-import { IconRefresh } from '../components/icons'
+import { chip, btnSolid, btnBordered, btnFlat } from '../lib/ui'
+import { IconPlus, IconRefresh } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
 import ModalPagarDeuda, { type DeudaItem } from '../components/ModalPagarDeuda'
-import type { Moneda, Prestamo, Fiado, Cliente } from '../types'
+import ModalNuevaDeudaSimple from '../components/ModalNuevaDeudaSimple'
+import type { Moneda, Prestamo, Fiado, DeudaSimple, Cliente } from '../types'
 
 const FM = "'Manrope', sans-serif"
 const FN = "'Bebas Neue', sans-serif"
@@ -39,6 +41,7 @@ function saldoPrestamo(p: Prestamo): number {
 function construirResumen(
   prestamos: Prestamo[],
   fiados: Fiado[],
+  deudasSimples: DeudaSimple[],
   clientes: Cliente[],
 ): DeudorResumen[] {
   const nombreDe = new Map(clientes.map((c) => [c.id, c.nombre]))
@@ -87,6 +90,23 @@ function construirResumen(
     r.totalArs += saldo
   }
 
+  for (const d of deudasSimples) {
+    if (d.estado !== 'ABIERTA') continue
+    const saldo = parseFloat(d.saldo_pendiente)
+    if (saldo <= 0.009) continue
+    const r = bucket(d.cliente_id)
+    r.deudas.push({
+      tipo: 'deuda_simple',
+      id: d.id,
+      clienteNombre: r.nombre,
+      label: d.concepto,
+      saldo,
+      moneda: d.moneda,
+    })
+    if (d.moneda === 'USD') r.totalUsd += saldo
+    else r.totalArs += saldo
+  }
+
   return [...map.values()].sort((a, b) => a.nombre.localeCompare(b.nombre))
 }
 
@@ -117,7 +137,7 @@ function DeudorCard({ deudor, onPagar }: { deudor: DeudorResumen; onPagar: (d: D
         {deudor.deudas.map((d) => (
           <div key={`${d.tipo}-${d.id}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-              <span style={chip(d.tipo === 'prestamo' ? 'primary' : 'secondary')}>{d.tipo === 'prestamo' ? 'Préstamo' : 'Fiado'}</span>
+              <span style={chip(d.tipo === 'prestamo' ? 'primary' : d.tipo === 'deuda_simple' ? 'warning' : 'secondary')}>{d.tipo === 'prestamo' ? 'Préstamo' : d.tipo === 'deuda_simple' ? 'Deuda' : 'Fiado'}</span>
               <span style={{ fontFamily: FM, fontSize: '0.76rem', color: 'rgba(100,116,139,0.85)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexShrink: 0 }}>
@@ -135,6 +155,7 @@ function DeudorCard({ deudor, onPagar }: { deudor: DeudorResumen; onPagar: (d: D
 
 export default function DeudoresGeneral() {
   const [pagando, setPagando] = useState<DeudaItem | null>(null)
+  const [creando, setCreando] = useState(false)
   const queryClient = useQueryClient()
 
   const { data: prestamos, isLoading: loadingP, error: errP } = useQuery({
@@ -147,19 +168,35 @@ export default function DeudoresGeneral() {
     queryFn: () => getFiados('ABIERTO'),
     refetchInterval: 30_000,
   })
+  const { data: deudasSimples, isLoading: loadingD, error: errD } = useQuery({
+    queryKey: ['deudas-simples', 'ABIERTA'],
+    queryFn: () => getDeudasSimples('ABIERTA'),
+    refetchInterval: 30_000,
+  })
   const { data: clientes } = useQuery({ queryKey: ['clientes'], queryFn: getClientes, staleTime: 60_000 })
 
-  const isLoading = loadingP || loadingF
-  const error = errP || errF
-  const resumen = construirResumen(prestamos ?? [], fiados ?? [], clientes ?? [])
+  const isLoading = loadingP || loadingF || loadingD
+  const error = errP || errF || errD
+  const resumen = construirResumen(prestamos ?? [], fiados ?? [], deudasSimples ?? [], clientes ?? [])
 
   const totalArs = resumen.reduce((acc, r) => acc + r.totalArs, 0)
   const totalUsd = resumen.reduce((acc, r) => acc + r.totalUsd, 0)
 
-  function handleSuccess() {
-    setPagando(null)
+  function invalidar() {
     queryClient.invalidateQueries({ queryKey: ['prestamos'] })
     queryClient.invalidateQueries({ queryKey: ['fiados'] })
+    queryClient.invalidateQueries({ queryKey: ['deudas-simples'] })
+  }
+
+  function handleSuccess() {
+    setPagando(null)
+    invalidar()
+  }
+
+  function handleCreada() {
+    setCreando(false)
+    invalidar()
+    queryClient.invalidateQueries({ queryKey: ['clientes'] })
   }
 
   return (
@@ -170,7 +207,10 @@ export default function DeudoresGeneral() {
           <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>General</h1>
           <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Deuda consolidada de cada cliente (préstamos + cheques fiados)</p>
         </div>
-        <button onClick={() => { queryClient.invalidateQueries({ queryKey: ['prestamos'] }); queryClient.invalidateQueries({ queryKey: ['fiados'] }) }} style={{ ...btnBordered('neutral'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, padding: '0.45rem 0.875rem' }}><IconRefresh size={14} />Actualizar</button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={() => setCreando(true)} style={{ ...btnSolid('primary'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', padding: '0.45rem 0.875rem' }}><IconPlus size={15} />Nuevo</button>
+          <button onClick={invalidar} style={{ ...btnBordered('neutral'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, padding: '0.45rem 0.875rem' }}><IconRefresh size={14} />Actualizar</button>
+        </div>
       </div>
 
       {/* KPIs */}
@@ -203,6 +243,7 @@ export default function DeudoresGeneral() {
       )}
 
       {pagando && <ModalPagarDeuda deuda={pagando} onClose={() => setPagando(null)} onSuccess={handleSuccess} />}
+      {creando && <ModalNuevaDeudaSimple onClose={() => setCreando(false)} onSuccess={handleCreada} />}
     </div>
   )
 }

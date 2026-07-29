@@ -26,6 +26,8 @@ const CATEGORIA_LABEL: Record<string, string> = {
   GASTO: 'Gasto',
   PAGO_PASIVO: 'Pago de deuda',
   VUELTO_PASIVO: 'Vuelto a cliente',
+  OTORGAMIENTO_DEUDA: 'Deuda otorgada',
+  COBRO_DEUDA: 'Cobro de deuda',
 }
 
 function getRangeForPreset(preset: Preset, customDesde: string | null, customHasta: string | null) {

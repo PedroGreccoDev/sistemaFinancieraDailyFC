@@ -66,6 +66,11 @@ class FiadoEstado(str, enum.Enum):
     CANCELADO = "CANCELADO"
 
 
+class DeudaSimpleEstado(str, enum.Enum):
+    ABIERTA   = "ABIERTA"
+    CANCELADA = "CANCELADA"
+
+
 class CajaTipo(str, enum.Enum):
     INGRESO = "INGRESO"
     EGRESO  = "EGRESO"
@@ -88,6 +93,8 @@ class CajaCategoria(str, enum.Enum):
     GASTO                = "GASTO"
     PAGO_PASIVO          = "PAGO_PASIVO"
     VUELTO_PASIVO        = "VUELTO_PASIVO"
+    OTORGAMIENTO_DEUDA   = "OTORGAMIENTO_DEUDA"
+    COBRO_DEUDA          = "COBRO_DEUDA"
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -145,9 +152,10 @@ class Cliente(Base):
         foreign_keys="[Cheque.cliente_destino_id]",
         back_populates="cliente_destino",
     )
-    prestamos:   Mapped[list[Prestamo]]          = relationship("Prestamo",          back_populates="cliente")
-    movimientos: Mapped[list[MovimientoEfectivo]] = relationship("MovimientoEfectivo", back_populates="cliente")
-    fiados:      Mapped[list[Fiado]]              = relationship("Fiado",              back_populates="cliente")
+    prestamos:      Mapped[list[Prestamo]]          = relationship("Prestamo",          back_populates="cliente")
+    movimientos:    Mapped[list[MovimientoEfectivo]] = relationship("MovimientoEfectivo", back_populates="cliente")
+    fiados:         Mapped[list[Fiado]]              = relationship("Fiado",              back_populates="cliente")
+    deudas_simples: Mapped[list[DeudaSimple]]        = relationship("DeudaSimple",        back_populates="cliente")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -485,6 +493,56 @@ class Fiado(Base):
         """Número del cheque originante. Atajo de lectura sobre la relación, para
         seguir exponiendo `cheque_nro` en la API y el bot sin guardarlo duplicado."""
         return self.cheque.nro_cheque if self.cheque else None
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: DeudaSimple (deuda libre de un cliente — sin cuotas ni cheque)
+# ══════════════════════════════════════════════════════════════════════
+
+class DeudaSimple(Base):
+    """Cuenta por cobrar de un cliente que no es un préstamo con cuotas ni un
+    fiado de cheque: una deuda libre con su razón (concepto), monto, moneda y
+    fecha. Al registrarla sale un EGRESO de caja (se entregó la plata) y al
+    cobrarla entra un INGRESO (total o parcial, admite cross-currency). Pasa a
+    CANCELADA cuando el saldo llega a 0."""
+
+    __tablename__ = "deudas_simples"
+    __table_args__ = (
+        sa.CheckConstraint("monto > 0",           name="ck_deudas_simples_monto_positive"),
+        sa.CheckConstraint("saldo_pendiente >= 0", name="ck_deudas_simples_saldo_non_negative"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    cliente_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        sa.ForeignKey("clientes.id", ondelete="RESTRICT"),
+        index=True,
+    )
+
+    concepto:        Mapped[str]               = mapped_column(sa.Text(), nullable=False)
+    monto:           Mapped[Decimal]           = mapped_column(sa.Numeric(18, 2))
+    saldo_pendiente: Mapped[Decimal]           = mapped_column(sa.Numeric(18, 2))
+    moneda:          Mapped[Moneda]            = mapped_column(
+        sa.Enum(Moneda, name="moneda", create_type=False)
+    )
+    estado:          Mapped[DeudaSimpleEstado] = mapped_column(
+        sa.Enum(DeudaSimpleEstado, name="deuda_simple_estado", create_type=False),
+        default=DeudaSimpleEstado.ABIERTA, index=True,
+    )
+    fecha:             Mapped[date]            = mapped_column(sa.Date())
+    fecha_cancelacion: Mapped[date | None]     = mapped_column(sa.Date(), nullable=True)
+    observaciones:     Mapped[str | None]      = mapped_column(sa.Text(), nullable=True)
+    # Cotización ($/USD) de la PRIMERA cobranza en moneda distinta a la deuda.
+    # Se setea una sola vez y sirve de default editable para los cobros siguientes.
+    cotizacion_pago:   Mapped[Decimal | None]  = mapped_column(sa.Numeric(18, 4), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
+
+    cliente: Mapped[Cliente] = relationship("Cliente", back_populates="deudas_simples")
 
 
 # ══════════════════════════════════════════════════════════════════════

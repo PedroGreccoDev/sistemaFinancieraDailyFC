@@ -15,6 +15,7 @@ from app.db.models import (
     Cheque,
     Cliente,
     Cuota,
+    DeudaSimple,
     Fiado,
     GastoOperativo,
     MovimientoCaja,
@@ -61,6 +62,11 @@ _GA = [
     "id", "concepto", "monto", "moneda", "fecha_operacion", "hora_operacion",
     "observaciones", "created_at", "updated_at",
 ]
+_DS = [
+    "id", "cliente_id", "concepto", "monto", "saldo_pendiente", "moneda",
+    "estado", "fecha", "fecha_cancelacion", "observaciones", "cotizacion_pago",
+    "created_at", "updated_at",
+]
 _MC = [
     "id", "fecha", "moneda", "tipo", "categoria", "monto", "ganancia",
     "referencia_tipo", "referencia_id", "detalle", "created_at", "updated_at",
@@ -77,9 +83,10 @@ _REQUIRED: dict[str, frozenset[str]] = {
     "fiados":               frozenset({"id", "cheque_id", "cliente_id", "monto_original", "saldo_pendiente", "estado"}),
     "pasivos":              frozenset({"id", "acreedor", "concepto", "monto", "moneda", "estado"}),
     "gastos_operativos":    frozenset({"id", "concepto", "monto", "moneda", "fecha_operacion"}),
-    # movimientos_caja es opcional: los backups v1 anteriores no lo traen y deben
-    # seguir importando. Solo validamos sus campos si la tabla viene presente.
+    # movimientos_caja y deudas_simples son opcionales: los backups anteriores no
+    # los traen y deben seguir importando. Solo se validan si la tabla viene presente.
     "movimientos_caja":     frozenset({"id", "fecha", "moneda", "tipo", "categoria", "monto"}),
+    "deudas_simples":       frozenset({"id", "cliente_id", "concepto", "monto", "saldo_pendiente", "moneda", "estado", "fecha"}),
 }
 
 
@@ -104,7 +111,7 @@ _UUID_COLS = frozenset({
 _DEC_COLS = frozenset({
     "monto", "monto_pagado", "credito", "total_a_cobrar", "ganancia",
     "porcentaje_compra", "porcentaje_venta", "cotizacion_aplicada",
-    "monto_original", "saldo_pendiente", "usd_restante",
+    "monto_original", "saldo_pendiente", "usd_restante", "cotizacion_pago",
 })
 _DT_COLS = frozenset({"created_at", "updated_at", "ultimo_evento_manual_at"})
 _BYTES_COLS = frozenset({"foto"})
@@ -147,6 +154,7 @@ def exportar_json(db: Session) -> dict:
             "fiados":               [_serialize(r, _FI) for r in db.query(Fiado).all()],
             "pasivos":              [_serialize(r, _PA) for r in db.query(Pasivo).all()],
             "gastos_operativos":    [_serialize(r, _GA) for r in db.query(GastoOperativo).all()],
+            "deudas_simples":       [_serialize(r, _DS) for r in db.query(DeudaSimple).all()],
             "movimientos_caja":     [_serialize(r, _MC) for r in db.query(MovimientoCaja).all()],
         },
     }
@@ -190,6 +198,7 @@ _DATE_GA = frozenset({"fecha_operacion"})
 _TIME_GA = frozenset({"hora_operacion"})
 _DT_MO   = frozenset({"fecha_operacion"})
 _DATE_MC = frozenset({"fecha"})
+_DATE_DS = frozenset({"fecha", "fecha_cancelacion"})
 
 
 def importar_json(db: Session, data: dict) -> dict[str, int]:
@@ -211,8 +220,8 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
 
     try:
         for tbl in (
-            "movimientos_caja", "cuotas", "fiados", "movimientos_efectivo", "prestamos",
-            "cheques", "pasivos", "gastos_operativos", "clientes",
+            "movimientos_caja", "cuotas", "fiados", "deudas_simples", "movimientos_efectivo",
+            "prestamos", "cheques", "pasivos", "gastos_operativos", "clientes",
         ):
             db.execute(sa.text(f"DELETE FROM {tbl}"))  # noqa: S608
 
@@ -228,6 +237,7 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         bulk(Fiado,              [_cv(r, date_cols=_DATE_FI) for r in tablas.get("fiados", [])])
         bulk(Pasivo,             [_cv(r, date_cols=_DATE_PA) for r in tablas.get("pasivos", [])])
         bulk(GastoOperativo,     [_cv(r, date_cols=_DATE_GA, time_cols=_TIME_GA) for r in tablas.get("gastos_operativos", [])])
+        bulk(DeudaSimple,        [_cv(r, date_cols=_DATE_DS) for r in tablas.get("deudas_simples", [])])
         bulk(MovimientoCaja,     [_cv(r, date_cols=_DATE_MC) for r in tablas.get("movimientos_caja", [])])
 
         db.commit()
@@ -238,7 +248,7 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
     tabla_names = (
         "clientes", "cheques", "prestamos", "cuotas",
         "movimientos_efectivo", "fiados", "pasivos", "gastos_operativos",
-        "movimientos_caja",
+        "deudas_simples", "movimientos_caja",
     )
     return {t: len(tablas.get(t, [])) for t in tabla_names}
 
