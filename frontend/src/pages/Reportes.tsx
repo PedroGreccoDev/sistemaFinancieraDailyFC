@@ -67,6 +67,7 @@ function MetricCard({ label, value, color = 'default', accentColor, prefix }: {
 function CajaBloque({ caja, simbolo }: { caja: CajaMoneda; simbolo: 'ARS' | 'USD' }) {
   const fmt = (v: string | number) => fmtMonto(v, simbolo as Moneda)
   const neto = parseFloat(caja.neto)
+  const cierre = parseFloat(caja.saldo_cierre ?? '0')
   return (
     <div style={{ ...CARD, overflow: 'hidden' }}>
       {/* Encabezado de la caja */}
@@ -91,6 +92,31 @@ function CajaBloque({ caja, simbolo }: { caja: CajaMoneda; simbolo: 'ARS' | 'USD
             {fmt(caja.neto)}
           </span>
         </div>
+      </div>
+
+      {/* Apertura → cierre. El neto de arriba es el FLUJO del período (un día de
+          solo compras da negativo, y está bien); esta franja muestra el SALDO,
+          que es la plata que realmente hay en la caja. */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: '0.75rem', flexWrap: 'wrap',
+        padding: '0.6rem 1.1rem', borderBottom: '1px solid var(--bd-006)',
+      }}>
+        <span style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.75)' }}>
+          Saldo al abrir&nbsp;
+          <strong style={{ color: 'var(--text-2)', fontVariantNumeric: 'tabular-nums' }}>
+            {fmt(caja.saldo_apertura)}
+          </strong>
+        </span>
+        <span style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.75)' }}>
+          Saldo al cerrar&nbsp;
+          <strong style={{
+            color: cierre >= 0 ? 'var(--text-1)' : '#f87171',
+            fontSize: '0.85rem', fontVariantNumeric: 'tabular-nums',
+          }}>
+            {fmt(caja.saldo_cierre)}
+          </strong>
+        </span>
       </div>
 
       {/* Detalle de líneas */}

@@ -26,11 +26,19 @@ class CajaLinea(BaseModel):
 
 
 class CajaMoneda(BaseModel):
-    """Caja de una moneda: totales de ingresos/egresos, neto y detalle de líneas."""
+    """Caja de una moneda: totales de ingresos/egresos, neto y detalle de líneas.
+
+    `saldo_apertura` es la plata que había al abrir el período (todo lo anterior,
+    incluido el efectivo de arranque del sistema) y `saldo_cierre` lo que queda al
+    final. El `neto` sigue siendo el flujo del período: un día de solo compras da
+    negativo —correcto, salió plata— sin que por eso el saldo esté en rojo.
+    """
     moneda: str
     ingresos_total: Decimal
     egresos_total: Decimal
     neto: Decimal
+    saldo_apertura: Decimal = Decimal("0.00")
+    saldo_cierre: Decimal = Decimal("0.00")
     lineas: list[CajaLinea]
 
 

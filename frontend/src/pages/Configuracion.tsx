@@ -5,6 +5,7 @@ import { exportarJSON, exportarExcel, importarJSON } from '../api/backup'
 import { useToast } from '../lib/toast'
 import { btnFlat, btnSolid, btnBordered, FM } from '../lib/ui'
 import { IconDownload, IconUpload, IconFileJson, IconTable, IconAlert, IconClose, IconUserCog } from '../components/icons'
+import AperturaSistema from '../components/AperturaSistema'
 
 const TABLA_LABELS: Record<string, string> = {
   clientes:             'Clientes',
@@ -259,6 +260,16 @@ export default function Configuracion() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+        {/* ── Apertura del sistema ─────────────────────────────────────── */}
+        <SectionCard>
+          <SectionTitle
+            icon={<IconUserCog size={20} />}
+            title="Apertura del sistema"
+            subtitle="Los saldos con los que el negocio arrancó a usar el sistema: la cartera de cheques que ya tenían y el efectivo que había en el cajón."
+          />
+          <AperturaSistema />
+        </SectionCard>
 
         {/* ── Usuarios ─────────────────────────────────────────────────── */}
         <SectionCard>

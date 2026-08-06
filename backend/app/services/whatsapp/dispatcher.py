@@ -717,7 +717,9 @@ def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
     """
     svc_caja.borrar_por_referencia(db, "cheque", cheque.id)
     pagado = (cheque.monto * (_CIEN_PCT - cheque.porcentaje_compra) / _CIEN_PCT).quantize(Decimal("0.01"))
-    if pagado > 0:
+    # La cartera preexistente nunca asentó el egreso de compra (ver
+    # services/apertura.py): al resincronizar no hay que inventarlo.
+    if pagado > 0 and not cheque.es_carga_inicial:
         svc_caja.registrar(
             db, fecha=fecha_local(cheque.created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
             categoria=CajaCategoria.COMPRA_CHEQUE, monto=pagado,

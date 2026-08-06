@@ -27,6 +27,7 @@ from app.schemas.cheques import (
     ChequeManualTransition,
     ChequeUpdate,
 )
+from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
 from app.services.exceptions import (
     ConflictError,
@@ -53,12 +54,20 @@ def create_cheque(
     )
     if created_at is not None:
         cheque.created_at = created_at
+
+    # Cartera preexistente: si la fecha cae dentro del período de carga inicial,
+    # el cheque ya estaba comprado antes de que el sistema existiera y NO asienta
+    # el egreso — esa plata salió fuera del período que la caja cubre, y el saldo
+    # de apertura ya la tiene descontada. Ver services/apertura.py.
+    fecha_carga = fecha_local(created_at)
+    cheque.es_carga_inicial = svc_apertura.es_carga_inicial(db, fecha_carga)
+
     try:
         db.add(cheque)
         db.flush()
         # Comprar el cheque saca plata de la caja ARS: lo pagado = monto·(1−%compra).
         pagado = (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(Decimal("0.01"))
-        if pagado > 0:
+        if pagado > 0 and not cheque.es_carga_inicial:
             banco_txt = f" — {cheque.banco}" if cheque.banco else ""
             svc_caja.registrar(
                 db, fecha=fecha_local(created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
@@ -238,7 +247,10 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
     monto/%compra/%venta. No hace commit (lo hace el caller)."""
     svc_caja.borrar_por_referencia(db, "cheque", cheque.id)
     pagado = (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(Decimal("0.01"))
-    if pagado > 0:
+    # La cartera preexistente nunca asentó el egreso de compra: al resincronizar
+    # no hay que inventarlo. Sin esto, editar un cheque de carga inicial le haría
+    # aparecer un egreso que no existió.
+    if pagado > 0 and not cheque.es_carga_inicial:
         banco_txt = f" — {cheque.banco}" if cheque.banco else ""
         svc_caja.registrar(
             db, fecha=fecha_local(cheque.created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,

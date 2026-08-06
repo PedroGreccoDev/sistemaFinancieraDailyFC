@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import anulacion, auth, backup, cheques, clientes, deudas_simples, fiados, gastos_operativos, movimientos, pasivos, prestamos, reportes, webhook
+from app.api.routes import anulacion, apertura, auth, backup, cheques, clientes, deudas_simples, fiados, gastos_operativos, movimientos, pasivos, prestamos, reportes, webhook
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -79,6 +79,7 @@ app.include_router(fiados.router, prefix=settings.api_v1_prefix, dependencies=_a
 app.include_router(deudas_simples.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 app.include_router(gastos_operativos.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 app.include_router(anulacion.router, prefix=settings.api_v1_prefix, dependencies=_auth)
+app.include_router(apertura.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 app.include_router(backup.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 
 # WhatsApp Bot — público (mantiene su propio control por número de teléfono)

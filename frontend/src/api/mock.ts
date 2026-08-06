@@ -174,6 +174,8 @@ const reporte: ReporteCaja = {
     ingresos_total: '430000',
     egresos_total: '162200',
     neto: '267800',
+    saldo_apertura: '1500000',
+    saldo_cierre: '1767800',
     lineas: [
       { fecha: d(-2), categoria: 'VENTA_USD',    tipo: 'INGRESO', monto: '725000', detalle: 'Venta de 500 USD @ $1450', ganancia: '25000', medio_pago: null, cotizacion: null },
       { fecha: d(-3), categoria: 'COBRO_CUOTA',  tipo: 'INGRESO', monto: '50000',  detalle: 'Cuota #1 - Juan Pérez',     ganancia: null, medio_pago: null, cotizacion: null },
@@ -187,6 +189,8 @@ const reporte: ReporteCaja = {
     ingresos_total: '300',
     egresos_total: '1300',
     neto: '-1000',
+    saldo_apertura: '2500',
+    saldo_cierre: '1500',
     lineas: [
       { fecha: d(-2), categoria: 'VENTA_USD',  tipo: 'EGRESO',  monto: '500', detalle: 'Venta de 500 USD @ $1450', ganancia: null, medio_pago: null, cotizacion: null },
       { fecha: d(-4), categoria: 'COMPRA_USD', tipo: 'INGRESO', monto: '300', detalle: 'Compra de 300 USD @ $1400', ganancia: null, medio_pago: null, cotizacion: null },

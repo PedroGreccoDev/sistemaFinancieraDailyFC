@@ -95,6 +95,9 @@ class CajaCategoria(str, enum.Enum):
     VUELTO_PASIVO        = "VUELTO_PASIVO"
     OTORGAMIENTO_DEUDA   = "OTORGAMIENTO_DEUDA"
     COBRO_DEUDA          = "COBRO_DEUDA"
+    # Efectivo que ya estaba en el cajón al poner el sistema en marcha. No es un
+    # ingreso del día: el reporte lo trata como saldo de apertura (§Apertura).
+    SALDO_INICIAL        = "SALDO_INICIAL"
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -253,6 +256,14 @@ class Cheque(AnulableMixin, Base):
     ultimo_evento_manual_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     ultimo_operador_id:      Mapped[str | None]      = mapped_column(sa.String(80), nullable=True)
     ultimo_motivo_manual:    Mapped[str | None]      = mapped_column(sa.Text(),     nullable=True)
+
+    # Cheque que YA estaba en cartera al arrancar el sistema (comprado antes de
+    # que existiera). Es inventario de apertura: no asienta el egreso de compra,
+    # porque esa plata salió fuera del período que la caja cubre —y el efectivo
+    # inicial ya la tiene descontada—. Migración 0018.
+    es_carga_inicial: Mapped[bool] = mapped_column(
+        sa.Boolean(), nullable=False, server_default=sa.false(), default=False
+    )
 
     # Foto del cheque (cargado por WhatsApp/OCR). Diferida: los listados nunca
     # cargan los bytes; solo se leen vía GET /cheques/{nro}/foto.
@@ -762,3 +773,58 @@ class Invitacion(Base):
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
     )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: ConfiguracionApertura  (arranque del sistema — migración 0018)
+# ══════════════════════════════════════════════════════════════════════
+
+class ConfiguracionApertura(Base):
+    """Los saldos con los que el negocio arrancó a usar el sistema.
+
+    Cuando el sistema se puso en marcha el negocio ya venía funcionando: había
+    efectivo en el cajón y cheques en cartera comprados tiempo atrás. Los dos son
+    **saldos de apertura**, no operaciones del día, y esta tabla los define.
+
+    `fecha_corte_carga_inicial` separa las dos épocas: hasta esa fecha inclusive,
+    los cheques que se cargan son inventario preexistente y NO asientan el egreso
+    de compra (esa plata salió antes, y el efectivo inicial ya la tiene
+    descontada); a partir del día siguiente, la operación es normal.
+
+    Es una tabla **singleton**: una sola fila, con `id = 1` forzado por un CHECK.
+    """
+
+    __tablename__ = "configuracion_apertura"
+    __table_args__ = (
+        sa.CheckConstraint("id = 1", name="ck_configuracion_apertura_singleton"),
+        sa.CheckConstraint(
+            "saldo_inicial_ars IS NULL OR saldo_inicial_ars >= 0",
+            name="ck_configuracion_apertura_ars_no_negativo",
+        ),
+        sa.CheckConstraint(
+            "saldo_inicial_usd IS NULL OR saldo_inicial_usd >= 0",
+            name="ck_configuracion_apertura_usd_no_negativo",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(sa.Integer(), primary_key=True, default=1)
+
+    fecha_corte_carga_inicial: Mapped[date | None] = mapped_column(sa.Date(), nullable=True)
+    saldo_inicial_ars:         Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+    saldo_inicial_usd:         Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+    # Día al que corresponde ese efectivo, NO el día en que se tipeó: se puede
+    # cargar una semana después y el reporte igual cierra bien para atrás.
+    fecha_saldo_inicial:       Mapped[date | None] = mapped_column(sa.Date(), nullable=True)
+
+    definido_por: Mapped[str | None]      = mapped_column(sa.String(80), nullable=True)
+    definido_at:  Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
+
+    @property
+    def saldo_definido(self) -> bool:
+        """True si ya se cargó el efectivo de apertura (es por única vez)."""
+        return self.definido_at is not None

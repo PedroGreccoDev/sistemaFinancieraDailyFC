@@ -58,6 +58,17 @@ def registrar(
     return mov
 
 
+def borrar_por_referencia_tipo(db: Session, referencia_tipo: str) -> None:
+    """Elimina (sin commit) TODAS las líneas de un tipo de referencia.
+
+    Para asientos que no cuelgan de una entidad con id propio, como el saldo de
+    apertura (`referencia_tipo='apertura'`): al rehacerlo hay que limpiar el
+    anterior completo, porque no hay un `referencia_id` por el cual filtrar."""
+    db.query(MovimientoCaja).filter(
+        MovimientoCaja.referencia_tipo == referencia_tipo,
+    ).delete(synchronize_session=False)
+
+
 def borrar_por_referencia(
     db: Session, referencia_tipo: str, referencia_id: uuid.UUID
 ) -> None:

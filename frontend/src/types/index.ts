@@ -86,7 +86,12 @@ export interface CajaMoneda {
   moneda: string
   ingresos_total: string
   egresos_total: string
+  /** Flujo del período: ingresos − egresos. Un día de solo compras da negativo. */
   neto: string
+  /** Plata que había al abrir el período (todo lo anterior + efectivo de arranque). */
+  saldo_apertura: string
+  /** Lo que queda al cerrar: apertura + neto. */
+  saldo_cierre: string
   lineas: CajaLinea[]
 }
 

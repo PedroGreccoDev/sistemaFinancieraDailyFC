@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.fechas import fecha_local
@@ -39,6 +39,32 @@ def _money(value: object) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"))
 
 
+def _saldo_hasta(db: Session, desde: date) -> dict[Moneda, Decimal]:
+    """Saldo acumulado por moneda ANTES de `desde` (el saldo de apertura).
+
+    Suma todo el libro de caja anterior al período, con el signo que le da su
+    tipo. Incluye la línea `SALDO_INICIAL` con el efectivo de arranque, así que
+    el resultado es la plata que realmente había en la caja al abrir ese día.
+    """
+    filas = db.execute(
+        select(
+            MovimientoCaja.moneda,
+            func.coalesce(
+                func.sum(
+                    case(
+                        (MovimientoCaja.tipo == CajaTipo.INGRESO, MovimientoCaja.monto),
+                        else_=-MovimientoCaja.monto,
+                    )
+                ),
+                0,
+            ),
+        )
+        .where(MovimientoCaja.fecha < desde)
+        .group_by(MovimientoCaja.moneda)
+    ).all()
+    return {moneda: _money(total) for moneda, total in filas}
+
+
 def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
     """Caja diaria de flujo real: ingresos y egresos efectivos por moneda.
 
@@ -59,13 +85,31 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
         )
     )
 
+    # Saldo de apertura: todo lo que pasó ANTES del período, incluido el efectivo
+    # con el que arrancó el sistema (categoría SALDO_INICIAL). Con esto el reporte
+    # cierra como una caja de verdad en cualquier rango:
+    #   apertura + ingresos − egresos = saldo de cierre
+    # y un día de solo compras se lee negativo en el neto (correcto: salió plata)
+    # sin que el saldo aparezca en rojo.
+    apertura_por_moneda = _saldo_hasta(db, desde)
+
     def _caja(moneda: Moneda) -> CajaMoneda:
-        propios = [m for m in movimientos if m.moneda == moneda]
+        del_periodo = [m for m in movimientos if m.moneda == moneda]
+
+        # El efectivo de arranque NO es un ingreso del día: si cae dentro del
+        # período consultado, suma al saldo de apertura y no a los ingresos, para
+        # no inflar el neto de la jornada en que se cargó.
+        inicial = [m for m in del_periodo if m.categoria == CajaCategoria.SALDO_INICIAL]
+        propios = [m for m in del_periodo if m.categoria != CajaCategoria.SALDO_INICIAL]
+
         ingresos = sum(
             (m.monto for m in propios if m.tipo == CajaTipo.INGRESO), Decimal("0.00")
         )
         egresos = sum(
             (m.monto for m in propios if m.tipo == CajaTipo.EGRESO), Decimal("0.00")
+        )
+        apertura = apertura_por_moneda.get(moneda, Decimal("0.00")) + sum(
+            (m.monto for m in inicial), Decimal("0.00")
         )
         lineas = [
             CajaLinea(
@@ -85,6 +129,8 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
             ingresos_total=_money(ingresos),
             egresos_total=_money(egresos),
             neto=_money(ingresos - egresos),
+            saldo_apertura=_money(apertura),
+            saldo_cierre=_money(apertura + ingresos - egresos),
             lineas=lineas,
         )
 
@@ -111,6 +157,7 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
 
 # Familia de operación de cada categoría de caja, para el filtro del panel.
 _GRUPO_POR_CATEGORIA: dict[CajaCategoria, str] = {
+    CajaCategoria.SALDO_INICIAL:         "APERTURA",
     CajaCategoria.COBRO_CUOTA:           "COBROS",
     CajaCategoria.COBRO_FIADO:           "COBROS",
     CajaCategoria.COBRO_DEUDA:           "COBROS",
@@ -128,6 +175,7 @@ _GRUPO_POR_CATEGORIA: dict[CajaCategoria, str] = {
 
 # Fallback de descripción cuando la línea de caja no trae `detalle`.
 _LABEL_CATEGORIA: dict[CajaCategoria, str] = {
+    CajaCategoria.SALDO_INICIAL:         "Saldo inicial de caja",
     CajaCategoria.COBRO_CUOTA:           "Cobro de cuota",
     CajaCategoria.COBRO_FIADO:           "Cobro de fiado",
     CajaCategoria.COBRO_DEUDA:           "Cobro de deuda",

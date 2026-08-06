@@ -58,6 +58,83 @@ en sync con la operación de negocio.
 
 ---
 
+## Apertura del sistema — los saldos con los que arrancó _(régimen definido 2026-08-06)_
+
+Cuando el sistema se puso en marcha el negocio **ya venía funcionando**: había efectivo
+en el cajón y cheques en cartera comprados tiempo atrás. Los dos son **saldos de
+apertura**, no operaciones del día. Tabla singleton `configuracion_apertura` (modelo
+`ConfiguracionApertura`, migración `0018`), servicio `svc_apertura`, router `/apertura`.
+
+- **Fecha de corte (`fecha_corte_carga_inicial`).** Hasta esa fecha **inclusive**, un
+  cheque que se carga es cartera preexistente: se marca `es_carga_inicial` y **NO asienta
+  el egreso `COMPRA_CHEQUE`**. Esa plata salió antes de que el sistema existiera y el
+  efectivo de apertura **ya la tiene descontada**: asentarla la restaría **dos veces**.
+  Es automático (lo resuelve `create_cheque` vía `svc_apertura.es_carga_inicial`), no
+  depende de que el operador tilde nada — el olvido es donde se cometen los errores.
+- **Se aplica hacia atrás:** `definir_fecha_corte` marca los cheques ya cargados dentro
+  del período y les **borra el egreso de compra** que no correspondía. Solo el egreso: si
+  el cheque ya se vendió o cobró, ese ingreso es plata real y se conserva.
+- **`resync_caja_cheque` respeta la marca** (en `svc_cheques` y en el `dispatcher`): sin
+  eso, editar un cheque de carga inicial le haría aparecer un egreso que nunca existió.
+- **Saldo inicial:** efectivo en mano al arrancar, por moneda, con **la fecha a la que
+  corresponde** —no la fecha en que se tipea—, así se puede cargar días después y los
+  reportes viejos igual cierran. Asienta una línea `SALDO_INICIAL` por moneda. Es **por
+  única vez**: rehacerlo exige `forzar=true`.
+- **`SALDO_INICIAL` no es un ingreso del día.** El reporte lo excluye de
+  `ingresos_total`/`neto` y lo suma al **saldo de apertura**; su grupo es `APERTURA`. Si
+  contara como ingreso, el día en que se carga aparecería con una entrada gigante que
+  nunca ocurrió.
+- **El reporte cierra como una caja de verdad:** `saldo_apertura` (todo lo anterior al
+  período, vía `_saldo_hasta`) `+ ingresos − egresos = saldo_cierre`. El `neto` sigue
+  siendo el **flujo** del período: un día de solo compras da negativo —correcto, salió
+  plata— sin que el **saldo** esté en rojo.
+
+---
+
+## Anulación y reversión — "Eliminar" no borra _(régimen definido 2026-08-06)_
+
+El botón **Eliminar** del panel **anula**: la fila queda con `anulado_at` /
+`anulado_por` / `motivo_anulacion` (mixin `AnulableMixin`, migración `0017`), sale de
+los listados y **sus líneas del libro de caja se revierten**. Se conserva la historia
+para poder auditar después por qué la caja dio distinto; un `DELETE` físico haría
+imposible esa reconstrucción.
+
+- **Ortogonal al estado.** Un cheque anulado conserva su `estado` histórico. **No** hay
+  valor `ANULADO` en los enums: rompería la máquina de estados y los reportes.
+- **Motor único:** `app/services/anulacion.py`, base común del botón del panel, la
+  reversión y (pendiente) el bot. `anular()` barre **todas** las `refs` de caja de la
+  entidad —un préstamo asienta con `prestamo` y `cuota`; una deuda simple con
+  `deuda_simple` y `deuda_simple_cobro`—; el catálogo `_ENTIDADES` fija ese mapa y hay
+  tests que lo custodian.
+- **Reversión ≠ anulación.** `revertir_cheque` devuelve un cheque terminal a
+  `EN_CARTERA` **sin eliminarlo** (queda disponible para volver a venderse): borra el
+  ingreso de venta/cobro y **conserva el egreso de la compra**, que sigue siendo cierto.
+  Es la única puerta que abre los estados terminales, y solo hacia atrás.
+- **Previsualización obligatoria:** `GET /anulaciones/{entidad}/{id}` devuelve el
+  impacto (líneas de caja a revertir, qué arrastra, bloqueo si lo hay) para que el panel
+  lo muestre **antes** de confirmar. `POST` en la misma ruta ejecuta. Toda anulación
+  exige `operador_id` + `motivo`.
+- **Bloqueos** (lo que no se puede deshacer solo): un fiado que ya recibió cobros
+  parciales; una **compra** de USD cuyo lote ya fue consumido; una **venta** de USD que
+  no es la última (reescribiría ganancias FIFO ya reportadas); un cheque entregado para
+  pagar un pasivo.
+- **Cascadas:** anular un cheque `FIADO` arrastra su fiado; anular un **fiado** devuelve
+  el cheque a `EN_CARTERA` (si no, quedaría entregado a crédito sin nadie debiendo).
+- **Unicidad sobre las filas vivas:** `(banco, nro_cheque)` y "un fiado por cheque" son
+  **índices únicos PARCIALES** con `WHERE anulado_at IS NULL`. El caso normal es cargar
+  mal un cheque, anularlo y recargarlo con el mismo número.
+- **Al anular divisas hay que `db.flush()` antes de `_reimputar_fifo`:** la sesión va con
+  `autoflush=False` y si no, el SELECT no ve la marca recién puesta y la operación
+  anulada sigue aportando o consumiendo stock USD.
+- **Todo listado nuevo debe filtrar `anulado_at IS NULL`.** Ya lo hacen los `list_*`, el
+  feed de Movimientos, el snapshot de pasivos, el historial de cuotas cobradas, el FIFO y
+  las búsquedas del bot.
+- **Backup:** el **JSON** conserva los anulados con su marca (copia fiel de la base; si no
+  los llevara, un ciclo export→import los resucitaría). El **Excel** los excluye: es un
+  reporte de trabajo y una operación dada de baja no debe figurar como real.
+
+---
+
 ## Módulos de negocio
 
 ### 1. Chequera Virtual
