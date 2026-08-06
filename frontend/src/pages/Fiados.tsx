@@ -10,6 +10,7 @@ import { IconPlus, IconRefresh } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
 import type { Fiado, FiadoEstado, CobrarConChequeResult, Cliente } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
+import ModalEliminar from '../components/ModalEliminar'
 
 type Filtro = 'ABIERTO' | 'todos' | 'CANCELADO'
 
@@ -318,6 +319,7 @@ export default function Fiados() {
   const [cobrandoEfectivo, setCobrandoEfectivo] = useState<Fiado | null>(null)
   const [cobrandoCheque, setCobrandoCheque] = useState<Fiado | null>(null)
   const [resultado, setResultado] = useState<CobrarConChequeResult | null>(null)
+  const [eliminando, setEliminando] = useState<Fiado | null>(null)
   const queryClient = useQueryClient()
 
   const estado = filtro === 'todos' ? undefined : filtro as FiadoEstado
@@ -349,6 +351,15 @@ export default function Fiados() {
     queryClient.invalidateQueries({ queryKey: ['fiados'] })
     queryClient.invalidateQueries({ queryKey: ['cartera'] })
     setResultado(result)
+  }
+
+  function handleEliminarSuccess() {
+    setEliminando(null)
+    queryClient.invalidateQueries({ queryKey: ['fiados'] })
+    queryClient.invalidateQueries({ queryKey: ['cartera'] })
+    queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
+    queryClient.invalidateQueries({ queryKey: ['reporte'] })
+    queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
   }
 
   function nombreCliente(id: string) { return clienteMap.get(id) ?? '…' }
@@ -426,12 +437,15 @@ export default function Fiados() {
                   </span>
                   <span style={{ fontFamily: FM, fontSize: '0.9rem', fontWeight: 700, whiteSpace: 'nowrap', color: fiado.estado === 'ABIERTO' ? '#fbbf24' : 'rgba(100,116,139,0.5)' }}>{fmtARS(fiado.saldo_pendiente)}</span>
                 </div>
-                {fiado.estado === 'ABIERTO' && (
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
-                    <button onClick={() => setCobrandoEfectivo(fiado)} style={{ ...btnFlat('primary'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Efectivo</button>
-                    <button onClick={() => setCobrandoCheque(fiado)} style={{ ...btnFlat('success'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Con cheque</button>
-                  </div>
-                )}
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
+                  {fiado.estado === 'ABIERTO' && (
+                    <>
+                      <button onClick={() => setCobrandoEfectivo(fiado)} style={{ ...btnFlat('primary'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Efectivo</button>
+                      <button onClick={() => setCobrandoCheque(fiado)} style={{ ...btnFlat('success'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Con cheque</button>
+                    </>
+                  )}
+                  <button onClick={() => setEliminando(fiado)} style={{ ...btnBordered('danger'), flex: fiado.estado === 'ABIERTO' ? '0 0 auto' : 1, fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}>Eliminar</button>
+                </div>
               </div>
             ))}
           </div>
@@ -466,12 +480,15 @@ export default function Fiados() {
                     <td style={{ ...TD, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', whiteSpace: 'nowrap' }}>{fmtDate(fiado.fecha_fiado)}</td>
                     <td style={TD}><EstadoBadge estado={fiado.estado} /></td>
                     <td style={{ ...TD, textAlign: 'right' }}>
-                      {fiado.estado === 'ABIERTO' && (
-                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                          <button onClick={() => setCobrandoEfectivo(fiado)} style={{ ...btnGhost('primary'), fontSize: '0.68rem', padding: 0, whiteSpace: 'nowrap' }}>Efectivo</button>
-                          <button onClick={() => setCobrandoCheque(fiado)} style={{ ...btnGhost('success'), fontSize: '0.68rem', padding: 0, whiteSpace: 'nowrap' }}>Con cheque</button>
-                        </div>
-                      )}
+                      <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+                        {fiado.estado === 'ABIERTO' && (
+                          <>
+                            <button onClick={() => setCobrandoEfectivo(fiado)} style={{ ...btnGhost('primary'), fontSize: '0.68rem', padding: 0, whiteSpace: 'nowrap' }}>Efectivo</button>
+                            <button onClick={() => setCobrandoCheque(fiado)} style={{ ...btnGhost('success'), fontSize: '0.68rem', padding: 0, whiteSpace: 'nowrap' }}>Con cheque</button>
+                          </>
+                        )}
+                        <button onClick={() => setEliminando(fiado)} style={{ ...btnBordered('danger'), fontSize: '0.68rem', padding: '2px 8px', whiteSpace: 'nowrap' }}>Eliminar</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -486,6 +503,7 @@ export default function Fiados() {
       {cobrandoEfectivo && <ModalEfectivo fiado={cobrandoEfectivo} clienteNombre={nombreCliente(cobrandoEfectivo.cliente_id)} onClose={() => setCobrandoEfectivo(null)} onSuccess={handleEfectivoSuccess} />}
       {cobrandoCheque && <ModalCheque fiado={cobrandoCheque} clienteNombre={nombreCliente(cobrandoCheque.cliente_id)} onClose={() => setCobrandoCheque(null)} onSuccess={handleChequeSuccess} />}
       {resultado && <ModalResultado result={resultado} onClose={() => setResultado(null)} />}
+      {eliminando && <ModalEliminar entidad="fiado" id={eliminando.id} onClose={() => setEliminando(null)} onSuccess={handleEliminarSuccess} />}
     </div>
   )
 }

@@ -9,6 +9,7 @@ import { SkeletonRows } from '../components/Skeleton'
 import type { GastoOperativo, Moneda } from '../types'
 import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
+import ModalEliminar from '../components/ModalEliminar'
 
 type PresetFecha = 'HOY' | 'SEMANA' | 'MES' | 'PERSONALIZADO'
 
@@ -167,6 +168,7 @@ export default function Gastos() {
   const [showPicker, setShowPicker]   = useState(false)
   const [mostrarNuevo, setMostrarNuevo] = useState(false)
   const [gastoEditar, setGastoEditar] = useState<GastoOperativo | null>(null)
+  const [gastoEliminar, setGastoEliminar] = useState<GastoOperativo | null>(null)
   const queryClient = useQueryClient()
 
   const { data: gastos = [], isLoading } = useQuery({
@@ -183,6 +185,15 @@ export default function Gastos() {
   function handleEditarSuccess() {
     setGastoEditar(null)
     queryClient.invalidateQueries({ queryKey: ['gastos'] })
+  }
+
+  function handleEliminarSuccess() {
+    setGastoEliminar(null)
+    queryClient.invalidateQueries({ queryKey: ['gastos'] })
+    // La baja revierte el egreso de caja: reporte y feed quedan desactualizados.
+    queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
+    queryClient.invalidateQueries({ queryKey: ['reporte'] })
+    queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
   }
 
   const { desde, hasta } = getRango(preset, customDesde, customHasta)
@@ -586,6 +597,14 @@ export default function Gastos() {
                     >
                       Editar
                     </button>
+
+                    <button
+                      onClick={() => setGastoEliminar(g)}
+                      title="Eliminar gasto"
+                      style={{ ...btnBordered('danger'), fontSize: '0.66rem', padding: '2px 9px', flexShrink: 0 }}
+                    >
+                      Eliminar
+                    </button>
                   </div>
                 ))}
               </div>
@@ -627,6 +646,7 @@ export default function Gastos() {
 
       {mostrarNuevo && <ModalNuevoGasto onClose={() => setMostrarNuevo(false)} onSuccess={handleNuevoSuccess} />}
       {gastoEditar && <ModalEditarGasto gasto={gastoEditar} onClose={() => setGastoEditar(null)} onSuccess={handleEditarSuccess} />}
+      {gastoEliminar && <ModalEliminar entidad="gasto" id={gastoEliminar.id} onClose={() => setGastoEliminar(null)} onSuccess={handleEliminarSuccess} />}
     </div>
   )
 }

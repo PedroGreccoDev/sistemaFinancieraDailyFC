@@ -174,7 +174,11 @@ def get_prestamo(db: Session, prestamo_id: uuid.UUID) -> Prestamo:
 
 
 def list_prestamos(db: Session, estado: PrestamoEstado | None = None) -> list[Prestamo]:
-    query = select(Prestamo).options(selectinload(Prestamo.cuotas_detalle))
+    query = (
+        select(Prestamo)
+        .options(selectinload(Prestamo.cuotas_detalle))
+        .where(Prestamo.anulado_at.is_(None))
+    )
     if estado is not None:
         query = query.where(Prestamo.estado == estado)
     return list(db.scalars(query.order_by(Prestamo.created_at.desc())))

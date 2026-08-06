@@ -9,6 +9,7 @@ import { IconPlus, IconRefresh } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
 import type { Cheque, MedioPago, Moneda, Pasivo, PasivoEstado } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
+import ModalEliminar from '../components/ModalEliminar'
 
 type Filtro = 'todos' | PasivoEstado
 
@@ -389,6 +390,7 @@ export default function Pasivos() {
   const [pasivoEfectivo, setPasivoEfectivo] = useState<Pasivo | null>(null)
   const [pasivoCheque, setPasivoCheque] = useState<Pasivo | null>(null)
   const [pasivoEditar, setPasivoEditar] = useState<Pasivo | null>(null)
+  const [pasivoEliminar, setPasivoEliminar] = useState<Pasivo | null>(null)
   const [mostrarNueva, setMostrarNueva] = useState(false)
   const queryClient = useQueryClient()
 
@@ -404,9 +406,14 @@ export default function Pasivos() {
   const totalUSD = pendientes.filter((p) => p.moneda === 'USD').reduce((acc, p) => acc + parseFloat(p.saldo_pendiente), 0)
 
   function handleSuccess() {
-    setPasivoEfectivo(null); setPasivoCheque(null); setPasivoEditar(null); setMostrarNueva(false)
+    setPasivoEfectivo(null); setPasivoCheque(null); setPasivoEditar(null)
+    setPasivoEliminar(null); setMostrarNueva(false)
     queryClient.invalidateQueries({ queryKey: ['pasivos'] })
     queryClient.invalidateQueries({ queryKey: ['cheques'] })
+    // La baja revierte líneas de caja: el reporte y el feed quedan desactualizados.
+    queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
+    queryClient.invalidateQueries({ queryKey: ['reporte'] })
+    queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
   }
 
   return (
@@ -491,6 +498,7 @@ export default function Pasivos() {
                     </>
                   )}
                   <button onClick={() => setPasivoEditar(pasivo)} style={{ ...btnBordered('neutral'), flex: pasivo.estado === 'PENDIENTE' ? '0 0 auto' : 1, fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}>Editar</button>
+                  <button onClick={() => setPasivoEliminar(pasivo)} style={{ ...btnBordered('danger'), flex: '0 0 auto', fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}>Eliminar</button>
                 </div>
               </div>
             ))}
@@ -529,6 +537,7 @@ export default function Pasivos() {
                           </>
                         )}
                         <button onClick={() => setPasivoEditar(pasivo)} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>Editar</button>
+                        <button onClick={() => setPasivoEliminar(pasivo)} style={{ ...btnBordered('danger'), fontSize: '0.68rem', padding: '2px 8px' }}>Eliminar</button>
                       </div>
                     </td>
                   </tr>
@@ -544,6 +553,7 @@ export default function Pasivos() {
       {pasivoEfectivo && <ModalPagar pasivo={pasivoEfectivo} onClose={() => setPasivoEfectivo(null)} onSuccess={handleSuccess} />}
       {pasivoCheque && <ModalCancelarCheque pasivo={pasivoCheque} onClose={() => setPasivoCheque(null)} onSuccess={handleSuccess} />}
       {pasivoEditar && <ModalEditarDeuda pasivo={pasivoEditar} onClose={() => setPasivoEditar(null)} onSuccess={handleSuccess} />}
+      {pasivoEliminar && <ModalEliminar entidad="pasivo" id={pasivoEliminar.id} onClose={() => setPasivoEliminar(null)} onSuccess={handleSuccess} />}
     </div>
   )
 }

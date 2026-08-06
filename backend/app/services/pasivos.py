@@ -72,7 +72,7 @@ def get_pasivo(db: Session, pasivo_id: uuid.UUID) -> Pasivo:
 
 
 def list_pasivos(db: Session, estado: PasivoEstado | None = None) -> list[Pasivo]:
-    stmt = select(Pasivo)
+    stmt = select(Pasivo).where(Pasivo.anulado_at.is_(None))
     if estado is not None:
         stmt = stmt.where(Pasivo.estado == estado)
     stmt = stmt.order_by(Pasivo.fecha_vencimiento.asc().nulls_last(), Pasivo.created_at.desc())

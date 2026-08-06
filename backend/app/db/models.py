@@ -118,6 +118,31 @@ class Base(DeclarativeBase):
 
 
 # ══════════════════════════════════════════════════════════════════════
+#  MIXIN: Anulable (borrado lógico) — régimen definido 2026-08-06
+# ══════════════════════════════════════════════════════════════════════
+
+class AnulableMixin:
+    """Marca de anulación para las entidades que el panel puede "eliminar".
+
+    Eliminar NO borra la fila: la anula. El registro conserva su historia —para
+    poder auditar después por qué la caja dio distinto— pero sale de los listados
+    y sus líneas de caja se revierten.
+
+    Es **ortogonal al estado** de cada entidad: un cheque anulado conserva su
+    `estado` histórico. No hay valor ANULADO en los enums de estado, que rompería
+    la máquina de estados del cheque y los reportes.
+    """
+
+    anulado_at:       Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    anulado_por:      Mapped[str | None]      = mapped_column(sa.String(80), nullable=True)
+    motivo_anulacion: Mapped[str | None]      = mapped_column(sa.Text(),     nullable=True)
+
+    @property
+    def anulado(self) -> bool:
+        return self.anulado_at is not None
+
+
+# ══════════════════════════════════════════════════════════════════════
 #  MODELO: Cliente
 # ══════════════════════════════════════════════════════════════════════
 
@@ -183,7 +208,7 @@ _TRANSICIONES: dict[ChequeEstado, frozenset[ChequeEstado]] = {
 #  MODELO: Cheque (con máquina de estados integrada)
 # ══════════════════════════════════════════════════════════════════════
 
-class Cheque(Base):
+class Cheque(AnulableMixin, Base):
     __tablename__ = "cheques"
     __table_args__ = (
         sa.CheckConstraint("monto > 0",                             name="ck_cheques_monto_positive"),
@@ -202,7 +227,15 @@ class Cheque(Base):
         # identidad es la PK subrogada `id` y la unicidad es (banco, nro_cheque).
         # Nota: en Postgres NULL es distinto de NULL, así que cheques sin banco
         # detectado no chocan entre sí (se permiten cargar igual).
-        sa.UniqueConstraint("banco", "nro_cheque", name="uq_cheques_banco_nro"),
+        # La unicidad es un índice ÚNICO PARCIAL sobre los cheques vivos
+        # (migración 0017): un cheque anulado libera su número para que se pueda
+        # volver a cargar corregido con el mismo (banco, nro).
+        sa.Index(
+            "uq_cheques_banco_nro_vivos",
+            "banco", "nro_cheque",
+            unique=True,
+            postgresql_where=sa.text("anulado_at IS NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -315,7 +348,7 @@ class Cheque(Base):
 #  MODELO: Prestamo
 # ══════════════════════════════════════════════════════════════════════
 
-class Prestamo(Base):
+class Prestamo(AnulableMixin, Base):
     __tablename__ = "prestamos"
     __table_args__ = (
         sa.CheckConstraint("credito > 0",               name="ck_prestamos_credito_positive"),
@@ -404,7 +437,7 @@ class Cuota(Base):
 #  MODELO: MovimientoEfectivo
 # ══════════════════════════════════════════════════════════════════════
 
-class MovimientoEfectivo(Base):
+class MovimientoEfectivo(AnulableMixin, Base):
     __tablename__ = "movimientos_efectivo"
     __table_args__ = (
         sa.CheckConstraint("monto > 0",               name="ck_movimientos_efectivo_monto_positive"),
@@ -447,7 +480,7 @@ class MovimientoEfectivo(Base):
 #  MODELO: Fiado (deuda de cliente por cheque entregado en crédito)
 # ══════════════════════════════════════════════════════════════════════
 
-class Fiado(Base):
+class Fiado(AnulableMixin, Base):
     __tablename__ = "fiados"
     __table_args__ = (
         sa.CheckConstraint("monto_original > 0",   name="ck_fiados_monto_positive"),
@@ -456,6 +489,14 @@ class Fiado(Base):
             "porcentaje_venta >= 0 AND porcentaje_venta <= 100",
             name="ck_fiados_porcentaje_range",
         ),
+        # Un cheque origina un solo fiado, pero solo entre los fiados vivos: si el
+        # fiado se anula, el cheque vuelve a poder fiarse (migración 0017).
+        sa.Index(
+            "uq_fiados_cheque_vivos",
+            "cheque_id",
+            unique=True,
+            postgresql_where=sa.text("anulado_at IS NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -463,7 +504,7 @@ class Fiado(Base):
     cheque_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         sa.ForeignKey("cheques.id", ondelete="RESTRICT"),
-        unique=True, index=True,
+        index=True,
     )
     cliente_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -499,7 +540,7 @@ class Fiado(Base):
 #  MODELO: DeudaSimple (deuda libre de un cliente — sin cuotas ni cheque)
 # ══════════════════════════════════════════════════════════════════════
 
-class DeudaSimple(Base):
+class DeudaSimple(AnulableMixin, Base):
     """Cuenta por cobrar de un cliente que no es un préstamo con cuotas ni un
     fiado de cheque: una deuda libre con su razón (concepto), monto, moneda y
     fecha. Al registrarla sale un EGRESO de caja (se entregó la plata) y al
@@ -549,7 +590,7 @@ class DeudaSimple(Base):
 #  MODELO: Pasivo (deudas del negocio con terceros)
 # ══════════════════════════════════════════════════════════════════════
 
-class Pasivo(Base):
+class Pasivo(AnulableMixin, Base):
     __tablename__ = "pasivos"
     __table_args__ = (
         sa.CheckConstraint("monto > 0", name="ck_pasivos_monto_positive"),
@@ -585,7 +626,7 @@ class Pasivo(Base):
 #  MODELO: GastoOperativo
 # ══════════════════════════════════════════════════════════════════════
 
-class GastoOperativo(Base):
+class GastoOperativo(AnulableMixin, Base):
     __tablename__ = "gastos_operativos"
     __table_args__ = (
         sa.CheckConstraint("monto > 0", name="ck_gastos_operativos_monto_positive"),

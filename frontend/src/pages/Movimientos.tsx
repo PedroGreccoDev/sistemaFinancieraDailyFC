@@ -9,6 +9,7 @@ import { SkeletonRows } from '../components/Skeleton'
 import type { MovimientoEfectivo, MovimientoUnificado, MovimientoGrupo, MovimientoFlujo } from '../types'
 import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
+import ModalEliminar from '../components/ModalEliminar'
 
 type GrupoFiltro = 'TODOS' | MovimientoGrupo
 type FlujoFiltro = 'TODOS' | MovimientoFlujo
@@ -165,6 +166,7 @@ export default function Movimientos() {
   const [customHasta, setCustomHasta] = useState<string | null>(null)
   const [showPicker, setShowPicker]   = useState(false)
   const [editarDivisaId, setEditarDivisaId] = useState<string | null>(null)
+  const [eliminarDivisaId, setEliminarDivisaId] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   const { desde, hasta } = getRango(preset, customDesde, customHasta)
@@ -200,6 +202,15 @@ export default function Movimientos() {
     setEditarDivisaId(null)
     queryClient.invalidateQueries({ queryKey: ['movimientos'] })
     queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
+  }
+
+  function handleEliminarDivisa() {
+    setEliminarDivisaId(null)
+    queryClient.invalidateQueries({ queryKey: ['movimientos'] })
+    queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
+    // Sacar la operación de la cadena reimputa el FIFO: cambian ganancias del reporte.
+    queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
+    queryClient.invalidateQueries({ queryKey: ['reporte'] })
   }
 
   const movEditar = editarDivisaId ? divisas.find((m) => m.id === editarDivisaId) ?? null : null
@@ -384,7 +395,10 @@ export default function Movimientos() {
                   ? m.descripcion.charAt(0).toUpperCase()
                   : cfg.initial
                 const montoFmt = fmtMonto(m.monto, m.moneda)
-                const esDivisaEditable = m.grupo === 'DIVISAS' && m.referencia_tipo === 'movimiento' && m.referencia_id != null
+                // El libro de caja guarda las divisas con referencia_tipo
+                // 'movimiento_efectivo' (svc_movimientos._REF). Comparar contra
+                // 'movimiento' hacía que los botones nunca aparecieran.
+                const esDivisaEditable = m.grupo === 'DIVISAS' && m.referencia_tipo === 'movimiento_efectivo' && m.referencia_id != null
                 const color = m.flujo === 'EGRESO' ? '#f87171'
                   : m.flujo === 'NEUTRO' ? 'rgba(100,116,139,0.7)'
                   : 'var(--text-1)'
@@ -447,15 +461,25 @@ export default function Movimientos() {
                       {prefijo}{montoFmt}
                     </span>
 
-                    {/* Editar — solo divisas (las demás operaciones se editan en su página) */}
+                    {/* Editar/Eliminar — solo divisas (las demás operaciones se
+                        manejan en su propia página, donde está su contexto). */}
                     {esDivisaEditable && (
-                      <button
-                        onClick={() => setEditarDivisaId(m.referencia_id)}
-                        title="Editar operación de divisas"
-                        style={{ ...btnBordered('neutral'), fontSize: '0.66rem', padding: '2px 9px', flexShrink: 0 }}
-                      >
-                        Editar
-                      </button>
+                      <>
+                        <button
+                          onClick={() => setEditarDivisaId(m.referencia_id)}
+                          title="Editar operación de divisas"
+                          style={{ ...btnBordered('neutral'), fontSize: '0.66rem', padding: '2px 9px', flexShrink: 0 }}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => setEliminarDivisaId(m.referencia_id)}
+                          title="Eliminar la operación y revertir su impacto en caja"
+                          style={{ ...btnBordered('danger'), fontSize: '0.66rem', padding: '2px 9px', flexShrink: 0 }}
+                        >
+                          Eliminar
+                        </button>
+                      </>
                     )}
                   </div>
                 )
@@ -471,6 +495,14 @@ export default function Movimientos() {
           editableDinero={dineroEditable(movEditar)}
           onClose={() => setEditarDivisaId(null)}
           onSuccess={handleEditDivisa}
+        />
+      )}
+      {eliminarDivisaId && (
+        <ModalEliminar
+          entidad="movimiento_efectivo"
+          id={eliminarDivisaId}
+          onClose={() => setEliminarDivisaId(null)}
+          onSuccess={handleEliminarDivisa}
         />
       )}
     </div>

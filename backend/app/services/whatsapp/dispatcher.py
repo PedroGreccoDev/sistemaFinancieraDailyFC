@@ -498,6 +498,7 @@ def _gastos_parecidos_hoy(
             select(GastoOperativo).where(
                 GastoOperativo.fecha_operacion == fecha,
                 GastoOperativo.moneda == moneda,
+                GastoOperativo.anulado_at.is_(None),
             )
         ).all()
     )
@@ -665,6 +666,7 @@ def _buscar_fiado_abierto(db: Session, cliente_nombre: str) -> Fiado | None:
             select(Fiado).where(
                 Fiado.cliente_id == cliente.id,
                 Fiado.estado == FiadoEstado.ABIERTO,
+                Fiado.anulado_at.is_(None),
             )
         ).all()
     )
@@ -912,7 +914,10 @@ def _resolver_gasto_a_editar(
     # Atajo: "el último" sin ningún selector adicional.
     if usar_ultimo and monto_parsed is None and hora_parsed is None:
         gasto = db.scalars(
-            select(GastoOperativo).order_by(GastoOperativo.created_at.desc()).limit(1)
+            select(GastoOperativo)
+            .where(GastoOperativo.anulado_at.is_(None))
+            .order_by(GastoOperativo.created_at.desc())
+            .limit(1)
         ).first()
         if gasto is None:
             return None, "❓ No encontré ningún gasto registrado."
@@ -924,7 +929,10 @@ def _resolver_gasto_a_editar(
     candidatos = list(
         db.scalars(
             select(GastoOperativo)
-            .where(GastoOperativo.fecha_operacion == hoy_local())
+            .where(
+                GastoOperativo.fecha_operacion == hoy_local(),
+                GastoOperativo.anulado_at.is_(None),
+            )
             .order_by(GastoOperativo.created_at.desc())
         ).all()
     )
@@ -1007,7 +1015,10 @@ def _editar_pasivo(db: Session, identificador: str, campo: str, nuevo_valor: Any
     if identificador.lower() == "ultimo":
         pasivo = db.scalars(
             select(Pasivo)
-            .where(Pasivo.estado == PasivoEstado.PENDIENTE)
+            .where(
+                Pasivo.estado == PasivoEstado.PENDIENTE,
+                Pasivo.anulado_at.is_(None),
+            )
             .order_by(Pasivo.created_at.desc())
             .limit(1)
         ).first()
@@ -1018,6 +1029,7 @@ def _editar_pasivo(db: Session, identificador: str, campo: str, nuevo_valor: Any
                 select(Pasivo).where(
                     Pasivo.acreedor.ilike(f"%{identificador}%"),
                     Pasivo.estado == PasivoEstado.PENDIENTE,
+                    Pasivo.anulado_at.is_(None),
                 )
             ).all()
         )
@@ -1107,6 +1119,7 @@ def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
             select(Prestamo).where(
                 Prestamo.cliente_id == cliente.id,
                 Prestamo.estado == PrestamoEstado.ACTIVO,
+                Prestamo.anulado_at.is_(None),
             )
         ).all()
     )
@@ -1142,6 +1155,7 @@ def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
             select(Fiado).where(
                 Fiado.cliente_id == cliente.id,
                 Fiado.estado == FiadoEstado.ABIERTO,
+                Fiado.anulado_at.is_(None),
             )
         ).all()
     )
@@ -1163,7 +1177,10 @@ def _consulta_prestamos(db: Session) -> DispatchResult:
     prestamos: list[Prestamo] = list(
         db.scalars(
             select(Prestamo)
-            .where(Prestamo.estado == PrestamoEstado.ACTIVO)
+            .where(
+                Prestamo.estado == PrestamoEstado.ACTIVO,
+                Prestamo.anulado_at.is_(None),
+            )
             .order_by(Prestamo.created_at.asc())
         ).all()
     )

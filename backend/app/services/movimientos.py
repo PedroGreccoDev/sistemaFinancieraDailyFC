@@ -114,6 +114,7 @@ def create_movimiento(
                     .where(
                         MovimientoEfectivo.tipo == MovimientoEfectivoTipo.COMPRA,
                         MovimientoEfectivo.usd_restante > 0,
+                        MovimientoEfectivo.anulado_at.is_(None),
                     )
                     .order_by(
                         MovimientoEfectivo.fecha_operacion.asc(),
@@ -159,7 +160,11 @@ def create_movimiento(
 
 def list_movimientos(db: Session) -> list[MovimientoEfectivo]:
     return list(
-        db.scalars(select(MovimientoEfectivo).order_by(MovimientoEfectivo.created_at.desc()))
+        db.scalars(
+            select(MovimientoEfectivo)
+            .where(MovimientoEfectivo.anulado_at.is_(None))
+            .order_by(MovimientoEfectivo.created_at.desc())
+        )
     )
 
 
@@ -178,9 +183,11 @@ def _reimputar_fifo(db: Session) -> None:
     reflejar una edición sin arrastrar el estado previo. Como editar solo se
     permite sobre lotes intactos y la última venta, esto reproduce idénticamente el
     resto de las operaciones y solo cambia la editada."""
+    # Las operaciones anuladas salen de la cadena: no aportan stock ni consumen lotes.
     movs = list(
         db.scalars(
             select(MovimientoEfectivo)
+            .where(MovimientoEfectivo.anulado_at.is_(None))
             .order_by(
                 MovimientoEfectivo.fecha_operacion.asc(),
                 MovimientoEfectivo.created_at.asc(),

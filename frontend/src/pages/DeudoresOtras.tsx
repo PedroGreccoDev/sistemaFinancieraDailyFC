@@ -10,6 +10,7 @@ import { SkeletonRows } from '../components/Skeleton'
 import DropdownFilter from '../components/DropdownFilter'
 import ModalNuevaDeudaSimple from '../components/ModalNuevaDeudaSimple'
 import ModalPagarDeuda, { type DeudaItem } from '../components/ModalPagarDeuda'
+import ModalEliminar from '../components/ModalEliminar'
 import type { DeudaSimple, DeudaSimpleEstado, Moneda } from '../types'
 
 type Filtro = 'todos' | DeudaSimpleEstado
@@ -100,6 +101,7 @@ export default function DeudoresOtras() {
   const [creando, setCreando] = useState(false)
   const [cobrando, setCobrando] = useState<DeudaItem | null>(null)
   const [editando, setEditando] = useState<DeudaSimple | null>(null)
+  const [eliminando, setEliminando] = useState<DeudaSimple | null>(null)
   const queryClient = useQueryClient()
 
   const estado = filtro === 'todos' ? undefined : (filtro as DeudaSimpleEstado)
@@ -123,9 +125,13 @@ export default function DeudoresOtras() {
   }
 
   function handleSuccess() {
-    setCreando(false); setCobrando(null); setEditando(null)
+    setCreando(false); setCobrando(null); setEditando(null); setEliminando(null)
     invalidar()
     queryClient.invalidateQueries({ queryKey: ['clientes'] })
+    // Una baja revierte líneas de caja: reporte y feed quedan desactualizados.
+    queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
+    queryClient.invalidateQueries({ queryKey: ['reporte'] })
+    queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
   }
 
   return (
@@ -205,6 +211,7 @@ export default function DeudoresOtras() {
                       <button onClick={() => setCobrando({ tipo: 'deuda_simple', id: d.id, clienteNombre: nombreDe.get(d.cliente_id) ?? '—', label: d.concepto, saldo: parseFloat(d.saldo_pendiente), moneda: d.moneda })} style={{ ...btnFlat('success'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Cobrar</button>
                     )}
                     <button onClick={() => setEditando(d)} style={{ ...btnBordered('neutral'), flex: d.estado === 'ABIERTA' ? '0 0 auto' : 1, fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}>Editar</button>
+                    <button onClick={() => setEliminando(d)} style={{ ...btnBordered('danger'), flex: '0 0 auto', fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}>Eliminar</button>
                   </div>
                 </div>
               ))}
@@ -240,6 +247,7 @@ export default function DeudoresOtras() {
                             <button onClick={() => setCobrando({ tipo: 'deuda_simple', id: d.id, clienteNombre: nombreDe.get(d.cliente_id) ?? '—', label: d.concepto, saldo: parseFloat(d.saldo_pendiente), moneda: d.moneda })} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Cobrar</button>
                           )}
                           <button onClick={() => setEditando(d)} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>Editar</button>
+                          <button onClick={() => setEliminando(d)} style={{ ...btnBordered('danger'), fontSize: '0.68rem', padding: '2px 8px' }}>Eliminar</button>
                         </div>
                       </td>
                     </tr>
@@ -254,6 +262,7 @@ export default function DeudoresOtras() {
       {creando && <ModalNuevaDeudaSimple onClose={() => setCreando(false)} onSuccess={handleSuccess} />}
       {cobrando && <ModalPagarDeuda deuda={cobrando} onClose={() => setCobrando(null)} onSuccess={handleSuccess} />}
       {editando && <ModalEditarDeudaSimple deuda={editando} onClose={() => setEditando(null)} onSuccess={handleSuccess} />}
+      {eliminando && <ModalEliminar entidad="deuda_simple" id={eliminando.id} onClose={() => setEliminando(null)} onSuccess={handleSuccess} />}
     </div>
   )
 }

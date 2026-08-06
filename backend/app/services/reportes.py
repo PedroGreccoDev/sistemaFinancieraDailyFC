@@ -210,6 +210,7 @@ def get_movimientos_unificados(
             .where(
                 func.date(Cheque.created_at) >= desde - timedelta(days=1),
                 func.date(Cheque.created_at) <= hasta + timedelta(days=1),
+                Cheque.anulado_at.is_(None),
             )
             .order_by(Cheque.created_at.asc())
         )
@@ -260,6 +261,7 @@ def get_cobros_cuotas_historial(
                 Cuota.estado == CuotaEstado.COBRADA,
                 Cuota.fecha_cobro >= desde,
                 Cuota.fecha_cobro <= hasta,
+                Prestamo.anulado_at.is_(None),
             )
             .order_by(Cuota.fecha_cobro.desc(), Cuota.updated_at.desc())
         )
@@ -288,6 +290,7 @@ def _get_saldo_pasivos(db: Session) -> SaldoPasivos:
                 select(func.coalesce(func.sum(Pasivo.saldo_pendiente), 0)).where(
                     Pasivo.estado == PasivoEstado.PENDIENTE,
                     Pasivo.moneda == moneda,
+                    Pasivo.anulado_at.is_(None),
                 )
             )
         )

@@ -58,7 +58,7 @@ def get_deuda_simple(db: Session, deuda_id: uuid.UUID) -> DeudaSimple:
 def list_deudas_simples(
     db: Session, estado: DeudaSimpleEstado | None = None
 ) -> list[DeudaSimple]:
-    query = select(DeudaSimple)
+    query = select(DeudaSimple).where(DeudaSimple.anulado_at.is_(None))
     if estado is not None:
         query = query.where(DeudaSimple.estado == estado)
     return list(db.scalars(query.order_by(DeudaSimple.created_at.desc())))

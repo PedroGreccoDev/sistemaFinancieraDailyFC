@@ -41,7 +41,7 @@ def get_fiado(db: Session, fiado_id: uuid.UUID) -> Fiado:
 
 
 def list_fiados(db: Session, estado: FiadoEstado | None = None) -> list[Fiado]:
-    query = select(Fiado)
+    query = select(Fiado).where(Fiado.anulado_at.is_(None))
     if estado is not None:
         query = query.where(Fiado.estado == estado)
     return list(db.scalars(query.order_by(Fiado.created_at.desc())))

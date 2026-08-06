@@ -8,6 +8,7 @@ import { useToast } from '../lib/toast'
 import { Skeleton } from '../components/Skeleton'
 import { IconPlus } from '../components/icons'
 import ModalPagarDeuda, { type DeudaItem } from '../components/ModalPagarDeuda'
+import ModalEliminar from '../components/ModalEliminar'
 import type { Prestamo, Cuota, Moneda, Frecuencia, Cliente } from '../types'
 
 type Semaforo = 'mora' | 'proximo' | 'ok' | 'cancelado'
@@ -623,6 +624,7 @@ export default function DeudoresPrestamos() {
   const [cobrandoCuota, setCobrandoCuota] = useState<Prestamo | null>(null)
   const [pagoLibre, setPagoLibre] = useState<DeudaItem | null>(null)
   const [editandoPrestamo, setEditandoPrestamo] = useState<Prestamo | null>(null)
+  const [eliminandoPrestamo, setEliminandoPrestamo] = useState<Prestamo | null>(null)
   const queryClient = useQueryClient()
 
   const { data: prestamos, isLoading: loadingP, error: errP } = useQuery({
@@ -669,6 +671,15 @@ export default function DeudoresPrestamos() {
   function handleEditarPrestamo() {
     setEditandoPrestamo(null)
     queryClient.invalidateQueries({ queryKey: ['prestamos'] })
+  }
+
+  function handleEliminarPrestamo() {
+    setEliminandoPrestamo(null)
+    queryClient.invalidateQueries({ queryKey: ['prestamos'] })
+    // La baja revierte el otorgamiento y los cobros de cuota asentados en caja.
+    queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
+    queryClient.invalidateQueries({ queryKey: ['reporte'] })
+    queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
   }
 
   return (
@@ -794,11 +805,19 @@ export default function DeudoresPrestamos() {
                     type="button"
                     onClick={() => setEditandoPrestamo(p)}
                     title="Corregir la carga del préstamo"
-                    style={{ ...btnBordered('neutral'), flex: '1 1 100%', padding: '0.45rem 0.8rem', fontSize: '0.75rem', textAlign: 'center' }}
+                    style={{ ...btnBordered('neutral'), flex: '1 1 8rem', padding: '0.45rem 0.8rem', fontSize: '0.75rem', textAlign: 'center' }}
                   >
                     Editar
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setEliminandoPrestamo(p)}
+                  title="Eliminar el préstamo y revertir sus movimientos de caja"
+                  style={{ ...btnBordered('danger'), flex: cobradas === 0 ? '1 1 8rem' : '1 1 100%', padding: '0.45rem 0.8rem', fontSize: '0.75rem', textAlign: 'center' }}
+                >
+                  Eliminar
+                </button>
               </div>
             </div>
           )
@@ -855,6 +874,14 @@ export default function DeudoresPrestamos() {
           clienteNombre={clienteMap.get(editandoPrestamo.cliente_id) ?? '…'}
           onClose={() => setEditandoPrestamo(null)}
           onSuccess={handleEditarPrestamo}
+        />
+      )}
+      {eliminandoPrestamo && (
+        <ModalEliminar
+          entidad="prestamo"
+          id={eliminandoPrestamo.id}
+          onClose={() => setEliminandoPrestamo(null)}
+          onSuccess={handleEliminarPrestamo}
         />
       )}
     </div>

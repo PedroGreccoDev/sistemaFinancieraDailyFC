@@ -41,7 +41,11 @@ def create_gasto(db: Session, payload: GastoOperativoCreate) -> GastoOperativo:
 
 
 def list_gastos(db: Session) -> list[GastoOperativo]:
-    stmt = select(GastoOperativo).order_by(GastoOperativo.fecha_operacion.desc())
+    stmt = (
+        select(GastoOperativo)
+        .where(GastoOperativo.anulado_at.is_(None))
+        .order_by(GastoOperativo.fecha_operacion.desc())
+    )
     return list(db.scalars(stmt).all())
 
 

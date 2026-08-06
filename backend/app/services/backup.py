@@ -29,17 +29,23 @@ ALEMBIC_REVISION = "0013"
 
 # ── Columnas por tabla ──────────────────────────────────────────────────────
 
+# Marca de anulación (migración 0017). Va en toda tabla anulable: si el backup no
+# la llevara, un ciclo export→import resucitaría los registros anulados y la caja
+# volvería a descuadrar.
+_ANUL = ["anulado_at", "anulado_por", "motivo_anulacion"]
+
 _CL = ["id", "nombre", "cuit", "telefono", "created_at", "updated_at"]
 _CH = [
     "id", "nro_cheque", "banco", "monto", "fecha_emision", "fecha_pago",
     "porcentaje_compra", "porcentaje_venta", "ganancia", "estado",
     "ultimo_evento_manual_at", "ultimo_operador_id", "ultimo_motivo_manual",
     "foto", "foto_mime", "cliente_origen_id", "cliente_destino_id",
-    "created_at", "updated_at",
+    "created_at", "updated_at", *_ANUL,
 ]
 _PR = [
     "id", "cliente_id", "credito", "moneda", "cuotas", "frecuencia",
     "total_a_cobrar", "ganancia", "estado", "fecha_inicio", "created_at", "updated_at",
+    *_ANUL,
 ]
 _CU = [
     "id", "prestamo_id", "numero_cuota", "fecha_vencimiento", "monto", "monto_pagado",
@@ -48,24 +54,25 @@ _CU = [
 _MO = [
     "id", "cliente_id", "tipo", "moneda", "monto", "cotizacion_aplicada",
     "ganancia", "usd_restante", "fecha_operacion", "observaciones", "created_at", "updated_at",
+    *_ANUL,
 ]
 _FI = [
     "id", "cheque_id", "cliente_id", "monto_original", "porcentaje_venta",
-    "saldo_pendiente", "estado", "fecha_fiado", "created_at", "updated_at",
+    "saldo_pendiente", "estado", "fecha_fiado", "created_at", "updated_at", *_ANUL,
 ]
 _PA = [
     "id", "acreedor", "concepto", "monto", "saldo_pendiente", "moneda",
     "estado", "fecha_vencimiento", "fecha_cancelacion", "observaciones",
-    "created_at", "updated_at",
+    "created_at", "updated_at", *_ANUL,
 ]
 _GA = [
     "id", "concepto", "monto", "moneda", "fecha_operacion", "hora_operacion",
-    "observaciones", "created_at", "updated_at",
+    "observaciones", "created_at", "updated_at", *_ANUL,
 ]
 _DS = [
     "id", "cliente_id", "concepto", "monto", "saldo_pendiente", "moneda",
     "estado", "fecha", "fecha_cancelacion", "observaciones", "cotizacion_pago",
-    "created_at", "updated_at",
+    "created_at", "updated_at", *_ANUL,
 ]
 _MC = [
     "id", "fecha", "moneda", "tipo", "categoria", "monto", "ganancia",
@@ -113,7 +120,7 @@ _DEC_COLS = frozenset({
     "porcentaje_compra", "porcentaje_venta", "cotizacion_aplicada",
     "monto_original", "saldo_pendiente", "usd_restante", "cotizacion_pago",
 })
-_DT_COLS = frozenset({"created_at", "updated_at", "ultimo_evento_manual_at"})
+_DT_COLS = frozenset({"created_at", "updated_at", "ultimo_evento_manual_at", "anulado_at"})
 _BYTES_COLS = frozenset({"foto"})
 
 
@@ -317,6 +324,14 @@ def exportar_excel(
             q = q.filter(model.created_at <= hasta_dt)
         return q
 
+    def _vivos(q: Any, model: Any) -> Any:
+        """Excluye las operaciones anuladas.
+
+        Solo aplica al Excel: es un reporte de trabajo, y una operación dada de
+        baja no debe figurar como si se hubiera hecho. El backup JSON, en cambio,
+        SÍ las conserva con su marca — es una copia fiel de la base."""
+        return q.filter(model.anulado_at.is_(None))
+
     HEADER_FILL = PatternFill("solid", fgColor="4F46E5")
     HEADER_FONT = Font(bold=True, color="FFFFFF", size=10)
     ALT_FILL    = PatternFill("solid", fgColor="F1F5F9")
@@ -356,8 +371,8 @@ def exportar_excel(
 
     # ── Cheques (foto embebida) ──────────────────────────────────────────────
     if _inc("cheques"):
-        cheques = _date_filter(
-            db.query(Cheque).options(undefer(Cheque.foto)), Cheque
+        cheques = _vivos(
+            _date_filter(db.query(Cheque).options(undefer(Cheque.foto)), Cheque), Cheque
         ).all()
         ws_ch = wb.create_sheet("Cheques")
         ch_headers = [
@@ -396,7 +411,7 @@ def exportar_excel(
 
     # ── Préstamos ────────────────────────────────────────────────────────────
     if _inc("prestamos"):
-        prestamos = _date_filter(db.query(Prestamo), Prestamo).all()
+        prestamos = _vivos(_date_filter(db.query(Prestamo), Prestamo), Prestamo).all()
         add_sheet(
             "Préstamos",
             ["ID", "Cliente ID", "Crédito", "Moneda", "Cuotas", "Frecuencia",
@@ -412,7 +427,14 @@ def exportar_excel(
 
     # ── Cuotas ───────────────────────────────────────────────────────────────
     if _inc("cuotas"):
-        cuotas = _date_filter(db.query(Cuota), Cuota).all()
+        # Las cuotas no tienen marca propia: heredan la del préstamo al que
+        # pertenecen, así que se excluyen las de préstamos anulados.
+        cuotas = (
+            _date_filter(db.query(Cuota), Cuota)
+            .join(Cuota.prestamo)
+            .filter(Prestamo.anulado_at.is_(None))
+            .all()
+        )
         add_sheet(
             "Cuotas",
             ["ID", "Préstamo ID", "Nro Cuota", "Vencimiento", "Monto", "Pagado", "Estado",
@@ -426,7 +448,9 @@ def exportar_excel(
 
     # ── Movimientos ──────────────────────────────────────────────────────────
     if _inc("movimientos_efectivo"):
-        movimientos = _date_filter(db.query(MovimientoEfectivo), MovimientoEfectivo).all()
+        movimientos = _vivos(
+            _date_filter(db.query(MovimientoEfectivo), MovimientoEfectivo), MovimientoEfectivo
+        ).all()
         add_sheet(
             "Movimientos",
             ["ID", "Cliente ID", "Tipo", "Moneda", "Monto", "Cotización",
@@ -441,7 +465,7 @@ def exportar_excel(
 
     # ── Fiados ───────────────────────────────────────────────────────────────
     if _inc("fiados"):
-        fiados = _date_filter(db.query(Fiado), Fiado).all()
+        fiados = _vivos(_date_filter(db.query(Fiado), Fiado), Fiado).all()
         add_sheet(
             "Fiados",
             ["ID", "Cheque ID", "Cliente ID", "Monto Original", "% Venta",
@@ -456,7 +480,7 @@ def exportar_excel(
 
     # ── Pasivos ──────────────────────────────────────────────────────────────
     if _inc("pasivos"):
-        pasivos = _date_filter(db.query(Pasivo), Pasivo).all()
+        pasivos = _vivos(_date_filter(db.query(Pasivo), Pasivo), Pasivo).all()
         add_sheet(
             "Pasivos",
             ["ID", "Acreedor", "Concepto", "Monto", "Saldo Pendiente", "Moneda",
@@ -471,7 +495,7 @@ def exportar_excel(
 
     # ── Gastos Operativos ─────────────────────────────────────────────────────
     if _inc("gastos_operativos"):
-        gastos = _date_filter(db.query(GastoOperativo), GastoOperativo).all()
+        gastos = _vivos(_date_filter(db.query(GastoOperativo), GastoOperativo), GastoOperativo).all()
         add_sheet(
             "Gastos Operativos",
             ["ID", "Concepto", "Monto", "Moneda", "Fecha Operación",

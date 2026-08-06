@@ -84,7 +84,11 @@ def _msg_duplicado(db: Session, nro_cheque: str, banco: str | None) -> str:
     cargado para que el operador distinga un duplicado real de un cheque homónimo de
     otro banco o de data vieja."""
     existente = db.scalar(
-        select(Cheque).where(Cheque.nro_cheque == nro_cheque, Cheque.banco == banco)
+        select(Cheque).where(
+            Cheque.nro_cheque == nro_cheque,
+            Cheque.banco == banco,
+            Cheque.anulado_at.is_(None),
+        )
     )
     if existente is None:
         return "Ya existe un cheque con ese número y banco."
@@ -117,9 +121,20 @@ def resolve_cheque(db: Session, nro: str, banco: str | None = None) -> Cheque:
     if not nro:
         raise ValidationError("Indicá el número de cheque.")
 
-    matches = list(db.scalars(select(Cheque).where(Cheque.nro_cheque == nro)))
+    # Los cheques anulados no se resuelven: para el operador dejaron de existir.
+    matches = list(
+        db.scalars(
+            select(Cheque).where(Cheque.nro_cheque == nro, Cheque.anulado_at.is_(None))
+        )
+    )
     if not matches:
-        matches = list(db.scalars(select(Cheque).where(Cheque.nro_cheque.endswith(nro))))
+        matches = list(
+            db.scalars(
+                select(Cheque).where(
+                    Cheque.nro_cheque.endswith(nro), Cheque.anulado_at.is_(None)
+                )
+            )
+        )
     if not matches:
         raise NotFoundError(f"No encontré ningún cheque con el número '{nro}'.")
 
@@ -153,7 +168,7 @@ def get_cheque_foto(db: Session, cheque_id: uuid.UUID) -> tuple[bytes, str]:
 
 
 def list_cheques(db: Session, estado: ChequeEstado | None = None) -> list[Cheque]:
-    query = select(Cheque)
+    query = select(Cheque).where(Cheque.anulado_at.is_(None))
     if estado is not None:
         query = query.where(Cheque.estado == estado)
     return list(db.scalars(query.order_by(Cheque.created_at.desc())))

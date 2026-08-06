@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ChequeEstado
 from app.db.session import get_db
+from app.schemas.anulacion import RevertirRequest
 from app.schemas.cheques import (
     ChequeCreate,
     ChequeFiarRequest,
@@ -16,6 +17,7 @@ from app.schemas.cheques import (
     ChequeRead,
     ChequeUpdate,
 )
+from app.services import anulacion as svc_anulacion
 from app.services import cheques as service
 
 
@@ -82,4 +84,23 @@ def fiar_cheque(
 ) -> ChequeFiarResponse:
     cheque, fiado = service.fiar_cheque(db, cheque_id, payload)
     return ChequeFiarResponse(cheque=cheque, fiado=fiado)
+
+
+@router.post("/{cheque_id}/revertir", response_model=ChequeRead)
+def revertir_cheque(
+    cheque_id: UUID,
+    payload: RevertirRequest,
+    db: DbSession,
+) -> ChequeRead:
+    """Devuelve un cheque VENDIDO/FIADO/COBRADO/RECHAZADO a EN_CARTERA.
+
+    No lo elimina: el cheque queda disponible para volver a operarse. Se borra el
+    ingreso de la venta/cobro del libro de caja y se conserva el egreso de la
+    compra, que sigue siendo cierto."""
+    return svc_anulacion.revertir_cheque(
+        db,
+        cheque_id,
+        operador_id=payload.operador_id,
+        motivo=payload.motivo,
+    )
 
