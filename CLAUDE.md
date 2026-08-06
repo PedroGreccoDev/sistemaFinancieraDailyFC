@@ -154,6 +154,8 @@ imposible esa reconstrucción.
 - **Foto del cheque:** los cheques cargados por WhatsApp guardan la imagen (migración `0009`); se visualiza en el panel con `ChequeFotoModal`.
   - El endpoint `GET /cheques/{id}/foto` se monta en un **router público** (`cheques.public_router`, sin `get_current_user`): se sirve por **UUID no-adivinable** para que funcione en `<img src>` directos del panel (p. ej. la miniatura de `Cartera`), que no pueden enviar el header `Authorization`. **La protección es la entropía del UUID, no la sesión** — si esos UUIDs se filtran (logs, links), la foto queda expuesta. El resto de `cheques.router` sigue protegido. Si se necesita cerrar el acceso sin romper los `<img>`, el camino es un token firmado en la query (`?token=`).
 - **Editar carga (panel + bot):** `PATCH /cheques/{id}` (`svc_cheques.editar_cheque`) corrige la carga y resincroniza la caja (`resync_caja_cheque`). Reglas: `COBRADO`/`RECHAZADO` son terminales y NO editables; `EN_CARTERA` edita campos base; `VENDIDO`/`FIADO` además `porcentaje_venta` (recalcula ganancia, y el saldo del fiado solo si aún no recibió cobros parciales). En el panel está el botón "Editar" por fila en Cartera (en cartera y en el historial de ventas); el modal permite además reasignar cliente origen/destino (con alta de cliente inline).
+- **Eliminar y Revertir (panel):** botones por fila en Cartera. Eliminar **anula** (no borra) y revierte la caja; Revertir devuelve un cheque terminal a `EN_CARTERA` dejándolo disponible para volver a operarse. Ver §Anulación y reversión.
+- **Cartera preexistente (`es_carga_inicial`):** un cheque cargado dentro del período de apertura **no asienta el egreso de compra** —ya estaba comprado antes de que el sistema existiera—. Ver §Apertura del sistema.
 
 ### 2. Fiados _(módulo agregado 2026-06-09)_
 
@@ -327,6 +329,11 @@ cliente, operación, fecha).
   deudas simples (§2.b).
 - **Cobros parciales cuentan:** si de un fiado de $100.000 entran $100, esos $100 son ingreso
   del día con su detalle (fiado, cliente, fecha).
+- **Neto ≠ saldo.** El `neto` es el **flujo** del período; el **saldo** es la plata que hay.
+  Cada moneda expone `saldo_apertura` (todo lo anterior al período, vía `_saldo_hasta`, más el
+  `SALDO_INICIAL` que caiga dentro) y `saldo_cierre = apertura + ingresos − egresos`. Un día de
+  solo compras da **neto negativo —correcto, salió plata—** sin que el saldo esté en rojo. El
+  `SALDO_INICIAL` **no** suma a `ingresos_total`: va al saldo de apertura (§Apertura del sistema).
 - `GET /api/v1/reportes/cobros-cuotas?desde=&hasta=` devuelve el historial detallado de cuotas
   **COBRADA** (por su `monto` total). Un pago de **importe libre** que deja una cuota a medias
   (§3) todavía no la lista —hasta que se complete—, pero **su efectivo sí figura en el reporte de
@@ -358,9 +365,13 @@ cliente, operación, fecha).
 
 ### 8. Backup / Configuración _(módulo agregado)_
 
-- Página **Configuración** del panel web con export/import de datos.
+- Página **Configuración** del panel web: apertura del sistema (§Apertura, componente
+  `AperturaSistema`), gestión de usuarios y export/import de datos.
 - `GET /api/v1/backup/exportar`: snapshot completo en JSON (incluye fotos de cheques embebidas).
-- `GET /api/v1/backup/exportar-excel`: export a XLSX (filtrable por día local ART).
+  **Conserva los registros anulados con su marca** — es una copia fiel de la base; si no los
+  llevara, un ciclo export→import los resucitaría.
+- `GET /api/v1/backup/exportar-excel`: export a XLSX (filtrable por día local ART). **Excluye los
+  anulados** (y las cuotas de préstamos anulados): es un reporte de trabajo, no una copia.
 - `POST /api/v1/backup/importar`: import con **validación de schema** antes de aplicar.
 
 ### 9. Autenticación / Usuarios _(módulo agregado 2026-06-19)_
@@ -448,6 +459,14 @@ cliente, operación, fecha).
     primero, parcial/total, saltea saldadas, no reparte de más) + cross-currency del préstamo.
   - **`test_deudas_simples.py`** — `aplicar_cobro` de una deuda simple (§2.b): nuevo saldo y
     transición a cancelada en cobros parciales/totales, sin dejar saldo negativo.
+  - **`test_anulacion.py`** — reglas de bloqueo del motor de anulación (§Anulación): fiado con
+    cobros encima, cheque usado para pagar un pasivo, compra de USD ya consumida y venta que no
+    es la última. Incluye dos tests que **custodian el catálogo `_ENTIDADES`**: si una entidad
+    perdiera alguna `referencia_tipo`, la anulación dejaría líneas de caja vivas contando plata
+    que ya no existe, y eso pasaría desapercibido.
+  - **`test_apertura.py`** — fecha de corte de la carga inicial (§Apertura): el día del corte es
+    inclusive, después vuelve a descontar, y sin corte definido todo es operación normal. Fija
+    además que `SALDO_INICIAL` va al grupo `APERTURA` y no cuenta como ingreso del día.
 - **Convención:** mantené la lógica de negocio en funciones/métodos testeables sin BD; si una
   pieza nueva necesita una sesión, extraé la parte pura para poder cubrirla en este estilo.
 
