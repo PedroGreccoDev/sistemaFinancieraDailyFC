@@ -194,3 +194,51 @@ def test_las_referencias_coinciden_con_las_que_escriben_los_servicios() -> None:
     assert _REF_ORIGEN in _ENTIDADES["deuda_simple"].refs
     assert _REF_COBRO in _ENTIDADES["deuda_simple"].refs
     assert REF_DIVISAS in _ENTIDADES["movimiento_efectivo"].refs
+
+
+# ── Intent del bot ────────────────────────────────────────────────────
+
+def test_revertir_operacion_es_un_intent_valido() -> None:
+    """Si el intent no está en la lista blanca, el parser lo descarta a
+    DESCONOCIDO y el bot responde "no entendí" en vez de revertir."""
+    from app.services.ia.claude import INTENTS
+
+    assert "REVERTIR_OPERACION" in INTENTS
+
+
+def test_el_prompt_distingue_revertir_de_editar() -> None:
+    """Editar corrige un valor mal cargado; revertir deshace la operación. Si el
+    prompt no marcara la diferencia, un "no se vendió" terminaría editando el
+    porcentaje en vez de devolver el cheque a cartera."""
+    from app.services.ia.claude import _SYSTEM_PROMPT
+
+    assert "REVERTIR_OPERACION" in _SYSTEM_PROMPT
+    assert "NO confundir con EDITAR_OPERACION" in _SYSTEM_PROMPT
+    # La reversión es destructiva: el prompt debe exigir confirmación.
+    seccion = _SYSTEM_PROMPT.split("15. REVERTIR_OPERACION")[1].split("16.")[0]
+    assert "confirmacion_requerida: true" in seccion
+
+
+def test_el_dispatcher_registra_el_intent() -> None:
+    """El intent tiene que estar cableado al handler, no solo documentado."""
+    import inspect
+
+    from app.services.whatsapp import dispatcher
+
+    fuente = inspect.getsource(dispatcher.dispatch)
+    assert 'intent == "REVERTIR_OPERACION"' in fuente
+    assert hasattr(dispatcher, "_revertir_operacion")
+
+
+def test_el_handler_de_reversion_no_usa_nombres_sin_importar() -> None:
+    """Los nombres que el handler usa solo dentro de la función no se validan al
+    importar el módulo: un modelo sin importar explota recién cuando el operador
+    pide esa reversión por WhatsApp. Este test los compila contra el módulo."""
+    import inspect
+
+    from app.services.whatsapp import dispatcher
+
+    fuente = inspect.getsource(dispatcher._resolver_para_anular)
+    for nombre in ("MovimientoEfectivo", "Pasivo", "Prestamo", "select"):
+        assert nombre in fuente, f"el test quedó desactualizado: {nombre} ya no se usa"
+        assert hasattr(dispatcher, nombre), f"{nombre} se usa pero no está importado"

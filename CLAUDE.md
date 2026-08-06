@@ -418,7 +418,16 @@ cliente, operación, fecha).
 - Cheques: `REGISTRAR_CHEQUE`, `VENDER_CHEQUE`, `FIAR_CHEQUE`, `COBRAR_CHEQUE`, `RECHAZAR_CHEQUE`.
 - Préstamos: `NUEVO_PRESTAMO`, `COBRAR_CUOTA`.
 - Fiados: `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
-- Otros: `REGISTRAR_DEUDA`, `MOVIMIENTO_EFECTIVO`, `REGISTRAR_GASTO`, `EDITAR_OPERACION`.
+- Otros: `REGISTRAR_DEUDA`, `MOVIMIENTO_EFECTIVO`, `REGISTRAR_GASTO`, `EDITAR_OPERACION`,
+  `REVERTIR_OPERACION`.
+  - **`REVERTIR_OPERACION` deshace; `EDITAR_OPERACION` corrige.** Editar cambia un valor mal
+    cargado ("el % era 3 no 2"); revertir deshace la operación entera ("no se vendió",
+    "borrá eso"). El prompt marca la diferencia explícitamente y hay un test que la custodia.
+  - `accion: REVERTIR` (solo cheques → vuelven a `EN_CARTERA` sin eliminarse) o `ELIMINAR`
+    (anula y revierte la caja). Ambas delegan en `svc_anulacion`, así que **las reglas de
+    bloqueo son las mismas que en el panel** — un fiado con cobros encima o una venta de USD
+    que no es la última se rechazan igual desde el chat.
+  - Siempre pide **confirmación** (`confirmacion_requerida: true`): es destructiva.
 - Consultas (lectura): `CONSULTA_CARTERA`, `CONSULTA_CLIENTE`, `CONSULTA_PRESTAMOS`.
 
 ---

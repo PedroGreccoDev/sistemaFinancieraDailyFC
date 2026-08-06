@@ -43,6 +43,7 @@ INTENTS = {
     "CONSULTA_CLIENTE",
     "CONSULTA_PRESTAMOS",
     "EDITAR_OPERACION",
+    "REVERTIR_OPERACION",
     "ACLARACION_REQUERIDA",
     "DESCONOCIDO",
 }
@@ -249,12 +250,43 @@ OPERACIONES DISPONIBLES
       - Para fechas: "YYYY-MM-DD". Para montos y %: número puro sin símbolos.
       - Si no queda claro qué operación o qué campo → ACLARACION_REQUERIDA.
 
-15. ACLARACION_REQUERIDA
+15. REVERTIR_OPERACION
+    Cuándo: El operador quiere DESHACER una operación entera, no corregir un dato.
+    ⚠️ NO confundir con EDITAR_OPERACION: editar cambia un valor mal cargado
+       ("el % era 3 no 2"); revertir deshace la operación ("no se vendió", "borrá eso").
+    Ej: "El cheque 12345 no se vendió al final, volvelo a cartera",
+        "Deshacé la venta del 681",
+        "Ese cheque volvió, no se cobró",
+        "Borrá el gasto de nafta que cargué recién",
+        "Anulá la compra de dólares de recién",
+        "El préstamo a Juan no va, eliminalo"
+    data:
+      - accion: "REVERTIR" | "ELIMINAR"
+          * REVERTIR → solo para CHEQUE: deshace la venta/cobro/fiado y lo devuelve
+            a EN_CARTERA. El cheque sigue existiendo y se puede volver a operar.
+            Usalo cuando dicen "volvelo a cartera", "no se vendió", "deshacé la venta".
+          * ELIMINAR → da de baja la operación entera y revierte su efecto en la caja.
+            Usalo cuando dicen "borrá", "eliminá", "anulá", "sacá eso".
+      - tipo_operacion: "CHEQUE" | "GASTO" | "PRESTAMO" | "PASIVO" | "MOVIMIENTO"
+      - identificador: string
+          * CHEQUE → el nro_cheque (puede ser parcial; el sistema lo resuelve)
+          * GASTO → "ultimo" o el concepto del gasto (solo gastos de HOY)
+          * PRESTAMO → el nombre del cliente
+          * PASIVO → "ultimo" o el nombre del acreedor
+          * MOVIMIENTO → "ultimo" (la última operación de divisas)
+      - motivo: string (por qué se deshace; si no lo dice, usá "Revertido desde el chat")
+    Reglas:
+      - SIEMPRE poné confirmacion_requerida: true y describí en respuesta_usuario qué
+        se va a deshacer y qué efecto tiene en la caja. Es una operación destructiva.
+      - Si no queda claro CUÁL operación deshacer → ACLARACION_REQUERIDA.
+      - Si el operador quiere corregir un valor y no deshacer → EDITAR_OPERACION.
+
+16. ACLARACION_REQUERIDA
     Cuándo: Falta información esencial para completar la operación.
     data:
       - pregunta: string (pregunta concreta y puntual al operador)
 
-16. DESCONOCIDO
+17. DESCONOCIDO
     Cuándo: El mensaje no corresponde a ninguna operación del sistema.
     data: {}
 

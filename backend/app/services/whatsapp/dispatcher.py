@@ -27,6 +27,7 @@ from app.db.models import (
     ChequeEstado,
     FrecuenciaCuotas,
     Moneda,
+    MovimientoEfectivo,
     MovimientoEfectivoTipo,
 )
 from app.schemas.gastos_operativos import GastoOperativoCreate
@@ -38,6 +39,7 @@ from app.schemas.clientes import ClienteCreate
 from app.schemas.fiados import FiadoCobrarConChequeRequest, FiadoCobrarEfectivoRequest
 from app.schemas.movimientos import MovimientoEfectivoCreate
 from app.schemas.prestamos import PrestamoCreate
+from app.services import anulacion as svc_anulacion
 from app.services import caja as svc_caja
 from app.services import cheques as svc_cheques
 from app.services import clientes as svc_clientes
@@ -129,6 +131,8 @@ def dispatch(
             return _consulta_prestamos(db)
         if intent == "EDITAR_OPERACION":
             return _editar_operacion(db, data)
+        if intent == "REVERTIR_OPERACION":
+            return _revertir_operacion(db, phone, data)
         # ACLARACION_REQUERIDA y DESCONOCIDO no tocan la BD
         return False, result.respuesta_usuario or "❓ No entendí. ¿Podés repetirlo?"
 
@@ -678,6 +682,143 @@ def _buscar_fiado_abierto(db: Session, cliente_nombre: str) -> Fiado | None:
             "Contactá al administrador para resolverlo desde el panel."
         )
     return None
+
+
+def _revertir_operacion(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
+    """Deshace una operación desde el chat (intent `REVERTIR_OPERACION`).
+
+    Dos acciones sobre el mismo motor (`svc_anulacion`, ver §Anulación y reversión):
+      - REVERTIR: solo cheques. Los devuelve a EN_CARTERA sin eliminarlos, para
+        que se puedan volver a vender. Se borra el ingreso de la venta/cobro y se
+        conserva el egreso de la compra, que sigue siendo cierto.
+      - ELIMINAR: anula la operación entera y revierte su rastro en la caja.
+
+    El bot resuelve la entidad por el identificador que dio el operador (número de
+    cheque, "ultimo", nombre de cliente) y delega toda la validación al motor: las
+    reglas de bloqueo son las mismas que en el panel, así que un fiado con cobros
+    encima o una venta de USD que no es la última se rechazan igual acá.
+    """
+    accion = str(data.get("accion", "ELIMINAR")).upper().strip()
+    tipo = str(data.get("tipo_operacion", "")).upper().strip()
+    identificador = str(data.get("identificador", "")).strip()
+    motivo = str(data.get("motivo") or "").strip() or "Revertido desde el chat"
+
+    if not tipo:
+        return False, "⚠️ No entendí qué operación querés deshacer."
+
+    # ── Revertir un cheque a cartera ──────────────────────────────────
+    if accion == "REVERTIR":
+        if tipo != "CHEQUE":
+            return False, (
+                "⚠️ Solo los cheques se pueden volver a cartera. "
+                "Para el resto, pedime que lo elimine."
+            )
+        cheque = svc_cheques.resolve_cheque(db, identificador)
+        svc_anulacion.revertir_cheque(db, cheque.id, operador_id=phone, motivo=motivo)
+        return True, (
+            f"↩️ Cheque Nº {cheque.nro_cheque} de vuelta EN CARTERA.\n"
+            f"Se sacó de la caja el ingreso de esa operación; el egreso de cuando "
+            f"lo compraste se mantiene."
+        )
+
+    # ── Eliminar (anular) la operación ────────────────────────────────
+    entidad, obj = _resolver_para_anular(db, tipo, identificador)
+    impacto = svc_anulacion.anular(
+        db, entidad, obj.id, operador_id=phone, motivo=motivo
+    )
+
+    detalle = ""
+    if impacto.lineas:
+        movs = "\n".join(
+            f"  • {l.tipo} {l.moneda} {l.monto:,.2f} — {l.detalle or l.categoria}"
+            for l in impacto.lineas[:5]
+        )
+        detalle = f"\nSe revirtió de la caja:\n{movs}"
+        if len(impacto.lineas) > 5:
+            detalle += f"\n  … y {len(impacto.lineas) - 5} movimiento(s) más."
+    else:
+        detalle = "\nNo movía plata, así que la caja no cambia."
+
+    arrastre = ""
+    if impacto.arrastra:
+        arrastre = "\nTambién se dio de baja: " + ", ".join(impacto.arrastra)
+
+    return True, f"🗑️ Eliminado: {impacto.descripcion}{detalle}{arrastre}"
+
+
+def _resolver_para_anular(db: Session, tipo: str, identificador: str):
+    """Traduce lo que dijo el operador a (entidad_del_motor, fila)."""
+    ident = identificador.lower().strip()
+
+    if tipo == "CHEQUE":
+        return "cheque", svc_cheques.resolve_cheque(db, identificador)
+
+    if tipo == "GASTO":
+        gasto, error = _resolver_gasto_a_editar(db, identificador)
+        if gasto is None:
+            raise ValueError(error or "No encontré ese gasto.")
+        return "gasto", gasto
+
+    if tipo == "MOVIMIENTO":
+        mov = db.scalars(
+            select(MovimientoEfectivo)
+            .where(MovimientoEfectivo.anulado_at.is_(None))
+            .order_by(MovimientoEfectivo.created_at.desc())
+            .limit(1)
+        ).first()
+        if mov is None:
+            raise ValueError("No hay ninguna operación de divisas registrada.")
+        return "movimiento_efectivo", mov
+
+    if tipo == "PASIVO":
+        if ident in ("ultimo", "último"):
+            pasivo = db.scalars(
+                select(Pasivo)
+                .where(Pasivo.anulado_at.is_(None))
+                .order_by(Pasivo.created_at.desc())
+                .limit(1)
+            ).first()
+        else:
+            candidatos = list(
+                db.scalars(
+                    select(Pasivo).where(
+                        Pasivo.acreedor.ilike(f"%{identificador}%"),
+                        Pasivo.anulado_at.is_(None),
+                    )
+                ).all()
+            )
+            if len(candidatos) > 1:
+                nombres = ", ".join(p.acreedor for p in candidatos[:5])
+                raise ValueError(
+                    f"Hay {len(candidatos)} deudas que coinciden ({nombres}). "
+                    "Decime cuál con más precisión."
+                )
+            pasivo = candidatos[0] if candidatos else None
+        if pasivo is None:
+            raise ValueError("No encontré esa deuda.")
+        return "pasivo", pasivo
+
+    if tipo == "PRESTAMO":
+        cliente = _buscar_cliente_o_error(db, identificador, estricto=True)
+        prestamos = list(
+            db.scalars(
+                select(Prestamo).where(
+                    Prestamo.cliente_id == cliente.id,
+                    Prestamo.anulado_at.is_(None),
+                )
+                .order_by(Prestamo.created_at.desc())
+            ).all()
+        )
+        if not prestamos:
+            raise ValueError(f"{cliente.nombre} no tiene préstamos cargados.")
+        if len(prestamos) > 1:
+            raise ValueError(
+                f"{cliente.nombre} tiene {len(prestamos)} préstamos. "
+                "Eliminá el que corresponda desde el panel para no equivocarnos."
+            )
+        return "prestamo", prestamos[0]
+
+    raise ValueError(f"No sé deshacer operaciones de tipo '{tipo}'.")
 
 
 def _editar_operacion(db: Session, data: dict[str, Any]) -> DispatchResult:
