@@ -112,10 +112,14 @@ def cobrar_con_cheque(
         raise NotFoundError("Fiado no encontrado.")
     if fiado.estado == FiadoEstado.CANCELADO:
         raise ConflictError("El fiado ya está cancelado.")
+    # Solo choca contra cheques VIVOS: uno anulado libera su número (índice único
+    # parcial, migración 0017). Sin este filtro, un cheque dado de baja seguiría
+    # bloqueando la recarga aunque la BD ya lo permita.
     ya_existe = db.scalar(
         select(Cheque).where(
             Cheque.nro_cheque == payload.nro_cheque_pago,
             Cheque.banco == payload.banco_pago,
+            Cheque.anulado_at.is_(None),
         )
     )
     if ya_existe is not None:

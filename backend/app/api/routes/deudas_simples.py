@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.db.models import DeudaSimpleEstado
 from app.db.session import get_db
 from app.schemas.deudas_simples import (
+    DeudaSimpleCobrarConChequeRequest,
+    DeudaSimpleCobrarConChequeResponse,
     DeudaSimpleCreate,
     DeudaSimplePagoRequest,
     DeudaSimpleRead,
@@ -51,3 +53,14 @@ def cobrar_deuda(
     deuda_id: UUID, payload: DeudaSimplePagoRequest, db: DbSession
 ) -> DeudaSimpleRead:
     return service.cobrar_deuda_simple(db, deuda_id, payload)
+
+
+@router.post("/{deuda_id}/cobrar-con-cheque", response_model=DeudaSimpleCobrarConChequeResponse)
+def cobrar_deuda_con_cheque(
+    deuda_id: UUID, payload: DeudaSimpleCobrarConChequeRequest, db: DbSession
+) -> DeudaSimpleCobrarConChequeResponse:
+    """El cliente paga la deuda con un cheque en vez de efectivo.
+
+    El cheque entra a cartera a su nombre y salda por su valor neto. No asienta
+    caja: la plata se reconoce recién cuando ese cheque se venda o se cobre."""
+    return service.cobrar_con_cheque(db, deuda_id, payload)

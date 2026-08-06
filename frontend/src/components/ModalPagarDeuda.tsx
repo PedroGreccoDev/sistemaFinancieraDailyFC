@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { pagarPrestamo } from '../api/prestamos'
 import { cobrarEfectivo } from '../api/fiados'
-import { cobrarDeudaSimple } from '../api/deudas_simples'
+import { cobrarDeudaSimple, cobrarDeudaSimpleConCheque } from '../api/deudas_simples'
 import { fmtARS, fmtUSD } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
@@ -43,6 +43,18 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
 
+  // Forma de pago. El cobro con cheque vive acá para "otras deudas"; los
+  // préstamos lo tienen por cuota en su propia pestaña (necesita saber a qué
+  // cuota imputarlo) y los fiados en la suya, así que para esos dos se deriva.
+  const [forma, setForma] = useState<'efectivo' | 'cheque'>('efectivo')
+  const chequeDisponible = deuda.tipo === 'deuda_simple'
+
+  const [chNro, setChNro] = useState('')
+  const [chBanco, setChBanco] = useState('')
+  const [chMonto, setChMonto] = useState('')
+  const [chPorcentaje, setChPorcentaje] = useState('')
+  const [chFechaPago, setChFechaPago] = useState('')
+
   const saldo = deuda.saldo
   const montoNum = parseFloat(monto) || 0
   const cotizNum = parseFloat(cotizacion) || 0
@@ -60,6 +72,48 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   const superaSaldo = equivalente !== null && equivalente - saldo >= 0.01
   const faltaCotiz = cross && cotizNum <= 0
   const puedeEnviar = montoNum > 0 && !faltaCotiz && equivalente !== null && !superaSaldo
+
+  // ── Cheque: valor neto y qué salda ─────────────────────────────────
+  const chMontoNum = parseFloat(chMonto) || 0
+  const chPctNum = parseFloat(chPorcentaje) || 0
+  const chValorNeto = chMontoNum > 0 ? Math.round(chMontoNum * (100 - chPctNum)) / 100 : 0
+  // El cheque siempre es en pesos: si la deuda es en USD hay que convertir.
+  const chCross = deuda.moneda !== 'ARS'
+  const chEquivalente = chValorNeto > 0 && (!chCross || cotizNum > 0)
+    ? Math.round((chCross ? chValorNeto / cotizNum : chValorNeto) * 100) / 100
+    : null
+  // A diferencia del efectivo, un cheque de más NO es error: la deuda se cancela
+  // y el negocio le queda debiendo la diferencia al cliente.
+  const chDiferencia = chEquivalente !== null ? Math.round((chEquivalente - saldo) * 100) / 100 : null
+  const puedeEnviarCheque =
+    chNro.trim().length > 0 && chMontoNum > 0 && chPorcentaje !== '' && chEquivalente !== null
+
+  async function handleSubmitCheque(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      const r = await cobrarDeudaSimpleConCheque(deuda.id, {
+        nro_cheque_pago: chNro.trim(),
+        banco_pago: chBanco.trim() || null,
+        monto_cheque: chMontoNum,
+        porcentaje_compra_cheque: chPctNum,
+        fecha_pago: chFechaPago || null,
+        cotizacion: chCross ? cotizNum : null,
+      })
+      const dif = parseFloat(r.diferencia)
+      toast(
+        'success',
+        dif > 0
+          ? `Deuda saldada · le quedás debiendo ${fmtMoneda(dif, deuda.moneda)}`
+          : dif < 0
+            ? `Cobrado · sigue debiendo ${fmtMoneda(-dif, deuda.moneda)}`
+            : 'Deuda saldada con el cheque',
+      )
+      onSuccess()
+    } catch (err) { setError((err as Error).message) }
+    finally { setLoading(false) }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -97,12 +151,95 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Pagar deuda</h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{deuda.clienteNombre} · {deuda.label}</p>
         </div>
-        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+        <form onSubmit={forma === 'cheque' ? handleSubmitCheque : handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
           <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', borderRadius: 'var(--r-md)', display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
             <span style={{ color: 'rgba(100,116,139,0.65)' }}>Saldo pendiente</span>
             <span style={{ fontWeight: 700, color: '#fbbf24' }}>{fmtMoneda(saldo, deuda.moneda)}</span>
           </div>
 
+          {/* Con qué paga el cliente */}
+          {chequeDisponible && (
+            <div>
+              <label style={LABEL_STYLE}>Cómo paga</label>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {([['efectivo', 'Efectivo'], ['cheque', 'Con cheque']] as const).map(([v, txt]) => (
+                  <button key={v} type="button" onClick={() => { setForma(v); setError(null) }}
+                    style={{ ...(forma === v ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.45rem', fontSize: '0.78rem' }}>
+                    {txt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {forma === 'cheque' ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={LABEL_STYLE}>Nº de cheque</label>
+                  <input type="text" value={chNro} onChange={(e) => setChNro(e.target.value)} required autoFocus style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>Banco</label>
+                  <input type="text" value={chBanco} onChange={(e) => setChBanco(e.target.value)} placeholder="Opcional" style={INPUT_STYLE} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={LABEL_STYLE}>Monto del cheque</label>
+                  <input type="number" step="0.01" min="0.01" value={chMonto} onChange={(e) => setChMonto(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
+                </div>
+                <div>
+                  <label style={LABEL_STYLE}>% de descuento</label>
+                  <input type="number" step="0.01" min="0" max="100" value={chPorcentaje} onChange={(e) => setChPorcentaje(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
+                </div>
+              </div>
+              <div>
+                <label style={LABEL_STYLE}>Fecha de pago del cheque <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
+                <input type="date" value={chFechaPago} onChange={(e) => setChFechaPago(e.target.value)} style={INPUT_STYLE} />
+              </div>
+
+              {chCross && (
+                <div>
+                  <label style={LABEL_STYLE}>Cotización (pesos por 1 USD)</label>
+                  <input type="number" step="0.0001" min="0.0001" value={cotizacion} onChange={(e) => setCotizacion(e.target.value)} required style={INPUT_STYLE} />
+                  <p style={{ fontFamily: FM, fontSize: '0.68rem', marginTop: '0.25rem', color: 'rgba(100,116,139,0.55)' }}>
+                    El cheque es en pesos y la deuda en USD: la cotización define cuántos dólares salda.
+                  </p>
+                </div>
+              )}
+
+              {chValorNeto > 0 && (
+                <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.65rem 1rem', fontFamily: FM, fontSize: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'rgba(100,116,139,0.7)' }}>Vale (neto)</span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(chValorNeto)}</span>
+                  </div>
+                  {chDiferencia !== null && (
+                    <span style={{ color: chDiferencia > 0 ? '#fbbf24' : chDiferencia < 0 ? 'rgba(100,116,139,0.8)' : '#4ade80' }}>
+                      {chDiferencia > 0
+                        ? `Cancela la deuda y le quedás debiendo ${fmtMoneda(chDiferencia, deuda.moneda)}`
+                        : chDiferencia < 0
+                          ? `Sigue debiendo ${fmtMoneda(-chDiferencia, deuda.moneda)}`
+                          : 'Cancela la deuda justo'}
+                    </span>
+                  )}
+                  <span style={{ color: 'rgba(100,116,139,0.55)', fontSize: '0.68rem' }}>
+                    El cheque entra a cartera. No mueve la caja hasta que lo vendas o lo cobres.
+                  </span>
+                </div>
+              )}
+
+              {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Volver</button>
+                <button type="submit" disabled={loading || !puedeEnviarCheque} style={{ ...btnSolid('success'), flex: 1, padding: '0.55rem', opacity: (loading || !puedeEnviarCheque) ? 0.5 : 1 }}>
+                  {loading ? 'Registrando…' : 'Recibir cheque'}
+                </button>
+              </div>
+            </>
+          ) : (
+          <>
           <div>
             <label style={LABEL_STYLE}>Moneda de pago</label>
             <select value={monedaPago} onChange={(e) => setMonedaPago(e.target.value as Moneda)} style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
@@ -138,6 +275,8 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
             <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Volver</button>
             <button type="submit" disabled={loading || !puedeEnviar} style={{ ...btnSolid('success'), flex: 1, padding: '0.55rem', opacity: (loading || !puedeEnviar) ? 0.5 : 1 }}>{loading ? 'Registrando…' : 'Confirmar pago'}</button>
           </div>
+          </>
+          )}
         </form>
       </div>
     </div>

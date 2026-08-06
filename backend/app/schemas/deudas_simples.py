@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import DeudaSimpleEstado, Moneda
+from app.schemas.cheques import ChequeRead
 
 
 class DeudaSimpleCreate(BaseModel):
@@ -66,3 +67,37 @@ class DeudaSimpleRead(BaseModel):
     cotizacion_pago: Decimal | None
     created_at: datetime
     updated_at: datetime
+
+
+class DeudaSimpleCobrarConChequeRequest(BaseModel):
+    """Cobro de una deuda libre entregando un cheque en vez de efectivo.
+
+    El cheque entra a cartera a nombre del cliente de la deuda y vale su
+    `valor_neto = monto_cheque × (1 − porcentaje_compra_cheque / 100)`.
+
+    Los cheques son SIEMPRE en pesos, así que cobrar con cheque una deuda en USD
+    cruza monedas y exige `cotizacion` ($/USD) — igual que el cobro en efectivo.
+    """
+
+    nro_cheque_pago: str = Field(min_length=1, max_length=64)
+    banco_pago: str | None = Field(default=None, max_length=120)
+    monto_cheque: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    porcentaje_compra_cheque: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
+    fecha_emision: date | None = None
+    fecha_pago: date | None = None
+    # Obligatoria solo si la deuda es en USD (el cheque siempre entra en ARS).
+    cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+    fecha_cobro: date | None = None
+
+
+class DeudaSimpleCobrarConChequeResponse(BaseModel):
+    """Resultado del cobro con cheque.
+
+    `diferencia` en la moneda de la deuda: > 0 el cheque valía más que el saldo y
+    el negocio le queda debiendo esa diferencia al cliente; < 0 el cliente todavía
+    debe el resto; 0 justo.
+    """
+
+    deuda: DeudaSimpleRead
+    cheque_ingresado: ChequeRead
+    diferencia: Decimal

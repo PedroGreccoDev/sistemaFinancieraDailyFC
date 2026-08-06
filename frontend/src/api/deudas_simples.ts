@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { DeudaSimple, DeudaSimpleEstado, Moneda } from '../types'
+import type { Cheque, DeudaSimple, DeudaSimpleEstado, Moneda } from '../types'
 
 export interface DeudaSimpleCreatePayload {
   cliente_id: string
@@ -39,6 +39,41 @@ export interface CobrarDeudaSimplePayload {
 
 export const cobrarDeudaSimple = (id: string, payload: CobrarDeudaSimplePayload): Promise<DeudaSimple> =>
   apiFetch<DeudaSimple>(`/deudas-simples/${id}/cobrar`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+/**
+ * Cobro de una deuda libre entregando un cheque en vez de efectivo.
+ *
+ * El cheque entra a cartera a nombre del cliente y salda por su valor neto
+ * (`monto × (1 − %compra)`), no por su nominal. No mueve la caja: la plata se
+ * reconoce recién cuando ese cheque se venda o se cobre.
+ */
+export interface CobrarDeudaSimpleConChequePayload {
+  nro_cheque_pago: string
+  banco_pago?: string | null
+  monto_cheque: number
+  porcentaje_compra_cheque: number
+  fecha_emision?: string | null
+  fecha_pago?: string | null
+  // Requerida solo si la deuda es en USD (el cheque siempre entra en pesos).
+  cotizacion?: number | null
+  fecha_cobro?: string | null
+}
+
+export interface CobrarConChequeResult {
+  deuda: DeudaSimple
+  cheque_ingresado: Cheque
+  /** En la moneda de la deuda: > 0 el negocio le queda debiendo al cliente. */
+  diferencia: string
+}
+
+export const cobrarDeudaSimpleConCheque = (
+  id: string,
+  payload: CobrarDeudaSimpleConChequePayload,
+): Promise<CobrarConChequeResult> =>
+  apiFetch<CobrarConChequeResult>(`/deudas-simples/${id}/cobrar-con-cheque`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })

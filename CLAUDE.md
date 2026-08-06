@@ -212,6 +212,18 @@ y fecha. Conceptualmente "un fiado sin cheque y con divisa". Tabla `deudas_simpl
 - **Dos `referencia_tipo` de caja:** el egreso de origen usa `deuda_simple` y cada cobro
   usa `deuda_simple_cobro`, para que la edición resincronice **solo** el egreso de origen
   (`_registrar_egreso_origen`) sin tocar las líneas de los cobros ya hechos.
+- **Cobro con cheque** (`POST /deudas-simples/{id}/cobrar-con-cheque`,
+  `svc_deudas_simples.cobrar_con_cheque`): el cliente paga con un cheque en vez de efectivo.
+  El cheque entra `EN_CARTERA` con `cliente_origen_id` = cliente de la deuda y salda por su
+  **valor neto** (`monto × (1 − %compra)`), no por el nominal. **No asienta caja**: no entró
+  efectivo — la plata se reconoce al vender o cobrar ese cheque (mismo criterio que §2 y §3),
+  y por eso se inserta con `db.add()` y no con `create_cheque()`.
+  - **Un cheque "de más" es el caso normal, no un error.** El cliente entrega el cheque que
+    tiene. Si vale más que el saldo, la deuda se cancela y la `diferencia` (> 0) queda a favor
+    del cliente. Por eso usa `conversion.convertir_a_moneda_deuda` (convierte sin topear) y
+    **no** `calcular_reduccion_saldo`, que rechaza un pago mayor al saldo — correcto para
+    efectivo, roto para cheques.
+  - Cross-currency: los cheques son siempre ARS, así que una deuda en USD exige `cotizacion`.
 - **Editar carga:** `PATCH /deudas-simples/{id}` (`svc_deudas_simples.editar_deuda_simple`).
   `concepto`/`fecha`/`observaciones` siempre; `monto`/`moneda` solo si está `ABIERTA` y sin
   cobros parciales (`saldo == monto`); al editar se resincroniza el egreso de origen.

@@ -13,6 +13,37 @@ from app.db.models import Moneda
 from app.services.exceptions import ValidationError
 
 
+def convertir_a_moneda_deuda(
+    moneda_deuda: Moneda,
+    moneda_pago: Moneda,
+    monto_pagado: Decimal,
+    cotizacion: Decimal | None,
+) -> Decimal:
+    """Convierte un monto a la moneda de la deuda, **sin topearlo al saldo**.
+
+    Es la mitad "conversión" de `calcular_reduccion_saldo`, sin su validación de
+    exceso. La usan los cobros con **cheque**, donde el valor del instrumento es
+    fijo: si el cheque vale más que la deuda no se puede entregar de menos — la
+    deuda queda saldada y el negocio le queda debiendo la diferencia al cliente
+    (mismo criterio que fiados, §2, y que el vuelto de pasivos, §5).
+
+    Para pagos en efectivo usá `calcular_reduccion_saldo`: ahí sí corresponde
+    rechazar un pago mayor al saldo, porque se cobra exactamente lo que se debe.
+    """
+    if moneda_pago == moneda_deuda:
+        return monto_pagado.quantize(Decimal("0.01"))
+    if cotizacion is None or cotizacion <= Decimal("0"):
+        raise ValidationError(
+            "El pago es en una moneda distinta a la deuda: indicá la cotización "
+            "(pesos por 1 USD)."
+        )
+    if moneda_deuda == Moneda.USD and moneda_pago == Moneda.ARS:
+        convertido = monto_pagado / cotizacion
+    else:  # deuda ARS, pago USD
+        convertido = monto_pagado * cotizacion
+    return convertido.quantize(Decimal("0.01"))
+
+
 def calcular_reduccion_saldo(
     moneda_deuda: Moneda,
     saldo_pendiente: Decimal,
