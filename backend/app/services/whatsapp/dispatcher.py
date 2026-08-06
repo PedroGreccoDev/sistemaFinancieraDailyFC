@@ -151,9 +151,68 @@ def dispatch(
 # Handlers por intent
 # ────────────────────────────────────────────────────────────────────────────
 
+def _items_o_uno(data: dict[str, Any], clave: str) -> list[dict[str, Any]]:
+    """Normaliza el payload del modelo a una lista de ítems.
+
+    El bot acepta varios cheques por mensaje (una foto puede traer 4), así que el
+    modelo devuelve un array. Se tolera el formato viejo de un solo objeto con los
+    campos sueltos: una sesión que quedó abierta con historial del formato anterior
+    sigue funcionando en vez de romper a mitad de una conversación.
+    """
+    items = data.get(clave)
+    if isinstance(items, list) and items:
+        return [i for i in items if isinstance(i, dict)]
+    return [data]
+
+
 def _registrar_cheque(
     db: Session,
     phone: str,
+    data: dict[str, Any],
+    msg_at: datetime | None = None,
+    foto: tuple[bytes, str] | None = None,
+) -> DispatchResult:
+    """Alta de uno o varios cheques (una foto puede traer varios).
+
+    Si alguno falla —típicamente porque ya estaba cargado— **se cargan los demás
+    igual** y se informa cuál falló y por qué (decisión del dueño, 2026-08-06): así
+    no hay que volver a sacar la foto de los cuatro por culpa de uno repetido.
+    """
+    items = _items_o_uno(data, "cheques")
+
+    if len(items) == 1:
+        return _registrar_un_cheque(db, items[0], msg_at, foto)
+
+    cargados: list[str] = []
+    fallidos: list[str] = []
+    for item in items:
+        try:
+            _registrar_un_cheque(db, item, msg_at, foto)
+            nro = str(item.get("nro_cheque", "?"))
+            banco = f" — {item['banco']}" if item.get("banco") else ""
+            monto = item.get("monto")
+            monto_txt = f" · {_ars(Decimal(str(monto)))}" if monto is not None else ""
+            cargados.append(f"  • Nº {nro}{banco}{monto_txt}")
+        except (ServiceError, ValueError) as exc:
+            motivo = getattr(exc, "message", None) or str(exc)
+            fallidos.append(f"  • Nº {item.get('nro_cheque', '?')}: {motivo}")
+
+    lines: list[str] = []
+    if cargados:
+        lines.append(f"✅ *{len(cargados)} cheque(s) en cartera*")
+        lines.extend(cargados)
+    if fallidos:
+        if cargados:
+            lines.append("")
+        lines.append(f"⚠️ *{len(fallidos)} no se pudo(eron) cargar*")
+        lines.extend(fallidos)
+        lines.append("")
+        lines.append("Corregí esos y mandámelos de nuevo; los de arriba ya quedaron.")
+    return bool(cargados), "\n".join(lines)
+
+
+def _registrar_un_cheque(
+    db: Session,
     data: dict[str, Any],
     msg_at: datetime | None = None,
     foto: tuple[bytes, str] | None = None,
@@ -202,6 +261,68 @@ def _registrar_cheque(
 
 
 def _vender_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
+    """Venta de uno o varios cheques en un solo mensaje.
+
+    Misma política que el alta: los que se pueden vender se venden, y se informa
+    cuál falló (por ejemplo si ya estaba vendido) sin tirar abajo el resto."""
+    items = _items_o_uno(data, "ventas")
+
+    if len(items) == 1:
+        return _vender_un_cheque(db, phone, items[0], msg_at)
+
+    vendidos: list[str] = []
+    fallidos: list[str] = []
+    ganancia_total = Decimal("0.00")
+    for item in items:
+        try:
+            cheque = _vender_un_cheque_obj(db, phone, item, msg_at)
+            ganancia_total += cheque.ganancia or Decimal("0.00")
+            aviso = " ⚠️ a pérdida" if (cheque.ganancia or 0) < 0 else ""
+            vendidos.append(
+                f"  • Nº {cheque.nro_cheque} al {_pct(cheque.porcentaje_venta)}% "
+                f"· {_ars(cheque.ganancia)}{aviso}"
+            )
+        except (ServiceError, ValueError) as exc:
+            motivo = getattr(exc, "message", None) or str(exc)
+            fallidos.append(f"  • Nº {item.get('nro_cheque', '?')}: {motivo}")
+
+    lines: list[str] = []
+    if vendidos:
+        lines.append(f"✅ *{len(vendidos)} cheque(s) vendido(s)*")
+        lines.extend(vendidos)
+        lines.append("")
+        lines.append(f"Ganancia total: {_ars(ganancia_total)}")
+    if fallidos:
+        if vendidos:
+            lines.append("")
+        lines.append(f"⚠️ *{len(fallidos)} no se pudo(eron) vender*")
+        lines.extend(fallidos)
+    return bool(vendidos), "\n".join(lines)
+
+
+def _vender_un_cheque_obj(
+    db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None
+) -> Cheque:
+    """Vende un cheque y devuelve la fila, para poder resumir el lote."""
+    objetivo = _resolver_cheque(db, data)
+    pct_venta = _req_decimal(data, "porcentaje_venta")
+
+    cliente_destino_id: uuid.UUID | None = None
+    if cliente_nombre := data.get("cliente_nombre"):
+        cliente = _find_or_create_cliente(db, str(cliente_nombre))
+        cliente_destino_id = cliente.id
+
+    payload = ChequeManualTransition(
+        target_state=ChequeEstado.VENDIDO,
+        operador_id=phone,
+        motivo="Venta registrada por operador",
+        porcentaje_venta=pct_venta,
+        cliente_destino_id=cliente_destino_id,
+    )
+    return svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
+
+
+def _vender_un_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     objetivo = _resolver_cheque(db, data)
     pct_venta = _req_decimal(data, "porcentaje_venta")
 

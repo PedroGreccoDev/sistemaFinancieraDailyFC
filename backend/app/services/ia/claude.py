@@ -63,26 +63,51 @@ OPERACIONES DISPONIBLES
 ═══════════════════════════════════════
 
 1. REGISTRAR_CHEQUE
-   Cuándo: El operador manda foto de cheque o dicta datos de uno nuevo.
+   Cuándo: El operador manda foto(s) de cheque o dicta datos de cheques nuevos.
+   ⚠️ UNA FOTO PUEDE TRAER VARIOS CHEQUES. Miralas COMPLETAS y extraé TODOS los que
+      veas, aunque estén apilados, superpuestos, en abanico o girados. NUNCA
+      devuelvas solo uno si hay más: cada cheque que se te escape es plata que el
+      operador cree cargada y no está.
    data:
-     - nro_cheque: string (número del cheque, sin espacios ni guiones)
-     - banco: string o null (nombre del banco emisor; leerlo del cheque o del mensaje.
-       Es CLAVE: el número de cheque solo es único dentro de un banco.)
-     - monto: number ("$50.000,50" → 50000.50)
-     - porcentaje_compra: number (% que pagó para comprarlo)
-     - fecha_emision: "YYYY-MM-DD" o null
-     - fecha_pago: "YYYY-MM-DD" o null
-     - cliente_nombre: string o null (de quién lo recibió)
+     - cheques: ARRAY con un objeto por cheque (aunque sea uno solo). Cada objeto:
+         * nro_cheque: string (número del cheque, sin espacios ni guiones)
+         * banco: string o null (nombre del banco emisor; leerlo del cheque o del
+           mensaje. Es CLAVE: el número de cheque solo es único dentro de un banco.)
+         * monto: number ("$50.000,50" → 50000.50)
+         * porcentaje_compra: number o null (% que pagó para comprarlo)
+         * fecha_emision: "YYYY-MM-DD" o null
+         * fecha_pago: "YYYY-MM-DD" o null
+         * cliente_nombre: string o null (de quién lo recibió)
+   Reglas del multi-cheque:
+     - El porcentaje NUNCA está impreso en el cheque: viene del mensaje del operador.
+     - Si dice UN porcentaje y hay VARIOS cheques, aplicá ese mismo a todos
+       ("son 4 al 8%" → los 4 con porcentaje_compra 8).
+     - Si dice VARIOS porcentajes, asignalos en el orden en que los nombra.
+     - Si hay más de un cheque y NO aclara el/los porcentaje(s) → ACLARACION_REQUERIDA
+       preguntando si todos llevan el mismo descuento o cuál va con cada uno.
+       Nombrá los cheques por su número para que pueda contestarte.
+     - Si detectás varios cheques, poné confirmacion_requerida: true y listalos en
+       respuesta_usuario (número, banco y monto de cada uno) para que los revise
+       antes de cargarlos.
 
 2. VENDER_CHEQUE
-   Cuándo: El operador dice que vendió un cheque.
-   Ej: "Vendí el 12345 al 3%", "Lo vendí al 2.5% a Juan"
+   Cuándo: El operador dice que vendió uno o VARIOS cheques.
+   Ej: "Vendí el 12345 al 3%", "Lo vendí al 2.5% a Juan",
+       "Vendí el 123, el 456 y el 789 al 4%", "Vendí esos 4 cheques al 3% a Pedro"
+   ⚠️ Igual que el alta: si nombra varios cheques, devolvelos TODOS en el array.
    data:
-     - nro_cheque: string
-     - banco: string o null (si lo menciona; sirve para desambiguar si hay varios
-       cheques con el mismo número de bancos distintos)
-     - porcentaje_venta: number
-     - cliente_nombre: string o null (a quién se vendió)
+     - ventas: ARRAY con un objeto por cheque vendido (aunque sea uno solo). Cada uno:
+         * nro_cheque: string
+         * banco: string o null (si lo menciona; sirve para desambiguar si hay varios
+           cheques con el mismo número de bancos distintos)
+         * porcentaje_venta: number
+         * cliente_nombre: string o null (a quién se vendió)
+   Reglas:
+     - Un solo porcentaje mencionado con varios cheques → se aplica a todos.
+     - Si se refiere a "esos cheques" / "los que cargué recién" sin números, buscá
+       en el historial los últimos cheques registrados y usá sus números.
+     - Si no podés determinar QUÉ cheques son → ACLARACION_REQUERIDA.
+     - Con más de un cheque, poné confirmacion_requerida: true y listá cuáles son.
 
 3. FIAR_CHEQUE
    Cuándo: El operador entrega un cheque a alguien como crédito abierto (sin cuotas fijas).
@@ -313,6 +338,8 @@ REGLAS CRÍTICAS
    Ante duda con un modismo de monto, NO inventes: pedí ACLARACION_REQUERIDA.
 7. Nombres → normalizar con mayúsculas. "juan perez" → "Juan Perez".
 8. Si hay imagen de cheque → extraer nro_cheque, banco, monto, fecha_emision, fecha_pago con OCR.
+   REVISÁ LA FOTO ENTERA ANTES DE RESPONDER: si hay más de un cheque, van TODOS en
+   el array `cheques`. Un cheque omitido es plata que el operador da por cargada.
    El banco es el nombre de la entidad emisora impreso en el cheque (ej: "Banco Nación",
    "Santander", "Galicia", "BBVA"). Es importante porque el número de cheque se repite
    entre bancos: sin banco, dos cheques distintos pueden parecer el mismo.
@@ -358,6 +385,25 @@ FORMATO DE RESPUESTA — SIEMPRE ESTE EXACTO
 
 # MIME types que acepta la API de Claude para imágenes
 _VALID_IMAGE_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
+
+# Modelo que interpreta los mensajes del operador y hace el OCR de los cheques.
+# Es la parte cara de equivocarse: un dígito mal leído es plata mal cargada, y
+# desde que se leen VARIOS cheques por foto la exigencia subió bastante.
+_MODEL_INTENCION = "claude-opus-5"
+
+# Clasificar un "dale" / "no" es trivial: va con el modelo más barato y rápido.
+_MODEL_CONFIRMACION = "claude-haiku-4-5"
+
+
+def _texto_de(response: Any) -> str:
+    """Devuelve el texto de la respuesta, salteando los bloques de razonamiento.
+
+    Con el razonamiento activo, `content[0]` puede ser un bloque `thinking` y no
+    el texto — leerlo por índice devolvía basura o rompía."""
+    for bloque in response.content:
+        if getattr(bloque, "type", None) == "text":
+            return bloque.text.strip()
+    return ""
 
 # ---------------------------------------------------------------------------
 # Resultado de la extracción
@@ -453,12 +499,12 @@ async def clasificar_confirmacion(text: str) -> str:
     try:
         client = _get_client()
         response = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=_MODEL_CONFIRMACION,
             max_tokens=8,
             system=_CONFIRM_CLASSIFIER_PROMPT,
             messages=[{"role": "user", "content": text}],
         )
-        veredicto = response.content[0].text.strip().lower()
+        veredicto = _texto_de(response).lower()
         if "confirm" in veredicto:
             return "confirm"
         if "reject" in veredicto:
@@ -521,13 +567,26 @@ async def extraer_intencion(
 
     try:
         response = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
+            model=_MODEL_INTENCION,
+            # Tope de thinking + respuesta JUNTOS. En Opus 5 el razonamiento está
+            # activo por defecto, así que un cap chico (el viejo era 1024) se
+            # consume razonando y trunca el JSON a medio escribir.
+            max_tokens=8192,
+            # Leer 4 cheques de una foto es la tarea exigente; el resto del bot es
+            # clasificación simple. `medium` cubre bien ambos sin gastar de más.
+            output_config={"effort": "medium"},
             system=_SYSTEM_PROMPT,
             messages=messages,
         )
 
-        raw_text = response.content[0].text.strip()
+        if response.stop_reason == "refusal":
+            logger.warning("Claude rechazó el mensaje por sus clasificadores de seguridad.")
+            return IntentResult(
+                intent="DESCONOCIDO",
+                respuesta_usuario="⚠️ No pude procesar ese mensaje. Probá reformulándolo.",
+            )
+
+        raw_text = _texto_de(response)
         parsed = _parse_json_object(raw_text)
 
         # Validar que el intent sea uno de los reconocidos

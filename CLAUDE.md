@@ -418,6 +418,26 @@ cliente, operación, fecha).
 
 ## Bot WhatsApp
 
+- **Modelos (`services/ia/claude.py`):** `_MODEL_INTENCION = claude-opus-5` interpreta los
+  mensajes y hace el **OCR de los cheques** — es la parte cara de equivocarse: un dígito mal
+  leído es plata mal cargada. `_MODEL_CONFIRMACION = claude-haiku-4-5` solo clasifica
+  "dale"/"no". Tres cosas que hay que respetar al tocar esa llamada:
+  - **El razonamiento está activo por defecto** en Opus 5 y `max_tokens` es el tope de
+    *razonamiento + respuesta juntos*. Con un cap chico el JSON sale truncado (por eso 8192,
+    no 1024).
+  - **`content[0]` puede ser un bloque `thinking`**, no el texto: leer por índice devuelve
+    basura. Usar `_texto_de(response)`.
+  - `stop_reason == "refusal"` se maneja como mensaje no interpretable, no como error.
+- **Multi-cheque (§ punto 1, 2026-08-06): una foto puede traer varios cheques.**
+  `REGISTRAR_CHEQUE` devuelve `data.cheques` (ARRAY) y `VENDER_CHEQUE` devuelve `data.ventas`
+  (ARRAY), siempre — con un solo cheque el array trae un elemento. `_items_o_uno()` normaliza
+  y **tolera el formato viejo** de campos sueltos, para que una sesión abierta con historial
+  del contrato anterior no se rompa a mitad de conversación.
+  - **Porcentaje:** uno solo mencionado con varios cheques se aplica a todos; varios se
+    asignan en orden; si no lo aclara y hay más de uno → `ACLARACION_REQUERIDA` (no se inventa).
+  - **Fallo parcial: se cargan los válidos y se informa cuál falló** (decisión del dueño), en
+    vez de abortar el lote — así no hay que repetir la foto de los cuatro por uno duplicado.
+    Cada alta commitea por separado, que es lo que hace posible ese comportamiento.
 - El bot opera vía WAHA (WhatsApp HTTP API) → webhook `POST /webhook/whatsapp`.
 - Solo el número configurado en `WHATSAPP_OPERATOR_PHONE` puede operar.
 - Flujo: mensaje → parser → (audio: Whisper) → Claude → dispatcher → BD → respuesta WA.
