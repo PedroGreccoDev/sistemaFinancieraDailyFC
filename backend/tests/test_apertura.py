@@ -107,3 +107,67 @@ def test_saldo_de_apertura_se_calcula_con_signo_por_tipo() -> None:
         (m if t == CajaTipo.INGRESO else -m for t, m in movimientos), Decimal("0.00")
     )
     assert saldo == Decimal("29200000.00")
+
+
+# ── El saldo inicial es un punto de corte, no un sumando ──────────────
+
+def _saldo(movimientos, desde, corte=None):
+    """Réplica en memoria de `_saldo_hasta`: qué entra en el saldo de apertura.
+
+    `movimientos` son (fecha, tipo, monto); `corte` es la fecha del saldo inicial.
+    """
+    if corte is not None and corte <= desde:
+        elegidos = [m for m in movimientos if corte <= m[0] < desde]
+    else:
+        elegidos = [m for m in movimientos if m[0] < desde]
+    return sum(
+        (m if t == CajaTipo.INGRESO else -m for _, t, m in elegidos), Decimal("0.00")
+    )
+
+
+def test_sin_saldo_inicial_se_suma_toda_la_historia() -> None:
+    movs = [
+        (date(2026, 8, 5), CajaTipo.EGRESO, Decimal("33000000.00")),
+        (date(2026, 8, 6), CajaTipo.INGRESO, Decimal("500000.00")),
+    ]
+    assert _saldo(movs, date(2026, 8, 7)) == Decimal("-32500000.00")
+
+
+def test_el_dia_del_saldo_inicial_arranca_exactamente_en_ese_efectivo() -> None:
+    """El caso del cierre real: se cuenta la plata el 7 y se carga con fecha 7.
+
+    La apertura del 7 tiene que ser EXACTAMENTE lo contado. Si se sumara la
+    historia previa (millones en rojo por compras de cartera vieja), el sistema
+    mostraría muchísima menos plata de la que hay en el cajón.
+    """
+    corte = date(2026, 8, 7)
+    movs = [
+        (date(2026, 8, 5), CajaTipo.EGRESO, Decimal("33000000.00")),   # historia
+        (date(2026, 8, 6), CajaTipo.EGRESO, Decimal("5000000.00")),    # historia
+        (corte, CajaTipo.INGRESO, Decimal("2000000.00")),              # SALDO_INICIAL
+    ]
+    # Para el reporte DEL día 7, el saldo inicial cae dentro del período y lo suma
+    # `_caja`; la apertura previa tiene que dar 0, no la historia en rojo.
+    assert _saldo(movs, corte, corte) == Decimal("0.00")
+
+
+def test_dias_posteriores_arrastran_desde_el_saldo_inicial() -> None:
+    """El 8 abre con lo del 7 más lo que se movió el 7 — sin la historia previa."""
+    corte = date(2026, 8, 7)
+    movs = [
+        (date(2026, 8, 5), CajaTipo.EGRESO, Decimal("33000000.00")),  # queda afuera
+        (corte, CajaTipo.INGRESO, Decimal("2000000.00")),             # SALDO_INICIAL
+        (corte, CajaTipo.EGRESO, Decimal("300000.00")),               # gasto del 7
+    ]
+    assert _saldo(movs, date(2026, 8, 8), corte) == Decimal("1700000.00")
+
+
+def test_reportes_anteriores_al_corte_conservan_su_historia() -> None:
+    """Mirar un día previo al arranque sigue mostrando lo que pasó entonces: el
+    saldo inicial no reescribe el pasado, solo define desde dónde se cuenta."""
+    corte = date(2026, 8, 7)
+    movs = [
+        (date(2026, 8, 4), CajaTipo.EGRESO, Decimal("1000000.00")),
+        (corte, CajaTipo.INGRESO, Decimal("2000000.00")),
+    ]
+    assert _saldo(movs, date(2026, 8, 5), corte) == Decimal("-1000000.00")

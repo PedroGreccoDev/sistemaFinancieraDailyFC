@@ -12,6 +12,7 @@ from app.db.models import (
     CajaTipo,
     Cheque,
     ChequeEstado,
+    ConfiguracionApertura,
     Cuota,
     CuotaEstado,
     Moneda,
@@ -42,10 +43,24 @@ def _money(value: object) -> Decimal:
 def _saldo_hasta(db: Session, desde: date) -> dict[Moneda, Decimal]:
     """Saldo acumulado por moneda ANTES de `desde` (el saldo de apertura).
 
-    Suma todo el libro de caja anterior al período, con el signo que le da su
-    tipo. Incluye la línea `SALDO_INICIAL` con el efectivo de arranque, así que
-    el resultado es la plata que realmente había en la caja al abrir ese día.
+    **El saldo inicial es un punto de corte, no un sumando.** Cuando el efectivo
+    de arranque se cargó en una fecha `F`, el conteo empieza ahí: solo se suman
+    los movimientos en `[F, desde)`. Todo lo anterior a `F` queda afuera a
+    propósito — el efectivo que el dueño contó ese día **ya tiene descontado**
+    lo que pasó antes, así que sumarlo de nuevo lo restaría dos veces (el mismo
+    error que resuelve la fecha de corte de la cartera preexistente, §Apertura).
+
+    Sin saldo inicial definido, o para períodos anteriores a `F`, se suma toda la
+    historia previa: es lo único que se puede decir de esos días.
     """
+    corte = db.scalar(select(ConfiguracionApertura.fecha_saldo_inicial))
+
+    condiciones = [MovimientoCaja.fecha < desde]
+    if corte is not None and corte <= desde:
+        # La línea SALDO_INICIAL tiene fecha `corte`, así que entra sola en el
+        # rango y aporta el efectivo de arranque.
+        condiciones.append(MovimientoCaja.fecha >= corte)
+
     filas = db.execute(
         select(
             MovimientoCaja.moneda,
@@ -59,7 +74,7 @@ def _saldo_hasta(db: Session, desde: date) -> dict[Moneda, Decimal]:
                 0,
             ),
         )
-        .where(MovimientoCaja.fecha < desde)
+        .where(*condiciones)
         .group_by(MovimientoCaja.moneda)
     ).all()
     return {moneda: _money(total) for moneda, total in filas}
