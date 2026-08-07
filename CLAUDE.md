@@ -84,10 +84,24 @@ apertura**, no operaciones del día. Tabla singleton `configuracion_apertura` (m
   `ingresos_total`/`neto` y lo suma al **saldo de apertura**; su grupo es `APERTURA`. Si
   contara como ingreso, el día en que se carga aparecería con una entrada gigante que
   nunca ocurrió.
-- **El reporte cierra como una caja de verdad:** `saldo_apertura` (todo lo anterior al
-  período, vía `_saldo_hasta`) `+ ingresos − egresos = saldo_cierre`. El `neto` sigue
-  siendo el **flujo** del período: un día de solo compras da negativo —correcto, salió
-  plata— sin que el **saldo** esté en rojo.
+- **El saldo inicial es un PUNTO DE CORTE, no un sumando.** Con un saldo inicial en la
+  fecha `F`, el saldo de apertura de un día `D ≥ F` suma solo los movimientos en `[F, D)`:
+  la línea `SALDO_INICIAL` entra sola por tener fecha `F` y **todo lo anterior queda
+  afuera a propósito**. El efectivo que el dueño contó ese día ya tiene descontado lo que
+  pasó antes; sumarlo lo restaría dos veces. Esto es lo que hace que **no haga falta
+  revertir los otorgamientos de préstamos, fiados y deudas preexistentes**: a diferencia
+  de los cheques —que se siguen operando y por eso sí hay que corregirlos—, esos egresos
+  viejos simplemente quedan del otro lado de la línea.
+- **El reporte cierra como una caja de verdad:** `saldo_apertura` `+ ingresos − egresos =
+  saldo_cierre`. El `neto` sigue siendo el **flujo** del período: un día de solo compras da
+  negativo —correcto, salió plata— sin que el **saldo** esté en rojo.
+- ⚠️ **El `saldo_inicial_usd` NO crea stock FIFO.** Es efectivo en la caja USD, no un lote
+  de compra: `create_movimiento` consume lotes `MovimientoEfectivo` de tipo `COMPRA` con
+  `usd_restante > 0` (§4), y el saldo de apertura no genera ninguno. Si en una apertura el
+  negocio tiene dólares en mano y espera venderlos, hay que **crear además un lote inicial
+  con su costo real** ($/USD al que los consiguieron), o la venta va a fallar por stock
+  insuficiente pese a que el saldo diga que hay. En la apertura del 2026-08-06 no hizo
+  falta: no tenían dólares (se cargó 0).
 
 ---
 
