@@ -40,6 +40,9 @@ export default function AperturaSistema() {
 
   const [saldoArs, setSaldoArs] = useState('')
   const [saldoUsd, setSaldoUsd] = useState('')
+  // Costo promedio de los dólares en mano: sin él quedarían en la caja pero no se
+  // podrían vender, porque la venta consume lotes de compra con su costo.
+  const [cotizUsd, setCotizUsd] = useState('')
   const [fechaSaldo, setFechaSaldo] = useState('')
   const [guardandoSaldo, setGuardandoSaldo] = useState(false)
   const [confirmando, setConfirmando] = useState(false)
@@ -84,6 +87,7 @@ export default function AperturaSistema() {
       await definirSaldoInicial({
         saldo_ars: parseFloat(saldoArs) || 0,
         saldo_usd: parseFloat(saldoUsd) || 0,
+        cotizacion_usd: usdNum > 0 ? parseFloat(cotizUsd) || null : null,
         fecha: fechaSaldo,
         operador_id: user?.username ?? 'panel',
         forzar: cfg?.saldo_definido === true,
@@ -105,6 +109,12 @@ export default function AperturaSistema() {
 
   const corteDefinido = !!cfg?.fecha_corte_carga_inicial
   const saldoDefinido = cfg?.saldo_definido === true
+
+  const usdNum = parseFloat(saldoUsd) || 0
+  // Con dólares en mano, la cotización de costo es obligatoria: sin ella el lote
+  // no se crea y no se podrían vender.
+  const faltaCotiz = usdNum > 0 && (parseFloat(cotizUsd) || 0) <= 0
+  const puedeCargar = !!fechaSaldo && (!!saldoArs || !!saldoUsd) && !faltaCotiz
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -183,6 +193,7 @@ export default function AperturaSistema() {
               Cargado por <strong>{cfg!.definido_por}</strong> · {fmtDate(cfg!.fecha_saldo_inicial)}
               <br />
               {fmtARS(cfg!.saldo_inicial_ars ?? '0')} · {fmtUSD(cfg!.saldo_inicial_usd ?? '0')}
+              {cfg!.cotizacion_usd_inicial && <> (a ${cfg!.cotizacion_usd_inicial} promedio)</>}
             </p>
           </div>
         )}
@@ -202,12 +213,28 @@ export default function AperturaSistema() {
           </div>
         </div>
 
+        {/* El efectivo en USD por sí solo no habilita venderlos: la venta consume
+            lotes de compra, y hace falta saber a cuánto se consiguieron. */}
+        {usdNum > 0 && (
+          <div style={{ marginTop: '0.75rem' }}>
+            <label style={LABEL_STYLE}>¿A cuánto compraron esos dólares? (promedio, $/USD)</label>
+            <input type="number" step="0.01" min="0.01" value={cotizUsd} onChange={(e) => setCotizUsd(e.target.value)} placeholder="Ej: 1350,00" style={{ ...INPUT_STYLE, maxWidth: '14rem' }} />
+            <p style={{ ...HELP, marginTop: '0.35rem' }}>
+              Es el costo con el que el sistema calcula la ganancia cuando los vendan. Si los
+              compraron en tandas a precios distintos, poné el promedio: de ahí en adelante
+              cada compra nueva guarda su precio real.
+              <br />
+              <strong>Sin este dato los dólares quedan en la caja pero no se pueden vender.</strong>
+            </p>
+          </div>
+        )}
+
         {!confirmando ? (
           <button
             type="button"
             onClick={() => setConfirmando(true)}
-            disabled={!fechaSaldo || (!saldoArs && !saldoUsd)}
-            style={{ ...btnSolid('primary'), marginTop: '0.875rem', padding: '0.55rem 1.1rem', opacity: (!fechaSaldo || (!saldoArs && !saldoUsd)) ? 0.5 : 1 }}
+            disabled={!puedeCargar}
+            style={{ ...btnSolid('primary'), marginTop: '0.875rem', padding: '0.55rem 1.1rem', opacity: puedeCargar ? 1 : 0.5 }}
           >
             {saldoDefinido ? 'Corregir el saldo cargado' : 'Cargar saldo de apertura'}
           </button>
@@ -216,7 +243,8 @@ export default function AperturaSistema() {
             <p style={{ ...HELP, color: 'var(--text-1)', marginBottom: '0.75rem' }}>
               Vas a fijar la caja de apertura en{' '}
               <strong>{fmtARS(parseFloat(saldoArs) || 0)}</strong> y{' '}
-              <strong>{fmtUSD(parseFloat(saldoUsd) || 0)}</strong>, con fecha{' '}
+              <strong>{fmtUSD(usdNum)}</strong>
+              {usdNum > 0 && <> (comprados a <strong>${cotizUsd}</strong> promedio)</>}, con fecha{' '}
               <strong>{fmtDate(fechaSaldo)}</strong>.
               {saldoDefinido && ' Esto reemplaza el saldo cargado antes.'}
               <br />

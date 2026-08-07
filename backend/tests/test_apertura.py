@@ -171,3 +171,69 @@ def test_reportes_anteriores_al_corte_conservan_su_historia() -> None:
         (corte, CajaTipo.INGRESO, Decimal("2000000.00")),
     ]
     assert _saldo(movs, date(2026, 8, 5), corte) == Decimal("-1000000.00")
+
+
+# ── Stock inicial de dólares (lote de apertura) ───────────────────────
+
+def test_dolares_sin_cotizacion_se_rechazan() -> None:
+    """El efectivo en USD por sí solo NO habilita venderlos: la venta consume
+    lotes de compra (§4). Sin la cotización de costo no se puede armar el lote, y
+    el operador lo descubriría recién al intentar vender."""
+    from app.services.apertura import definir_saldo_inicial
+    from app.services.exceptions import ValidationError
+
+    class DB:
+        def get(self, *_a, **_k):
+            return _cfg(None)
+
+    try:
+        definir_saldo_inicial(
+            DB(),
+            saldo_ars=Decimal("1000"),
+            saldo_usd=Decimal("500"),  # hay dólares...
+            cotizacion_usd=None,        # ...pero no se dijo a cuánto se compraron
+            fecha=date(2026, 8, 7),
+            operador_id="panel",
+        )
+        raise AssertionError("debería haber exigido la cotización")
+    except ValidationError as exc:
+        assert "cotización" in str(exc)
+
+
+def test_sin_dolares_no_hace_falta_cotizacion() -> None:
+    """Caso de la apertura real del 2026-08-06: no tenían dólares, se cargó 0 y
+    el stock USD arranca vacío sin pedir nada."""
+    from app.services.apertura import definir_saldo_inicial
+    from app.services.exceptions import ValidationError
+
+    class DB:
+        def get(self, *_a, **_k):
+            return _cfg(None)
+
+    # Solo debe fallar por la BD falsa, NUNCA por la validación de cotización.
+    try:
+        definir_saldo_inicial(
+            DB(),
+            saldo_ars=Decimal("1000"),
+            saldo_usd=Decimal("0"),
+            cotizacion_usd=None,
+            fecha=date(2026, 8, 7),
+            operador_id="panel",
+        )
+    except ValidationError as exc:
+        raise AssertionError(f"no debía validar nada de cotización: {exc}") from exc
+    except Exception:
+        pass  # cualquier otra explosión viene del stub, no de la regla
+
+
+def test_el_lote_de_apertura_no_asienta_caja() -> None:
+    """El lote aporta stock, no plata: los pesos salieron antes de que el sistema
+    existiera y la caja USD ya la da la línea SALDO_INICIAL. Si `resync` le
+    inventara líneas, los dólares se contarían dos veces."""
+    import inspect
+
+    from app.services.movimientos import _resync_caja_movimiento
+
+    fuente = inspect.getsource(_resync_caja_movimiento)
+    assert "es_apertura" in fuente
+    assert "return" in fuente.split("es_apertura")[1][:80]

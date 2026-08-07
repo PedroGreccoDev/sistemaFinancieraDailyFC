@@ -220,6 +220,11 @@ def _reimputar_fifo(db: Session) -> None:
 def _resync_caja_movimiento(db: Session, mov: MovimientoEfectivo) -> None:
     """Reconstruye las dos líneas de caja (ARS + USD) de una operación de divisas."""
     svc_caja.borrar_por_referencia(db, _REF, mov.id)
+    # El lote de apertura nunca asentó caja —los pesos salieron antes de que el
+    # sistema existiera, y la caja USD la aporta la línea SALDO_INICIAL—, así que
+    # resincronizar no debe inventarle movimientos: duplicaría los dólares.
+    if mov.es_apertura:
+        return
     fecha_caja = fecha_local(mov.fecha_operacion)
     pesos = (mov.monto * mov.cotizacion_aplicada).quantize(Decimal("0.01"))
     if mov.tipo == MovimientoEfectivoTipo.COMPRA:

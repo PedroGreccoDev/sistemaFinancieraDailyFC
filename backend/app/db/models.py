@@ -474,6 +474,12 @@ class MovimientoEfectivo(AnulableMixin, Base):
     # Stock de USD aún no consumido de esta operación. Solo aplica a las COMPRA:
     # arranca = monto y se decrementa al imputar ventas FIFO (las VENTA quedan en 0).
     usd_restante:        Mapped[Decimal]  = mapped_column(sa.Numeric(18, 2), default=Decimal("0.00"))
+    # Lote de dólares que YA se tenían al arrancar el sistema (migración 0019).
+    # Aporta stock para poder vender, con su costo promedio, pero NO asienta caja:
+    # esos pesos salieron antes de que el sistema existiera. Ver §Apertura.
+    es_apertura:         Mapped[bool]     = mapped_column(
+        sa.Boolean(), nullable=False, server_default=sa.false(), default=False
+    )
     fecha_operacion:     Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), index=True
     )
@@ -812,6 +818,9 @@ class ConfiguracionApertura(Base):
     fecha_corte_carga_inicial: Mapped[date | None] = mapped_column(sa.Date(), nullable=True)
     saldo_inicial_ars:         Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
     saldo_inicial_usd:         Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+    # $/USD promedio al que se consiguió el stock inicial de dólares: es el costo
+    # contra el que se calcula la ganancia de las primeras ventas (migración 0019).
+    cotizacion_usd_inicial:    Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 4), nullable=True)
     # Día al que corresponde ese efectivo, NO el día en que se tipeó: se puede
     # cargar una semana después y el reporte igual cierra bien para atrás.
     fecha_saldo_inicial:       Mapped[date | None] = mapped_column(sa.Date(), nullable=True)

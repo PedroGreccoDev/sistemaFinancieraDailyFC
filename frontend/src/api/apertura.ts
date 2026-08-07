@@ -12,6 +12,8 @@ export interface ConfiguracionApertura {
   fecha_corte_carga_inicial: string | null
   saldo_inicial_ars: string | null
   saldo_inicial_usd: string | null
+  /** $/USD promedio al que se consiguió el stock inicial de dólares. */
+  cotizacion_usd_inicial: string | null
   /** Día al que corresponde el efectivo, no el día en que se cargó. */
   fecha_saldo_inicial: string | null
   definido_por: string | null
@@ -40,6 +42,8 @@ export const definirFechaCorte = (payload: {
 export const definirSaldoInicial = (payload: {
   saldo_ars: number
   saldo_usd: number
+  /** Obligatoria si saldo_usd > 0: sin ella los dólares no se pueden vender. */
+  cotizacion_usd?: number | null
   fecha: string
   operador_id: string
   forzar?: boolean

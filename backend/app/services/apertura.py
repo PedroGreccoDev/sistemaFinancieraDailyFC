@@ -145,6 +145,46 @@ def _borrar_egreso_compra(db: Session, cheque: Cheque) -> int:
 #  Saldo inicial de efectivo
 # ══════════════════════════════════════════════════════════════════════
 
+def _rehacer_lote_usd(
+    db: Session, *, saldo_usd: Decimal, cotizacion: Decimal, fecha: date
+) -> None:
+    """Crea el lote de dólares de apertura (borrando el anterior si lo había).
+
+    El `saldo_inicial_usd` da el **efectivo** en la caja USD, pero la venta de
+    divisas consume **lotes** (§4): sin lote, el negocio no puede vender los
+    dólares que tiene aunque el saldo diga que están.
+
+    El lote se inserta directo, sin pasar por `create_movimiento`, para que **no
+    asiente caja**: esos pesos salieron antes de que el sistema existiera. La caja
+    USD ya la aporta la línea `SALDO_INICIAL`, así que asentar la compra acá
+    duplicaría los dólares.
+    """
+    from app.db.models import MovimientoEfectivo, MovimientoEfectivoTipo
+
+    # Se rehace entero: el lote de apertura es uno solo, y si el operador corrige
+    # el saldo o la cotización tiene que reflejarse sin acumular lotes viejos.
+    db.query(MovimientoEfectivo).filter(
+        MovimientoEfectivo.es_apertura.is_(True)
+    ).delete(synchronize_session=False)
+
+    if saldo_usd <= 0:
+        return
+
+    db.add(
+        MovimientoEfectivo(
+            tipo=MovimientoEfectivoTipo.COMPRA,
+            moneda=Moneda.USD,
+            monto=saldo_usd,
+            cotizacion_aplicada=cotizacion,
+            ganancia=Decimal("0.00"),
+            usd_restante=saldo_usd,  # lote intacto: nada consumido todavía
+            fecha_operacion=datetime.combine(fecha, datetime.min.time(), tzinfo=UTC),
+            observaciones="Stock inicial de dólares (apertura del sistema)",
+            es_apertura=True,
+        )
+    )
+
+
 def definir_saldo_inicial(
     db: Session,
     *,
@@ -152,6 +192,7 @@ def definir_saldo_inicial(
     saldo_usd: Decimal,
     fecha: date,
     operador_id: str,
+    cotizacion_usd: Decimal | None = None,
     forzar: bool = False,
 ) -> ConfiguracionApertura:
     """Carga el efectivo con el que arrancó el negocio. **Por única vez.**
@@ -168,6 +209,14 @@ def definir_saldo_inicial(
         raise ValidationError("Se requiere identificar al operador.")
     if saldo_ars < 0 or saldo_usd < 0:
         raise ValidationError("Los saldos de apertura no pueden ser negativos.")
+    # Sin la cotización de costo no se puede armar el lote, y sin lote los dólares
+    # quedan en la caja pero no se pueden vender: mejor frenar acá que descubrirlo
+    # cuando el operador intente venderlos.
+    if saldo_usd > 0 and (cotizacion_usd is None or cotizacion_usd <= 0):
+        raise ValidationError(
+            "Indicá a qué cotización promedio ($/USD) se consiguieron esos dólares: "
+            "es el costo contra el que se calcula la ganancia al venderlos."
+        )
 
     cfg = get_configuracion(db)
     if cfg.saldo_definido and not forzar:
@@ -194,8 +243,18 @@ def definir_saldo_inicial(
                     detalle="Saldo inicial de caja (efectivo al arrancar el sistema)",
                 )
 
+        # Stock de dólares: el efectivo lo da la línea SALDO_INICIAL de arriba, el
+        # lote habilita venderlos con su costo real.
+        _rehacer_lote_usd(
+            db,
+            saldo_usd=saldo_usd,
+            cotizacion=cotizacion_usd or Decimal("0"),
+            fecha=fecha,
+        )
+
         cfg.saldo_inicial_ars = saldo_ars
         cfg.saldo_inicial_usd = saldo_usd
+        cfg.cotizacion_usd_inicial = cotizacion_usd if saldo_usd > 0 else None
         cfg.fecha_saldo_inicial = fecha
         cfg.definido_por = operador_id.strip()
         cfg.definido_at = datetime.now(tz=UTC)

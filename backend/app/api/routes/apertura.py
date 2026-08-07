@@ -52,6 +52,7 @@ def definir_saldo_inicial(
         db,
         saldo_ars=payload.saldo_ars,
         saldo_usd=payload.saldo_usd,
+        cotizacion_usd=payload.cotizacion_usd,
         fecha=payload.fecha,
         operador_id=payload.operador_id,
         forzar=payload.forzar,

@@ -95,13 +95,20 @@ apertura**, no operaciones del día. Tabla singleton `configuracion_apertura` (m
 - **El reporte cierra como una caja de verdad:** `saldo_apertura` `+ ingresos − egresos =
   saldo_cierre`. El `neto` sigue siendo el **flujo** del período: un día de solo compras da
   negativo —correcto, salió plata— sin que el **saldo** esté en rojo.
-- ⚠️ **El `saldo_inicial_usd` NO crea stock FIFO.** Es efectivo en la caja USD, no un lote
-  de compra: `create_movimiento` consume lotes `MovimientoEfectivo` de tipo `COMPRA` con
-  `usd_restante > 0` (§4), y el saldo de apertura no genera ninguno. Si en una apertura el
-  negocio tiene dólares en mano y espera venderlos, hay que **crear además un lote inicial
-  con su costo real** ($/USD al que los consiguieron), o la venta va a fallar por stock
-  insuficiente pese a que el saldo diga que hay. En la apertura del 2026-08-06 no hizo
-  falta: no tenían dólares (se cargó 0).
+- **Dólares de apertura: el efectivo NO alcanza, hace falta el lote.** El `saldo_inicial_usd`
+  da el **efectivo** en la caja USD, pero la venta consume **lotes** `MovimientoEfectivo` de
+  tipo `COMPRA` con `usd_restante > 0` (§4): sin lote no se pueden vender aunque el saldo
+  diga que están. Por eso `definir_saldo_inicial` **exige `cotizacion_usd`** cuando
+  `saldo_usd > 0` y crea un lote con `es_apertura=True` (migración `0019`) a ese costo
+  promedio — mejor frenar en la carga que descubrirlo al intentar vender.
+  - Ese lote se inserta con `db.add()` y **no asienta caja**: los pesos salieron antes de que
+    el sistema existiera, y la caja USD ya la aporta la línea `SALDO_INICIAL`. Asentarlo
+    duplicaría los dólares. `_resync_caja_movimiento` corta temprano si `es_apertura`, para
+    que editarlo tampoco le invente líneas.
+  - `_rehacer_lote_usd` **borra el lote anterior** antes de crear el nuevo: la apertura es
+    una sola, y corregir el saldo o la cotización no debe acumular lotes.
+  - El promedio es una aproximación de apertura: la ganancia de las primeras ventas se
+    calcula contra él. Cada compra posterior guarda su costo real y el FIFO vuelve a ser exacto.
 
 ---
 
