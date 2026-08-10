@@ -68,16 +68,87 @@ def test_registrar_y_vender_siguen_siendo_intents_validos() -> None:
     assert "VENDER_CHEQUE" in INTENTS
 
 
-# ── Modelo del OCR ────────────────────────────────────────────────────
+# ── Ruteo de modelos ──────────────────────────────────────────────────
 
 def test_el_ocr_usa_el_modelo_de_mayor_capacidad() -> None:
     """Leer varios cheques de una foto es la tarea cara de equivocarse del sistema:
-    un dígito mal leído es plata mal cargada."""
-    from app.services.ia.claude import _MODEL_CONFIRMACION, _MODEL_INTENCION
+    un dígito mal leído es plata mal cargada y NO da ninguna señal de error, así
+    que este camino no se abarata ni se le pone escalada (no hay a qué escalar)."""
+    from app.services.ia.claude import _MODEL_CONFIRMACION, _MODEL_OCR, _MODEL_TEXTO
 
-    assert _MODEL_INTENCION == "claude-opus-5"
+    assert _MODEL_OCR == "claude-opus-5"
+    # El texto va con un modelo más barato: ahí el error se ve y hay escalada.
+    assert _MODEL_TEXTO == "claude-sonnet-5"
+    assert _MODEL_OCR != _MODEL_TEXTO
     # Clasificar un "dale" no justifica el modelo caro.
     assert _MODEL_CONFIRMACION == "claude-haiku-4-5"
+
+
+def _espiar_modelos(monkeypatch, respuesta_por_modelo) -> list[str]:
+    """Reemplaza la pasada de extracción y registra a qué modelos se llamó."""
+    from app.services.ia import claude as mod
+
+    llamados: list[str] = []
+
+    async def _fake(model: str, effort: str, messages: list) -> object:
+        llamados.append(model)
+        return respuesta_por_modelo(model)
+
+    monkeypatch.setattr(mod, "_extraer_con_modelo", _fake)
+    return llamados
+
+
+def test_la_foto_va_al_modelo_de_ocr_y_el_texto_al_barato(monkeypatch) -> None:
+    import asyncio
+
+    from app.services.ia import claude as mod
+
+    llamados = _espiar_modelos(
+        monkeypatch, lambda _m: mod.IntentResult(intent="REGISTRAR_GASTO")
+    )
+
+    asyncio.run(mod.extraer_intencion(text="gasté 5000 de nafta", image_bytes=None, history=[]))
+    assert llamados == [mod._MODEL_TEXTO]
+
+    llamados.clear()
+    asyncio.run(mod.extraer_intencion(text="", image_bytes=b"bytes-de-foto", history=[]))
+    assert llamados == [mod._MODEL_OCR]
+
+
+def test_una_falla_dura_en_texto_escala_al_modelo_capaz(monkeypatch) -> None:
+    """None = JSON ilegible, rechazo o error de red. Es la única señal confiable
+    de que el modelo barato no pudo."""
+    import asyncio
+
+    from app.services.ia import claude as mod
+
+    llamados = _espiar_modelos(
+        monkeypatch,
+        lambda m: None if m == mod._MODEL_TEXTO else mod.IntentResult(intent="COBRAR_CUOTA"),
+    )
+
+    resultado = asyncio.run(
+        mod.extraer_intencion(text="juan pagó dos cuotas", image_bytes=None, history=[])
+    )
+
+    assert llamados == [mod._MODEL_TEXTO, mod._MODEL_OCR]
+    assert resultado.intent == "COBRAR_CUOTA"
+
+
+def test_pedir_una_aclaracion_no_dispara_escalada(monkeypatch) -> None:
+    """Si el operador no dijo el porcentaje, preguntarlo es la respuesta CORRECTA.
+    Escalar ahí duplicaría el costo de un caso que funcionó bien."""
+    import asyncio
+
+    from app.services.ia import claude as mod
+
+    llamados = _espiar_modelos(
+        monkeypatch, lambda _m: mod.IntentResult(intent="ACLARACION_REQUERIDA")
+    )
+
+    asyncio.run(mod.extraer_intencion(text="vendí el 681", image_bytes=None, history=[]))
+
+    assert llamados == [mod._MODEL_TEXTO]
 
 
 def test_el_texto_se_lee_salteando_los_bloques_de_razonamiento() -> None:
