@@ -377,11 +377,18 @@ cliente, operación, fecha).
   y totales, ventas/compras/cobros de cheque, compra/venta USD, otorgamientos, gastos, pagos de
   pasivo y vueltos). Se le suma el **ingreso de cheques a cartera** (tabla `cheques`), un evento
   **sin efectivo** (`flujo=NEUTRO`) que por eso no vive en el libro de caja. Cada ítem trae
-  `grupo` (COBROS/CHEQUES/DIVISAS/GASTOS/OTORGAMIENTOS/PASIVOS), `flujo` (INGRESO/EGRESO/NEUTRO)
-  y `referencia_tipo/id`. El front (`pages/Movimientos.tsx`) lo consume vía
-  `getMovimientosUnificados` con filtro combinado grupo × flujo; el botón "Editar" sigue solo en
-  las filas de divisas (referencia_tipo `movimiento`). **Al agregar una operación nueva que
+  `grupo` (COBROS/CHEQUES/DIVISAS/GASTOS/OTORGAMIENTOS/PASIVOS/APERTURA), `flujo`
+  (INGRESO/EGRESO/NEUTRO) y `referencia_tipo/id`. El front (`pages/Movimientos.tsx`) lo consume
+  vía `getMovimientosUnificados` con filtro combinado grupo × flujo; el botón "Editar" sigue solo
+  en las filas de divisas (referencia_tipo `movimiento`). **Al agregar una operación nueva que
   asiente en el libro de caja, aparece sola en Movimientos —no hay que tocar esta pantalla.**
+  - **Un `grupo` nuevo en el backend hay que darlo de alta en el front.** `MovimientoGrupo`
+    (`types/index.ts`) y `GRUPO_CONFIG` son la contraparte del `_GRUPO_POR_CATEGORIA` del
+    servidor: un grupo desconocido dejaba `cfg` en `undefined` y el render tiraba la página
+    entera a blanco. Ahora `cfgGrupo()` cae en `OTROS`, pero el alta sigue haciendo falta para
+    que la fila se vea con su color y entre en el filtro. `SALDO_INICIAL` (grupo `APERTURA`) se
+    lista pero **no suma a los chips de ingresos/egresos del día**: es apertura, no plata que
+    entró ese día (§Apertura del sistema).
 
 > ✅ **Estado de implementación:** el modelo de caja diaria es el **vigente**. El endpoint es
 > `GET /api/v1/reportes/caja?desde=&hasta=` (`svc_reportes.get_reporte_caja`), que lee el libro
@@ -439,16 +446,37 @@ cliente, operación, fecha).
 
 ## Bot WhatsApp
 
-- **Modelos (`services/ia/claude.py`):** `_MODEL_INTENCION = claude-opus-5` interpreta los
-  mensajes y hace el **OCR de los cheques** — es la parte cara de equivocarse: un dígito mal
-  leído es plata mal cargada. `_MODEL_CONFIRMACION = claude-haiku-4-5` solo clasifica
-  "dale"/"no". Tres cosas que hay que respetar al tocar esa llamada:
-  - **El razonamiento está activo por defecto** en Opus 5 y `max_tokens` es el tope de
+- **Ruteo de modelos por tarea (`services/ia/claude.py`, definido 2026-08-10).** El bot tiene
+  dos cargas de trabajo con perfiles de riesgo opuestos y se rutean según **si el mensaje trae
+  foto** — señal disponible antes de llamar (`image_bytes`):
+  - `_MODEL_OCR = claude-opus-5` (effort `medium`) — mensajes **con foto**. Es la parte cara de
+    equivocarse: un dígito mal leído es plata mal cargada. **Este camino no se abarata ni lleva
+    escalada.** Un error de OCR no lanza excepción ni devuelve señal: entrega un JSON impecable
+    con el número equivocado, así que no hay falla que detectar ni a qué reintentar.
+  - `_MODEL_TEXTO = claude-sonnet-5` (effort `low`) — mensajes **de solo texto**, el grueso del
+    volumen (cobros, gastos, ventas, consultas). Acá el error se ve —el bot muestra la operación
+    y el operador la corrige— y además hay escalada, así que el modelo barato es una apuesta
+    acotada. Hasta el commit `0acab9f` este camino corría en Sonnet 4.6 sin razonamiento.
+  - `_MODEL_CONFIRMACION = claude-haiku-4-5` — solo clasifica "dale"/"no", y únicamente cuando
+    la lista local `_CONFIRM_WORDS` del webhook no reconoce el modismo.
+- **Escalada solo ante señal confiable.** `_extraer_con_modelo` devuelve `None` ante una falla
+  **dura** (JSON ilegible, `refusal`, error de red); el camino de texto reintenta con
+  `_MODEL_OCR` ante ese `None` o ante un `DESCONOCIDO`. **No escala en `ACLARACION_REQUERIDA`:**
+  pedir un dato que el operador realmente no dijo es la respuesta correcta, y escalar ahí
+  duplicaría el costo de un caso que funcionó bien.
+- **Prompt caching del system prompt.** Son ~5.900 tokens idénticos en cada mensaje: van en un
+  bloque con `cache_control: ephemeral`, y una lectura cacheada cuesta ~10% de la entrada. El
+  caché es un match de **prefijo**: interpolar algo variable ahí (fecha, nombre del operador) lo
+  rompe **sin dar error** — solo se nota en los contadores que loguea `_loguear_uso_cache`
+  (`cache leido` en 0 mensaje tras mensaje). El TTL es de 5 min: conviene con mensajes en tanda,
+  y un mensaje aislado sale ~25% más caro. El clasificador de confirmación **no** se cachea:
+  su prompt son ~300 tokens y Haiku exige 4.096 como mínimo.
+- Dos cosas más que hay que respetar al tocar esas llamadas:
+  - **El razonamiento está activo por defecto** en estos modelos y `max_tokens` es el tope de
     *razonamiento + respuesta juntos*. Con un cap chico el JSON sale truncado (por eso 8192,
-    no 1024).
+    no 1024). Es un techo, no un cargo: solo se paga lo que se genera.
   - **`content[0]` puede ser un bloque `thinking`**, no el texto: leer por índice devuelve
     basura. Usar `_texto_de(response)`.
-  - `stop_reason == "refusal"` se maneja como mensaje no interpretable, no como error.
 - **Multi-cheque (§ punto 1, 2026-08-06): una foto puede traer varios cheques.**
   `REGISTRAR_CHEQUE` devuelve `data.cheques` (ARRAY) y `VENDER_CHEQUE` devuelve `data.ventas`
   (ARRAY), siempre — con un solo cheque el array trae un elemento. `_items_o_uno()` normaliza

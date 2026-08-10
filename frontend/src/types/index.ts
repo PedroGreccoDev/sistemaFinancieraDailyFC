@@ -119,7 +119,8 @@ export interface CuotaCobradaHistorialItem {
 // Feed unificado de Movimientos: TODA operación (libro de caja + ingresos de
 // cheques a cartera), venga del bot o del panel. Lo sirve GET /reportes/movimientos.
 export type MovimientoGrupo =
-  | 'COBROS' | 'CHEQUES' | 'DIVISAS' | 'GASTOS' | 'OTORGAMIENTOS' | 'PASIVOS' | 'OTROS'
+  | 'COBROS' | 'CHEQUES' | 'DIVISAS' | 'GASTOS' | 'OTORGAMIENTOS' | 'PASIVOS'
+  | 'APERTURA' | 'OTROS'
 export type MovimientoFlujo = 'INGRESO' | 'EGRESO' | 'NEUTRO'
 
 export interface MovimientoUnificado {

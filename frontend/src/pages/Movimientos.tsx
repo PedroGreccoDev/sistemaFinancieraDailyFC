@@ -107,8 +107,13 @@ const GRUPO_CONFIG: Record<MovimientoGrupo, { label: string; color: string; bg: 
   GASTOS:        { label: 'Gastos',        color: '#fb923c', bg: 'rgba(251,146,60,0.13)', initial: 'G' },
   OTORGAMIENTOS: { label: 'Otorgamientos', color: '#f472b6', bg: 'rgba(244,114,182,0.13)', initial: 'O' },
   PASIVOS:       { label: 'Pasivos',       color: '#f87171', bg: 'rgba(248,113,113,0.13)', initial: 'P' },
+  APERTURA:      { label: 'Apertura',      color: '#facc15', bg: 'rgba(250,204,21,0.13)',  initial: 'A' },
   OTROS:         { label: 'Otros',         color: '#94a3b8', bg: 'rgba(148,163,184,0.13)', initial: '•' },
 }
+
+// Un grupo que el backend agregue y el front todavía no conozca cae en OTROS.
+// Sin esto, `cfg.initial` sobre un `undefined` tira la página entera a blanco.
+const cfgGrupo = (g: MovimientoGrupo) => GRUPO_CONFIG[g] ?? GRUPO_CONFIG.OTROS
 
 // Etiqueta corta de cada categoría, para la línea secundaria de detalle.
 const CATEGORIA_LABEL: Record<string, string> = {
@@ -126,6 +131,7 @@ const CATEGORIA_LABEL: Record<string, string> = {
   PAGO_PASIVO:           'Pago de pasivo',
   VUELTO_PASIVO:         'Vuelto de pasivo',
   INGRESO_CHEQUE:        'Ingreso a cartera',
+  SALDO_INICIAL:         'Saldo inicial de caja',
 }
 
 function detalleSecundario(m: MovimientoUnificado): string {
@@ -230,8 +236,12 @@ export default function Movimientos() {
       const ex = map.get(m.fecha) ?? { resumen: { ingresosARS: 0, egresosARS: 0, ingresosUSD: 0, egresosUSD: 0 }, items: [] }
       const monto = parseFloat(m.monto) || 0
       const r = ex.resumen
-      if (m.flujo === 'INGRESO') { if (m.moneda === 'ARS') r.ingresosARS += monto; else r.ingresosUSD += monto }
-      else if (m.flujo === 'EGRESO') { if (m.moneda === 'ARS') r.egresosARS += monto; else r.egresosUSD += monto }
+      // El saldo inicial es apertura, no plata que entró ese día: se lista pero
+      // no suma a los chips (mismo criterio que el reporte de caja).
+      if (m.grupo !== 'APERTURA') {
+        if (m.flujo === 'INGRESO') { if (m.moneda === 'ARS') r.ingresosARS += monto; else r.ingresosUSD += monto }
+        else if (m.flujo === 'EGRESO') { if (m.moneda === 'ARS') r.egresosARS += monto; else r.egresosUSD += monto }
+      }
       ex.items.push(m)
       map.set(m.fecha, ex)
     }
@@ -252,7 +262,7 @@ export default function Movimientos() {
     setShowPicker(p === 'PERSONALIZADO')
   }
 
-  const gruposFiltro: GrupoFiltro[] = ['TODOS', 'COBROS', 'CHEQUES', 'DIVISAS', 'GASTOS', 'OTORGAMIENTOS', 'PASIVOS']
+  const gruposFiltro: GrupoFiltro[] = ['TODOS', 'COBROS', 'CHEQUES', 'DIVISAS', 'GASTOS', 'OTORGAMIENTOS', 'PASIVOS', 'APERTURA']
 
   return (
     <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
@@ -293,7 +303,7 @@ export default function Movimientos() {
           <DropdownFilter
             label="Operación"
             value={grupo}
-            options={gruposFiltro.map(g => ({ value: g, label: g === 'TODOS' ? 'Todas' : GRUPO_CONFIG[g].label }))}
+            options={gruposFiltro.map(g => ({ value: g, label: g === 'TODOS' ? 'Todas' : cfgGrupo(g).label }))}
             onChange={setGrupo}
           />
           <DropdownFilter
@@ -390,7 +400,7 @@ export default function Movimientos() {
 
               {/* Ítems del día */}
               {items.map(m => {
-                const cfg = GRUPO_CONFIG[m.grupo]
+                const cfg = cfgGrupo(m.grupo)
                 const initial = m.grupo === 'GASTOS'
                   ? m.descripcion.charAt(0).toUpperCase()
                   : cfg.initial
