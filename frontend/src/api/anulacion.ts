@@ -9,6 +9,7 @@ export type EntidadAnulable =
   | 'deuda_simple'
   | 'pasivo'
   | 'gasto'
+  | 'ajuste_caja'
 
 /** Una línea del libro de caja que la anulación va a revertir. */
 export interface LineaImpacto {

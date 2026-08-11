@@ -181,6 +181,7 @@ def test_toda_entidad_anulable_declara_sus_referencias_de_caja() -> None:
         "deuda_simple": ("deuda_simple", "deuda_simple_cobro"),
         "pasivo": ("pasivo",),
         "gasto": ("gasto",),
+        "ajuste_caja": ("ajuste_caja",),
     }
     assert {k: v.refs for k, v in _ENTIDADES.items()} == esperado
 
@@ -188,12 +189,14 @@ def test_toda_entidad_anulable_declara_sus_referencias_de_caja() -> None:
 def test_las_referencias_coinciden_con_las_que_escriben_los_servicios() -> None:
     """Las constantes de referencia viven en cada servicio; si alguna cambiara,
     la anulación dejaría de encontrar sus líneas y la caja quedaría descuadrada."""
+    from app.services.ajustes_caja import _REF as REF_AJUSTE
     from app.services.deudas_simples import _REF_COBRO, _REF_ORIGEN
     from app.services.movimientos import _REF as REF_DIVISAS
 
     assert _REF_ORIGEN in _ENTIDADES["deuda_simple"].refs
     assert _REF_COBRO in _ENTIDADES["deuda_simple"].refs
     assert REF_DIVISAS in _ENTIDADES["movimiento_efectivo"].refs
+    assert REF_AJUSTE in _ENTIDADES["ajuste_caja"].refs
 
 
 # ── Intent del bot ────────────────────────────────────────────────────

@@ -120,7 +120,7 @@ export interface CuotaCobradaHistorialItem {
 // cheques a cartera), venga del bot o del panel. Lo sirve GET /reportes/movimientos.
 export type MovimientoGrupo =
   | 'COBROS' | 'CHEQUES' | 'DIVISAS' | 'GASTOS' | 'OTORGAMIENTOS' | 'PASIVOS'
-  | 'APERTURA' | 'OTROS'
+  | 'APERTURA' | 'AJUSTES' | 'OTROS'
 export type MovimientoFlujo = 'INGRESO' | 'EGRESO' | 'NEUTRO'
 
 export interface MovimientoUnificado {
@@ -170,6 +170,30 @@ export interface Pasivo {
   fecha_cancelacion: string | null
   observaciones: string | null
   cotizacion_pago: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Por qué se tocó la caja a mano. */
+export type AjusteCajaMotivo = 'CORRECCION' | 'APORTE' | 'RETIRO' | 'OTRO'
+
+/**
+ * Plata agregada o restada a la caja sin una operación de negocio detrás.
+ * `tipo` da el sentido: INGRESO suma efectivo, EGRESO lo resta (`monto` siempre
+ * positivo). `cotizacion_usd` solo viene cuando el ajuste sumó dólares: es el
+ * costo del lote FIFO que se creó para poder venderlos después.
+ */
+export interface AjusteCaja {
+  id: string
+  fecha: string
+  moneda: Moneda
+  tipo: 'INGRESO' | 'EGRESO'
+  motivo: AjusteCajaMotivo
+  monto: string
+  cotizacion_usd: string | null
+  lote_id: string | null
+  descripcion: string | null
+  operador_id: string
   created_at: string
   updated_at: string
 }

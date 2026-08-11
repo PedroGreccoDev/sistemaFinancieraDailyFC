@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, undefer
 
 from app.core.fechas import TZ_LOCAL
 from app.db.models import (
+    AjusteCaja,
     Cheque,
     Cliente,
     Cuota,
@@ -40,6 +41,10 @@ _CH = [
     "porcentaje_compra", "porcentaje_venta", "ganancia", "estado",
     "ultimo_evento_manual_at", "ultimo_operador_id", "ultimo_motivo_manual",
     "foto", "foto_mime", "cliente_origen_id", "cliente_destino_id",
+    # Marca de cartera preexistente (§Apertura). Sin ella el import devuelve esos
+    # cheques como compras normales y al editarlos se les asienta el egreso
+    # COMPRA_CHEQUE que el régimen de apertura quita: la plata se descuenta dos veces.
+    "es_carga_inicial",
     "created_at", "updated_at", *_ANUL,
 ]
 _PR = [
@@ -54,6 +59,10 @@ _CU = [
 _MO = [
     "id", "cliente_id", "tipo", "moneda", "monto", "cotizacion_aplicada",
     "ganancia", "usd_restante", "fecha_operacion", "observaciones", "created_at", "updated_at",
+    # Las dos marcas tienen que viajar: un lote de apertura o de ajuste que vuelve
+    # como compra normal se gana líneas de caja que nunca existieron al editarlo,
+    # y `_rehacer_lote_usd` deja de encontrarlo para reemplazarlo.
+    "es_apertura", "es_ajuste",
     *_ANUL,
 ]
 _FI = [
@@ -62,6 +71,8 @@ _FI = [
 ]
 _PA = [
     "id", "acreedor", "concepto", "monto", "saldo_pendiente", "moneda",
+    # Cotización default de los pagos que cruzan monedas (§5).
+    "cotizacion_pago",
     "estado", "fecha_vencimiento", "fecha_cancelacion", "observaciones",
     "created_at", "updated_at", *_ANUL,
 ]
@@ -76,7 +87,15 @@ _DS = [
 ]
 _MC = [
     "id", "fecha", "moneda", "tipo", "categoria", "monto", "ganancia",
+    # Con qué medio se pagó cada pasivo y el $/USD de los pagos que cruzan monedas
+    # (migración 0014). Sin ellos el import los devuelve en NULL y se pierde el
+    # detalle de auditoría de esas líneas.
+    "medio_pago", "cotizacion",
     "referencia_tipo", "referencia_id", "detalle", "created_at", "updated_at",
+]
+_AJ = [
+    "id", "fecha", "moneda", "tipo", "motivo", "monto", "cotizacion_usd",
+    "lote_id", "descripcion", "operador_id", "created_at", "updated_at", *_ANUL,
 ]
 
 # ── Validación de schema ────────────────────────────────────────────────────
@@ -94,6 +113,7 @@ _REQUIRED: dict[str, frozenset[str]] = {
     # los traen y deben seguir importando. Solo se validan si la tabla viene presente.
     "movimientos_caja":     frozenset({"id", "fecha", "moneda", "tipo", "categoria", "monto"}),
     "deudas_simples":       frozenset({"id", "cliente_id", "concepto", "monto", "saldo_pendiente", "moneda", "estado", "fecha"}),
+    "ajustes_caja":         frozenset({"id", "fecha", "moneda", "tipo", "motivo", "monto"}),
 }
 
 
@@ -113,12 +133,13 @@ def _validate_schema(tablas: dict) -> list[str]:
 
 _UUID_COLS = frozenset({
     "id", "cliente_id", "cheque_id", "prestamo_id",
-    "cliente_origen_id", "cliente_destino_id", "referencia_id",
+    "cliente_origen_id", "cliente_destino_id", "referencia_id", "lote_id",
 })
 _DEC_COLS = frozenset({
     "monto", "monto_pagado", "credito", "total_a_cobrar", "ganancia",
     "porcentaje_compra", "porcentaje_venta", "cotizacion_aplicada",
     "monto_original", "saldo_pendiente", "usd_restante", "cotizacion_pago",
+    "cotizacion_usd", "cotizacion",
 })
 _DT_COLS = frozenset({"created_at", "updated_at", "ultimo_evento_manual_at", "anulado_at"})
 _BYTES_COLS = frozenset({"foto"})
@@ -163,6 +184,7 @@ def exportar_json(db: Session) -> dict:
             "gastos_operativos":    [_serialize(r, _GA) for r in db.query(GastoOperativo).all()],
             "deudas_simples":       [_serialize(r, _DS) for r in db.query(DeudaSimple).all()],
             "movimientos_caja":     [_serialize(r, _MC) for r in db.query(MovimientoCaja).all()],
+            "ajustes_caja":         [_serialize(r, _AJ) for r in db.query(AjusteCaja).all()],
         },
     }
 
@@ -206,6 +228,7 @@ _TIME_GA = frozenset({"hora_operacion"})
 _DT_MO   = frozenset({"fecha_operacion"})
 _DATE_MC = frozenset({"fecha"})
 _DATE_DS = frozenset({"fecha", "fecha_cancelacion"})
+_DATE_AJ = frozenset({"fecha"})
 
 
 def importar_json(db: Session, data: dict) -> dict[str, int]:
@@ -226,9 +249,11 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         raise ValueError(f"{len(errors)} error(es) de schema:\n{preview}{suffix}")
 
     try:
+        # `ajustes_caja` va primero: referencia a `movimientos_efectivo` por su lote.
         for tbl in (
-            "movimientos_caja", "cuotas", "fiados", "deudas_simples", "movimientos_efectivo",
-            "prestamos", "cheques", "pasivos", "gastos_operativos", "clientes",
+            "ajustes_caja", "movimientos_caja", "cuotas", "fiados", "deudas_simples",
+            "movimientos_efectivo", "prestamos", "cheques", "pasivos",
+            "gastos_operativos", "clientes",
         ):
             db.execute(sa.text(f"DELETE FROM {tbl}"))  # noqa: S608
 
@@ -246,6 +271,8 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         bulk(GastoOperativo,     [_cv(r, date_cols=_DATE_GA, time_cols=_TIME_GA) for r in tablas.get("gastos_operativos", [])])
         bulk(DeudaSimple,        [_cv(r, date_cols=_DATE_DS) for r in tablas.get("deudas_simples", [])])
         bulk(MovimientoCaja,     [_cv(r, date_cols=_DATE_MC) for r in tablas.get("movimientos_caja", [])])
+        # Después de movimientos_efectivo: cada ajuste en USD apunta a su lote.
+        bulk(AjusteCaja,         [_cv(r, date_cols=_DATE_AJ) for r in tablas.get("ajustes_caja", [])])
 
         db.commit()
     except Exception:
@@ -255,7 +282,7 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
     tabla_names = (
         "clientes", "cheques", "prestamos", "cuotas",
         "movimientos_efectivo", "fiados", "pasivos", "gastos_operativos",
-        "deudas_simples", "movimientos_caja",
+        "deudas_simples", "movimientos_caja", "ajustes_caja",
     )
     return {t: len(tablas.get(t, [])) for t in tabla_names}
 

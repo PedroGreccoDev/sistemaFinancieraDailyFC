@@ -39,7 +39,7 @@ de modo que el asiento de caja y la operación de negocio son **atómicos** (o a
   el signo lo da el `tipo`.
 - `categoria` — el origen del movimiento: `COBRO_CUOTA`, `COBRO_FIADO`, `VENTA_CHEQUE`,
   `COBRO_CHEQUE`, `COMPRA_CHEQUE`, `COMPRA_USD`, `VENTA_USD`, `OTORGAMIENTO_PRESTAMO`, `GASTO`,
-  `PAGO_PASIVO`, `VUELTO_PASIVO`, `OTORGAMIENTO_DEUDA`, `COBRO_DEUDA`.
+  `PAGO_PASIVO`, `VUELTO_PASIVO`, `OTORGAMIENTO_DEUDA`, `COBRO_DEUDA`, `AJUSTE_CAJA`.
 - `referencia_tipo` / `referencia_id` — enlace flojo a la entidad que lo originó
   (cheque/préstamo/cuota/fiado/pasivo/gasto/movimiento/deuda_simple/deuda_simple_cobro).
   `COBRO_CUOTA` referencia la `cuota`
@@ -112,6 +112,60 @@ apertura**, no operaciones del día. Tabla singleton `configuracion_apertura` (m
 
 ---
 
+## Ajustes de caja — agregar o restar efectivo a mano _(régimen definido 2026-08-10)_
+
+Toda otra línea del libro nace de una operación de negocio. Un **ajuste** es la
+excepción explícita: plata que entra o sale **sin** operación detrás. Tabla
+`ajustes_caja` (modelo `AjusteCaja`, migración `0020`), servicio `svc_ajustes_caja`,
+router `/ajustes-caja`, categoría `AJUSTE_CAJA`, grupo de reporte `AJUSTES`.
+
+- **Motivos** (`AjusteCajaMotivo`): `CORRECCION` (el sistema no coincide con el
+  efectivo real del cajón), `APORTE` / `RETIRO` (el dueño puso o sacó plata) y
+  `OTRO`, que **exige descripción** — sin la razón escrita, en un mes nadie puede
+  reconstruir por qué la caja se movió sola.
+- **Cuenta como ingreso/egreso del período** (decisión del dueño). A diferencia de
+  `SALDO_INICIAL`, **no** va al saldo de apertura: un aporte levanta el neto del día
+  como si hubiera sido un buen día de operación. Es a propósito — el neto es el flujo
+  real de caja. Si algún día molesta al leer el reporte, moverlo a una línea aparte
+  es cambiar su grupo en `_GRUPO_POR_CATEGORIA`.
+- **Es una entidad propia, no una línea suelta del libro**, para poder auditar el
+  motivo y anularla con el motor común (`/anulaciones/ajuste_caja/{id}`).
+- **No se edita: se anula y se vuelve a cargar.** Un ajuste en USD mueve la cadena
+  FIFO y editarlo obligaría a reescribir imputaciones ya hechas. Anular deja además
+  el rastro de qué se corrigió y por qué.
+
+**Dólares — el efectivo no alcanza, hace falta el stock.** La caja USD y el stock
+vendible son cosas distintas (§4). Por eso:
+
+- **Sumar USD exige `cotizacion_usd`** y crea un lote `MovimientoEfectivo` con
+  `es_ajuste=True`, igual que el lote de apertura. Ese lote **no asienta caja** (la
+  caja USD ya la mueve la línea `AJUSTE_CAJA`): `_resync_caja_movimiento` corta
+  temprano con `es_apertura or es_ajuste`, y `list_movimientos` lo excluye para que
+  no figure como una compra que nunca ocurrió.
+- **Restar USD consume lotes FIFO sin realizar ganancia** —esos dólares se fueron,
+  pero nadie los compró—. Falla con `ValidationError` si no hay stock.
+- **Los ajustes tienen que entrar en `_reimputar_fifo`.** Esa función resetea el
+  stock de **todos** los lotes y lo vuelve a imputar; un consumo hecho por fuera se
+  restauraría **solo y en silencio** la próxima vez que alguien editara o anulara una
+  operación de divisas. `_consumidores_de_stock` mezcla ventas y ajustes en orden
+  cronológico; el ajuste se ubica al **arranque de su día** (solo guarda la fecha,
+  no la hora) para no reordenar las ventas entre sí, que se comparan por
+  `fecha_operacion` completa.
+- **Bloqueos al anular** (`_validar_ajuste`): un ajuste que sumó USD cuyo lote ya fue
+  vendido (aunque sea en parte), y uno que restó USD con ventas posteriores. Mismo
+  criterio que las operaciones de divisas: hacia atrás solo se deshace la última.
+  En ARS nunca hay bloqueo. Anular un ajuste que sumó dólares **borra su lote**
+  (el lote no tiene historia propia; el ajuste sí queda anulado y auditable).
+- **Backup:** `es_apertura` y `es_ajuste` viajan en el export (`_MO`) — ver §8 para por
+  qué las listas de columnas tienen que estar completas. `ajustes_caja` se borra
+  **primero** y se inserta **después** de `movimientos_efectivo`: apunta a su lote por FK.
+
+**Panel:** botón "± Ajustar caja" en la página **Movimientos**
+(`ModalAjusteCaja`), y botón "Eliminar" en las filas del grupo `AJUSTES` del feed.
+No hay intent de bot.
+
+---
+
 ## Anulación y reversión — "Eliminar" no borra _(régimen definido 2026-08-06)_
 
 El botón **Eliminar** del panel **anula**: la fila queda con `anulado_at` /
@@ -126,7 +180,9 @@ imposible esa reconstrucción.
   reversión y (pendiente) el bot. `anular()` barre **todas** las `refs` de caja de la
   entidad —un préstamo asienta con `prestamo` y `cuota`; una deuda simple con
   `deuda_simple` y `deuda_simple_cobro`—; el catálogo `_ENTIDADES` fija ese mapa y hay
-  tests que lo custodian.
+  tests que lo custodian. **Una entidad anulable nueva se da de alta ahí y en el test
+  que custodia el catálogo**, o la anulación la marcaría de baja dejando sus líneas de
+  caja vivas.
 - **Reversión ≠ anulación.** `revertir_cheque` devuelve un cheque terminal a
   `EN_CARTERA` **sin eliminarlo** (queda disponible para volver a venderse): borra el
   ingreso de venta/cobro y **conserva el egreso de la compra**, que sigue siendo cierto.
@@ -138,7 +194,7 @@ imposible esa reconstrucción.
 - **Bloqueos** (lo que no se puede deshacer solo): un fiado que ya recibió cobros
   parciales; una **compra** de USD cuyo lote ya fue consumido; una **venta** de USD que
   no es la última (reescribiría ganancias FIFO ya reportadas); un cheque entregado para
-  pagar un pasivo.
+  pagar un pasivo; un **ajuste de caja** en USD que trabó la cadena (§Ajustes de caja).
 - **Cascadas:** anular un cheque `FIADO` arrastra su fiado; anular un **fiado** devuelve
   el cheque a `EN_CARTERA` (si no, quedaría entregado a crédito sin nadie debiendo).
 - **Unicidad sobre las filas vivas:** `(banco, nro_cheque)` y "un fiado por cheque" son
@@ -377,7 +433,7 @@ cliente, operación, fecha).
   y totales, ventas/compras/cobros de cheque, compra/venta USD, otorgamientos, gastos, pagos de
   pasivo y vueltos). Se le suma el **ingreso de cheques a cartera** (tabla `cheques`), un evento
   **sin efectivo** (`flujo=NEUTRO`) que por eso no vive en el libro de caja. Cada ítem trae
-  `grupo` (COBROS/CHEQUES/DIVISAS/GASTOS/OTORGAMIENTOS/PASIVOS/APERTURA), `flujo`
+  `grupo` (COBROS/CHEQUES/DIVISAS/GASTOS/OTORGAMIENTOS/PASIVOS/APERTURA/AJUSTES), `flujo`
   (INGRESO/EGRESO/NEUTRO) y `referencia_tipo/id`. El front (`pages/Movimientos.tsx`) lo consume
   vía `getMovimientosUnificados` con filtro combinado grupo × flujo; el botón "Editar" sigue solo
   en las filas de divisas (referencia_tipo `movimiento`). **Al agregar una operación nueva que
@@ -403,6 +459,14 @@ cliente, operación, fecha).
 > FIFO de divisas (§4), gastos por moneda restando el neto de su moneda (§6) y el vuelto de pasivos
 > pagados con cheque "de más" (§5).
 
+### 7.b Ajustes manuales de caja
+
+Agregar o restar efectivo a mano, sin operación de negocio detrás. Ver
+**§Ajustes de caja** para el régimen completo (motivos, tratamiento en el reporte y
+lo que hay que respetar al tocar dólares).
+
+---
+
 ### 8. Backup / Configuración _(módulo agregado)_
 
 - Página **Configuración** del panel web: apertura del sistema (§Apertura, componente
@@ -410,6 +474,14 @@ cliente, operación, fecha).
 - `GET /api/v1/backup/exportar`: snapshot completo en JSON (incluye fotos de cheques embebidas).
   **Conserva los registros anulados con su marca** — es una copia fiel de la base; si no los
   llevara, un ciclo export→import los resucitaría.
+- **Las listas `_CL`/`_CH`/… fijan qué columnas viajan, y tienen que estar completas.** Una
+  columna que falta no rompe el export: el daño aparece al importar, **en silencio** (vuelve
+  en NULL o en su default). Ya pasó con `es_carga_inicial` —la cartera preexistente volvía como
+  compra normal y se le asentaba el egreso que §Apertura quita, o sea plata descontada dos
+  veces—, con `es_apertura`/`es_ajuste` y con `medio_pago`/`cotizacion`. `test_backup_columnas.py`
+  compara cada lista contra su modelo, así que **una migración que agregue una columna hace
+  fallar el test** y obliga a decidir si va al backup. Si es Decimal, además va en `_DEC_COLS`:
+  sin eso se inserta como texto y el descuadre recién se nota al sumar la caja.
 - `GET /api/v1/backup/exportar-excel`: export a XLSX (filtrable por día local ART). **Excluye los
   anulados** (y las cuotas de préstamos anulados): es un reporte de trabajo, no una copia.
 - `POST /api/v1/backup/importar`: import con **validación de schema** antes de aplicar.
@@ -554,6 +626,12 @@ cliente, operación, fecha).
     es la última. Incluye dos tests que **custodian el catálogo `_ENTIDADES`**: si una entidad
     perdiera alguna `referencia_tipo`, la anulación dejaría líneas de caja vivas contando plata
     que ya no existe, y eso pasaría desapercibido.
+  - **`test_backup_columnas.py`** — custodia que cada lista de columnas del export cubra
+    **todas** las del modelo (§8). Falla a propósito cuando una migración agrega una columna
+    nueva: es el único aviso de que el import la devolvería vacía sin decir nada.
+  - **`test_ajustes_caja.py`** — ajustes manuales (§Ajustes de caja): el consumo FIFO de
+    un ajuste que resta USD (`consumir_lotes_fifo`, que es la misma primitiva que usa la
+    venta) y las reglas de bloqueo de `_validar_ajuste` al anular uno en dólares.
   - **`test_apertura.py`** — fecha de corte de la carga inicial (§Apertura): el día del corte es
     inclusive, después vuelve a descontar, y sin corte definido todo es operación normal. Fija
     además que `SALDO_INICIAL` va al grupo `APERTURA` y no cuenta como ingreso del día.

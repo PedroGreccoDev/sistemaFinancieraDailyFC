@@ -98,6 +98,22 @@ class CajaCategoria(str, enum.Enum):
     # Efectivo que ya estaba en el cajón al poner el sistema en marcha. No es un
     # ingreso del día: el reporte lo trata como saldo de apertura (§Apertura).
     SALDO_INICIAL        = "SALDO_INICIAL"
+    # Plata agregada o restada a mano, sin operación de negocio detrás: corrección
+    # de un descuadre, aporte o retiro del dueño (§Ajustes de caja).
+    AJUSTE_CAJA          = "AJUSTE_CAJA"
+
+
+class AjusteCajaMotivo(str, enum.Enum):
+    """Por qué se tocó la caja a mano. Se elige al cargar el ajuste."""
+
+    # El sistema no coincide con el efectivo real del cajón y se emparejan.
+    CORRECCION = "CORRECCION"
+    # El dueño puso plata en el negocio.
+    APORTE     = "APORTE"
+    # El dueño sacó plata del negocio.
+    RETIRO     = "RETIRO"
+    # Cualquier otra razón; exige descripción.
+    OTRO       = "OTRO"
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -480,6 +496,13 @@ class MovimientoEfectivo(AnulableMixin, Base):
     es_apertura:         Mapped[bool]     = mapped_column(
         sa.Boolean(), nullable=False, server_default=sa.false(), default=False
     )
+    # Lote creado por un ajuste manual de caja que sumó dólares (migración 0020).
+    # Aporta stock igual que una compra, pero NO asienta caja: la línea del propio
+    # ajuste ya movió la caja USD. Tampoco es una operación de divisas, así que
+    # queda fuera del listado de Divisas. Ver §Ajustes de caja.
+    es_ajuste:           Mapped[bool]     = mapped_column(
+        sa.Boolean(), nullable=False, server_default=sa.false(), default=False
+    )
     fecha_operacion:     Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), index=True
     )
@@ -712,6 +735,62 @@ class MovimientoCaja(Base):
     referencia_tipo: Mapped[str | None]       = mapped_column(sa.String(40), nullable=True)
     referencia_id:   Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True, index=True)
     detalle:         Mapped[str | None]       = mapped_column(sa.Text(), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: AjusteCaja  (agregar o restar efectivo a mano)
+# ══════════════════════════════════════════════════════════════════════
+
+class AjusteCaja(AnulableMixin, Base):
+    """Plata que entra o sale de la caja sin una operación de negocio detrás.
+
+    Corrige un descuadre contra el efectivo real del cajón, o registra que el
+    dueño puso o sacó plata. Asienta una línea `AJUSTE_CAJA` en el libro con el
+    `tipo` que le corresponde, así que cuenta como ingreso/egreso del período.
+
+    Es una entidad propia y no una línea suelta del libro para poder auditar
+    **por qué** se tocó la caja y anularla con el motor común (§Anulación).
+    """
+
+    __tablename__ = "ajustes_caja"
+    __table_args__ = (
+        sa.CheckConstraint("monto > 0", name="ck_ajustes_caja_monto_positive"),
+        sa.CheckConstraint(
+            "cotizacion_usd IS NULL OR cotizacion_usd > 0",
+            name="ck_ajustes_caja_cotizacion_positive",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    fecha:  Mapped[date]   = mapped_column(sa.Date(), index=True)
+    moneda: Mapped[Moneda] = mapped_column(
+        sa.Enum(Moneda, name="moneda", create_type=False), index=True
+    )
+    # INGRESO suma efectivo, EGRESO lo resta. `monto` siempre positivo.
+    tipo:   Mapped[CajaTipo] = mapped_column(
+        sa.Enum(CajaTipo, name="caja_tipo", create_type=False)
+    )
+    motivo: Mapped[AjusteCajaMotivo] = mapped_column(
+        sa.Enum(AjusteCajaMotivo, name="ajuste_caja_motivo", create_type=False)
+    )
+    monto:  Mapped[Decimal] = mapped_column(sa.Numeric(18, 2))
+    # Solo cuando el ajuste SUMA USD: costo ($/USD) del lote FIFO que crea, para
+    # que esos dólares se puedan vender después con su ganancia bien calculada.
+    cotizacion_usd: Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 6), nullable=True)
+    # Lote creado por este ajuste, si sumó dólares. Se borra al anularlo.
+    lote_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        sa.ForeignKey("movimientos_efectivo.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    descripcion: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    operador_id: Mapped[str]        = mapped_column(sa.String(80))
 
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -186,6 +186,7 @@ _GRUPO_POR_CATEGORIA: dict[CajaCategoria, str] = {
     CajaCategoria.OTORGAMIENTO_DEUDA:    "OTORGAMIENTOS",
     CajaCategoria.PAGO_PASIVO:           "PASIVOS",
     CajaCategoria.VUELTO_PASIVO:         "PASIVOS",
+    CajaCategoria.AJUSTE_CAJA:           "AJUSTES",
 }
 
 # Fallback de descripción cuando la línea de caja no trae `detalle`.
@@ -204,6 +205,7 @@ _LABEL_CATEGORIA: dict[CajaCategoria, str] = {
     CajaCategoria.OTORGAMIENTO_DEUDA:    "Otorgamiento de deuda",
     CajaCategoria.PAGO_PASIVO:           "Pago de deuda (pasivo)",
     CajaCategoria.VUELTO_PASIVO:         "Vuelto de pasivo",
+    CajaCategoria.AJUSTE_CAJA:           "Ajuste de caja",
 }
 
 _LABEL_ESTADO_CHEQUE: dict[ChequeEstado, str] = {

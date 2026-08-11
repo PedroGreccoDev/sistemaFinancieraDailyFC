@@ -10,6 +10,7 @@ import type { MovimientoEfectivo, MovimientoUnificado, MovimientoGrupo, Movimien
 import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
 import ModalEliminar from '../components/ModalEliminar'
+import ModalAjusteCaja from '../components/ModalAjusteCaja'
 
 type GrupoFiltro = 'TODOS' | MovimientoGrupo
 type FlujoFiltro = 'TODOS' | MovimientoFlujo
@@ -108,6 +109,7 @@ const GRUPO_CONFIG: Record<MovimientoGrupo, { label: string; color: string; bg: 
   OTORGAMIENTOS: { label: 'Otorgamientos', color: '#f472b6', bg: 'rgba(244,114,182,0.13)', initial: 'O' },
   PASIVOS:       { label: 'Pasivos',       color: '#f87171', bg: 'rgba(248,113,113,0.13)', initial: 'P' },
   APERTURA:      { label: 'Apertura',      color: '#facc15', bg: 'rgba(250,204,21,0.13)',  initial: 'A' },
+  AJUSTES:       { label: 'Ajustes',       color: '#2dd4bf', bg: 'rgba(45,212,191,0.13)',  initial: '±' },
   OTROS:         { label: 'Otros',         color: '#94a3b8', bg: 'rgba(148,163,184,0.13)', initial: '•' },
 }
 
@@ -132,6 +134,7 @@ const CATEGORIA_LABEL: Record<string, string> = {
   VUELTO_PASIVO:         'Vuelto de pasivo',
   INGRESO_CHEQUE:        'Ingreso a cartera',
   SALDO_INICIAL:         'Saldo inicial de caja',
+  AJUSTE_CAJA:           'Ajuste de caja',
 }
 
 function detalleSecundario(m: MovimientoUnificado): string {
@@ -173,6 +176,8 @@ export default function Movimientos() {
   const [showPicker, setShowPicker]   = useState(false)
   const [editarDivisaId, setEditarDivisaId] = useState<string | null>(null)
   const [eliminarDivisaId, setEliminarDivisaId] = useState<string | null>(null)
+  const [ajustandoCaja, setAjustandoCaja] = useState(false)
+  const [eliminarAjusteId, setEliminarAjusteId] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   const { desde, hasta } = getRango(preset, customDesde, customHasta)
@@ -215,6 +220,15 @@ export default function Movimientos() {
     queryClient.invalidateQueries({ queryKey: ['movimientos'] })
     queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
     // Sacar la operación de la cadena reimputa el FIFO: cambian ganancias del reporte.
+    queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
+    queryClient.invalidateQueries({ queryKey: ['reporte'] })
+  }
+
+  function handleAjusteCaja() {
+    setAjustandoCaja(false)
+    queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
+    // Un ajuste en USD crea o consume lotes: cambia el stock y el reporte.
+    queryClient.invalidateQueries({ queryKey: ['movimientos'] })
     queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
     queryClient.invalidateQueries({ queryKey: ['reporte'] })
   }
@@ -262,7 +276,7 @@ export default function Movimientos() {
     setShowPicker(p === 'PERSONALIZADO')
   }
 
-  const gruposFiltro: GrupoFiltro[] = ['TODOS', 'COBROS', 'CHEQUES', 'DIVISAS', 'GASTOS', 'OTORGAMIENTOS', 'PASIVOS', 'APERTURA']
+  const gruposFiltro: GrupoFiltro[] = ['TODOS', 'COBROS', 'CHEQUES', 'DIVISAS', 'GASTOS', 'OTORGAMIENTOS', 'PASIVOS', 'AJUSTES', 'APERTURA']
 
   return (
     <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
@@ -300,6 +314,13 @@ export default function Movimientos() {
 
         {/* Derecha: filtros */}
         <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setAjustandoCaja(true)}
+            style={{ ...btnBordered('neutral'), padding: '0.45rem 0.9rem', fontSize: '0.78rem', whiteSpace: 'nowrap' }}
+          >
+            ± Ajustar caja
+          </button>
           <DropdownFilter
             label="Operación"
             value={grupo}
@@ -409,6 +430,8 @@ export default function Movimientos() {
                 // 'movimiento_efectivo' (svc_movimientos._REF). Comparar contra
                 // 'movimiento' hacía que los botones nunca aparecieran.
                 const esDivisaEditable = m.grupo === 'DIVISAS' && m.referencia_tipo === 'movimiento_efectivo' && m.referencia_id != null
+                // Un ajuste no se edita: se anula y se vuelve a cargar (§Ajustes de caja).
+                const esAjuste = m.grupo === 'AJUSTES' && m.referencia_tipo === 'ajuste_caja' && m.referencia_id != null
                 const color = m.flujo === 'EGRESO' ? '#f87171'
                   : m.flujo === 'NEUTRO' ? 'rgba(100,116,139,0.7)'
                   : 'var(--text-1)'
@@ -491,6 +514,15 @@ export default function Movimientos() {
                         </button>
                       </>
                     )}
+                    {esAjuste && (
+                      <button
+                        onClick={() => setEliminarAjusteId(m.referencia_id)}
+                        title="Eliminar el ajuste y revertir su impacto en caja"
+                        style={{ ...btnBordered('danger'), fontSize: '0.66rem', padding: '2px 9px', flexShrink: 0 }}
+                      >
+                        Eliminar
+                      </button>
+                    )}
                   </div>
                 )
               })}
@@ -513,6 +545,20 @@ export default function Movimientos() {
           id={eliminarDivisaId}
           onClose={() => setEliminarDivisaId(null)}
           onSuccess={handleEliminarDivisa}
+        />
+      )}
+      {ajustandoCaja && (
+        <ModalAjusteCaja
+          onClose={() => setAjustandoCaja(false)}
+          onSuccess={handleAjusteCaja}
+        />
+      )}
+      {eliminarAjusteId && (
+        <ModalEliminar
+          entidad="ajuste_caja"
+          id={eliminarAjusteId}
+          onClose={() => setEliminarAjusteId(null)}
+          onSuccess={() => { setEliminarAjusteId(null); handleAjusteCaja() }}
         />
       )}
     </div>

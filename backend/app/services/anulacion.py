@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import select, tuple_
@@ -30,12 +30,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    AjusteCaja,
     CajaCategoria,
+    CajaTipo,
     Cheque,
     ChequeEstado,
     DeudaSimple,
     Fiado,
     GastoOperativo,
+    Moneda,
     MovimientoCaja,
     MovimientoEfectivo,
     MovimientoEfectivoTipo,
@@ -80,6 +83,7 @@ _ENTIDADES: dict[str, _Spec] = {
     "deuda_simple":       _Spec(DeudaSimple,        ("deuda_simple", "deuda_simple_cobro"), "deuda"),
     "pasivo":             _Spec(Pasivo,             ("pasivo",),                            "deuda del negocio"),
     "gasto":              _Spec(GastoOperativo,     ("gasto",),                             "gasto"),
+    "ajuste_caja":        _Spec(AjusteCaja,         ("ajuste_caja",),                       "ajuste de caja"),
 }
 
 
@@ -188,6 +192,12 @@ def _describir(obj, spec: _Spec) -> str:
         return f"Préstamo a {cliente} — {obj.moneda.value} {obj.credito:,.2f} — {obj.estado.value}"
     if isinstance(obj, MovimientoEfectivo):
         return f"{obj.tipo.value} de {obj.monto} USD @ ${obj.cotizacion_aplicada}"
+    if isinstance(obj, AjusteCaja):
+        signo = "+" if obj.tipo == CajaTipo.INGRESO else "−"
+        return (
+            f"Ajuste de caja {signo}{obj.moneda.value} {obj.monto:,.2f} "
+            f"— {obj.motivo.value}"
+        )
     if isinstance(obj, Fiado):
         cliente = obj.cliente.nombre if obj.cliente else "sin cliente"
         return f"Fiado de {cliente} — saldo ${obj.saldo_pendiente:,.2f} — {obj.estado.value}"
@@ -243,6 +253,52 @@ def _validar(db: Session, entidad: str, obj) -> tuple[str | None, list[str]]:
         return _validar_movimiento(db, obj)
     if entidad == "fiado":
         return _validar_fiado(obj)
+    if entidad == "ajuste_caja":
+        return _validar_ajuste(db, obj)
+    return None, []
+
+
+def _validar_ajuste(db: Session, ajuste: AjusteCaja) -> tuple[str | None, list[str]]:
+    """Un ajuste en ARS se anula siempre; uno en USD, solo si no trabó el FIFO.
+
+    Anular un ajuste de dólares le devuelve (o le saca) stock a la cadena, y eso
+    reescribiría la ganancia de las ventas que vinieron después. Mismo criterio que
+    con las operaciones de divisas: hacia atrás solo se deshace la última.
+    """
+    if ajuste.moneda != Moneda.USD:
+        return None, []
+
+    # Sumó dólares: si su lote ya se vendió (aunque sea en parte), sacarlo dejaría
+    # esas ventas sin el stock del que salieron.
+    if ajuste.lote_id is not None:
+        lote = db.get(MovimientoEfectivo, ajuste.lote_id)
+        if lote is not None and lote.usd_restante != lote.monto:
+            consumido = lote.monto - lote.usd_restante
+            return (
+                f"No se puede anular este ajuste: {consumido} de los {lote.monto} USD "
+                "que agregó ya fueron vendidos. Anulá primero esas ventas.",
+                [],
+            )
+        return None, []
+
+    # Restó dólares: consumió lotes. Devolverlos cambiaría contra qué lote se
+    # imputó cada venta posterior, y con eso su ganancia ya reportada.
+    posterior = db.scalar(
+        select(MovimientoEfectivo.id)
+        .where(
+            MovimientoEfectivo.tipo == MovimientoEfectivoTipo.VENTA,
+            MovimientoEfectivo.anulado_at.is_(None),
+            MovimientoEfectivo.fecha_operacion
+            >= datetime.combine(ajuste.fecha, time.min, tzinfo=UTC),
+        )
+        .limit(1)
+    )
+    if posterior is not None:
+        return (
+            "Este ajuste sacó dólares del stock y después hubo ventas que dependen "
+            "de esa imputación FIFO. Anulá primero esas ventas.",
+            [],
+        )
     return None, []
 
 
@@ -408,7 +464,24 @@ def anular(
                 cheque.ultimo_motivo_manual = f"Vuelto a cartera al eliminar el fiado: {motivo.strip()}"
                 cheque.ultimo_evento_manual_at = datetime.now(tz=UTC)
 
+        # Anular un ajuste que sumó dólares se lleva su lote: ese stock no existió.
+        # Se borra en serio (no se anula) porque el lote no es una operación con
+        # historia propia, es el reflejo del ajuste — que sí queda anulado y auditable.
+        if entidad == "ajuste_caja" and obj.lote_id is not None:
+            lote = db.get(MovimientoEfectivo, obj.lote_id)
+            obj.lote_id = None
+            if lote is not None:
+                db.delete(lote)
+
         _marcar(obj, operador_id, motivo)
+
+        # Un ajuste en dólares aporta o consume stock: sacarlo de la cadena obliga
+        # a recalcular, igual que una operación de divisas.
+        if entidad == "ajuste_caja" and obj.moneda == Moneda.USD:
+            from app.services.movimientos import _reimputar_fifo
+
+            db.flush()
+            _reimputar_fifo(db)
 
         # Sacar una operación de divisas de la cadena obliga a recalcular el FIFO.
         if entidad == "movimiento_efectivo":
