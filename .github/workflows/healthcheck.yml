@@ -87,11 +87,19 @@ jobs:
         run: |
           TEXTO=$(printf '🔴 BOT CAÍDO (watchdog externo)\n\n%s\n\n🕒 %s ART' \
             "$MOTIVO" "$(TZ=America/Argentina/Buenos_Aires date '+%d/%m/%Y %H:%M')")
-          curl -sS --max-time 20 -X POST \
-            "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${CHAT}" \
-            --data-urlencode "text=${TEXTO}" \
-            --data-urlencode "disable_web_page_preview=true" > /dev/null
+          # TELEGRAM_CHAT_ID acepta varios separados por coma, igual que
+          # TELEGRAM_CHAT_IDS del backend: conviene mandar al grupo Y a un
+          # privado, porque si el grupo se convierte en supergrupo su id cambia
+          # y las alertas dejarían de llegar sin que nadie se entere.
+          echo "$CHAT" | tr ',' '\n' | while read -r destino; do
+            destino=$(echo "$destino" | tr -d '[:space:]')
+            [ -z "$destino" ] && continue
+            curl -sS --max-time 20 -X POST \
+              "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${destino}" \
+              --data-urlencode "text=${TEXTO}" \
+              --data-urlencode "disable_web_page_preview=true" > /dev/null
+          done
 
       - name: Fallar el job si el bot está caído
         if: steps.check.outputs.caido == 'true'
