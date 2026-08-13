@@ -8,10 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import ajustes_caja, anulacion, apertura, auth, backup, cheques, clientes, deudas_simples, fiados, gastos_operativos, movimientos, pasivos, prestamos, reportes, webhook
+from app.api.routes import ajustes_caja, anulacion, apertura, auth, backup, cheques, clientes, deudas_simples, fiados, gastos_operativos, health, movimientos, pasivos, prestamos, reportes, webhook
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.db.session import SessionLocal
+from app.services import monitor
 from app.services.exceptions import ServiceError
 from app.services.usuarios import bootstrap_admin
 
@@ -54,11 +55,23 @@ def _startup() -> None:
     finally:
         db.close()
 
+    # Vigilancia de salud en background (WAHA, sesión de WhatsApp, BD) con
+    # alerta por Telegram. No corre si falta la config de Telegram, y si algo
+    # sale mal al arrancarla no puede tumbar el proceso web: el monitor existe
+    # para avisar de caídas, no para causarlas.
+    try:
+        monitor.iniciar()
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).error("No se pudo iniciar el monitor de salud: %s", exc)
 
-@app.get("/health", tags=["health"])
-def health() -> dict[str, str]:
-    return {"status": "ok"}
 
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    await monitor.detener()
+
+
+# Salud — público: /health (liveness de Railway) y /health/deep (watchdog externo)
+app.include_router(health.router)
 
 # Autenticación (login, recuperación, invitaciones, gestión de usuarios) — público
 app.include_router(auth.router, prefix=settings.api_v1_prefix)

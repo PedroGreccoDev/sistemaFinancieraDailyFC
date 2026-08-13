@@ -137,6 +137,9 @@ async def send_text(phone: str, text: str, link_preview: bool = False) -> bool:
         status = "WORKING"
     if status not in _SESSION_OK:
         logger.error("Sesión WAHA en estado %r; no se puede enviar a %s (¿escanear QR?)", status, phone)
+        # El operador está esperando una respuesta que no va a llegar: avisar
+        # por Telegram acá es lo que evita enterarse por el cliente.
+        await _alertar_no_entregado(f"sesion-{status}", f"la sesión de WhatsApp está en {status}")
         return False
 
     # 2. Resolver el chatId canónico (corrige el dígito 9 de los celulares AR/BR).
@@ -162,7 +165,26 @@ async def send_text(phone: str, text: str, link_preview: bool = False) -> bool:
         return True
     except httpx.HTTPError as exc:
         logger.error("Error enviando mensaje WA a %s tras reintentos: %s", phone, exc)
+        await _alertar_no_entregado("envio-fallido", f"WAHA rechazó el envío tras reintentos: {exc}")
         return False
+
+
+async def _alertar_no_entregado(clave: str, motivo: str) -> None:
+    """Avisa por Telegram que un mensaje de WhatsApp no se pudo entregar.
+
+    Nunca propaga: el envío ya falló y romper acá además taparía el `False` que
+    el llamador necesita para seguir su camino.
+    """
+    try:
+        from app.services import monitor  # import local: evita ciclo con el monitor
+
+        await monitor.alertar_error(
+            clave,
+            "El bot no pudo responder por WhatsApp",
+            f"{motivo}\n\nEl operador mandó un mensaje y no recibió respuesta.",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("No se pudo alertar por Telegram del envío fallido: %s", exc)
 
 
 async def get_media_bytes(media_url: str) -> tuple[bytes, str]:

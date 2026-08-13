@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import traceback
 from datetime import datetime
 from typing import Any
 
@@ -10,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
+from app.services import monitor
 from app.services.ia import claude as ia_claude
 from app.services.ia import whisper as ia_whisper
 from app.services.whatsapp import client as wa_client
@@ -129,6 +131,13 @@ async def _procesar_mensaje_safe(
         await _procesar_mensaje(msg, settings)
     except Exception as exc:
         logger.exception("Error no controlado procesando mensaje de %s: %s", msg.phone, exc)
+        # El operador ve un "error inesperado" y sigue; sin este aviso nadie del
+        # lado técnico se entera de que el bot dejó de poder operar.
+        await monitor.alertar_error(
+            clave=f"webhook-{type(exc).__name__}",
+            titulo="Error procesando un mensaje del bot",
+            detalle=f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}",
+        )
         await wa_client.send_text(
             msg.phone,
             "⚠️ Ocurrió un error inesperado. Por favor intentá de nuevo.",

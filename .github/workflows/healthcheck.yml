@@ -1,0 +1,84 @@
+# Watchdog externo del bot.
+#
+# El monitor interno del backend (services/monitor.py) vigila WAHA, la sesión de
+# WhatsApp y Postgres — pero corre DENTRO del proceso: si Railway tumba el
+# backend, se cae junto con él y nadie avisa. Este workflow es la otra mitad:
+# pega desde afuera cada 5 minutos y avisa por Telegram si el backend no
+# contesta o contesta que algo está caído.
+#
+# Secrets a configurar en el repo (Settings → Secrets and variables → Actions):
+#   HEALTH_URL          https://tu-backend.up.railway.app/health/deep
+#   HEALTH_TOKEN        el mismo valor que la env var HEALTH_TOKEN de Railway
+#   TELEGRAM_BOT_TOKEN  token del bot de Telegram (@BotFather)
+#   TELEGRAM_CHAT_ID    chat/grupo donde avisar
+#
+# Nota sobre el cron de GitHub: el intervalo es "best effort" y en horas pico
+# puede correrse varios minutos. Alcanza para enterarse antes que el cliente,
+# pero no es un monitor de segundos.
+
+name: Healthcheck del bot
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: # permite dispararlo a mano para probar la alerta
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar /health/deep
+        id: check
+        run: |
+          set +e
+          CODIGO=$(curl -sS --max-time 25 \
+            -H "X-Health-Token: ${{ secrets.HEALTH_TOKEN }}" \
+            -o respuesta.json -w '%{http_code}' \
+            "${{ secrets.HEALTH_URL }}")
+          CURL_EXIT=$?
+          set -e
+
+          echo "codigo=$CODIGO"   >> "$GITHUB_OUTPUT"
+          echo "curl_exit=$CURL_EXIT" >> "$GITHUB_OUTPUT"
+
+          if [ "$CURL_EXIT" -ne 0 ]; then
+            # Ni siquiera hubo respuesta: el proceso está muerto, sin DNS o sin red.
+            echo "motivo=El backend NO responde (curl exit $CURL_EXIT). El servicio puede estar caído en Railway." >> "$GITHUB_OUTPUT"
+            echo "caido=true" >> "$GITHUB_OUTPUT"
+          elif [ "$CODIGO" = "200" ]; then
+            echo "caido=false" >> "$GITHUB_OUTPUT"
+          else
+            # 503 = diagnóstico CAIDO (el cuerpo dice qué pieza); otro código = algo raro.
+            DETALLE=$(jq -r '[.chequeos[] | select(.estado != "OK") | "• \(.nombre): \(.detalle)"] | join("\n")' respuesta.json 2>/dev/null || echo "")
+            # Ojo: `[ -z "$X" ] && ...` acá cortaría el step por `set -e` cuando el
+            # test da falso, y la alerta nunca se enviaría.
+            if [ -z "$DETALLE" ]; then
+              DETALLE=$(head -c 500 respuesta.json)
+            fi
+            {
+              echo "motivo<<FIN"
+              echo "HTTP $CODIGO"
+              echo "$DETALLE"
+              echo "FIN"
+              echo "caido=true"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Avisar por Telegram
+        if: steps.check.outputs.caido == 'true'
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MOTIVO: ${{ steps.check.outputs.motivo }}
+        run: |
+          TEXTO=$(printf '🔴 BOT CAÍDO (watchdog externo)\n\n%s\n\n🕒 %s ART' \
+            "$MOTIVO" "$(TZ=America/Argentina/Buenos_Aires date '+%d/%m/%Y %H:%M')")
+          curl -sS --max-time 20 -X POST \
+            "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT}" \
+            --data-urlencode "text=${TEXTO}" \
+            --data-urlencode "disable_web_page_preview=true" > /dev/null
+
+      - name: Fallar el job si el bot está caído
+        if: steps.check.outputs.caido == 'true'
+        run: exit 1

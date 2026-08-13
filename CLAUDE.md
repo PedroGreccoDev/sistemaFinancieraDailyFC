@@ -490,7 +490,8 @@ lo que hay que respetar al tocar dólares).
 
 - Login **por usuario+contraseña** para el panel. La validación es **en el backend**: todos los
   routers de negocio van con `dependencies=[Depends(get_current_user)]` en `app/main.py`. **Públicos:**
-  `/health`, `auth.router`, el `webhook` de WhatsApp y `cheques.public_router` (solo `GET /cheques/{id}/foto`; ver Chequera Virtual).
+  `health.router` (`/health` y `/health/deep`, este último con su propio `HEALTH_TOKEN` — ver §10),
+  `auth.router`, el `webhook` de WhatsApp y `cheques.public_router` (solo `GET /cheques/{id}/foto`; ver Chequera Virtual).
 - **Sesión sin caducidad por tiempo:** el JWT (HS256, `app/core/auth.py`) **no lleva `exp`**; lleva
   `sub` + `ver`. La revocación es por BD: `get_current_user` exige `usuario.activo` y que `ver` del
   token coincida con `usuario.token_version`. Resetear/recuperar la clave **incrementa `token_version`**
@@ -513,6 +514,60 @@ lo que hay que respetar al tocar dólares).
   `/usuarios` es `adminOnly`). `apiFetch` (`api/client.ts`) inyecta el Bearer y, ante **401** en ruta
   protegida, limpia el token y vuelve a `/login`. En `VITE_MOCK=1` el `AuthContext` cortocircuita con
   un admin mock para que la demo siga navegable sin backend.
+
+### 10. Monitoreo de salud y alertas _(módulo agregado 2026-08-13)_
+
+El bot se cayó una vez y **se enteró antes el cliente que nosotros**. Esta capa
+existe para que eso no vuelva a pasar: vigila las piezas, y cuando algo se rompe
+avisa **por Telegram** diciendo **qué** se rompió.
+
+- **Telegram y no WhatsApp, a propósito.** La caída más común es que la sesión de
+  WhatsApp se desvincule del celular; avisar por el canal que se cayó es imposible.
+  `services/telegram.py` es el único canal de alerta y **nunca lanza**: una alerta
+  que revienta el proceso que intentaba alertar es peor que no tenerla.
+- **Cuatro piezas, no una** (`services/health.py`, todas en el mismo diagnóstico):
+  `base_datos` (`SELECT 1`), `waha` (el gateway responde), `sesion_wa` (el `status`
+  de la sesión) y `webhook_wa`. Cada chequeo trae su `detalle` en castellano y ese
+  texto va tal cual al mensaje: tiene que decirle qué hacer a quien lo lee a las 3 AM.
+  - **`webhook_wa` es el que atrapa la caída silenciosa:** sesión `WORKING`, gateway
+    sano y ni un mensaje llegando porque WAHA se reinició sin su config de webhook.
+    Desde afuera el bot parece perfecto. Compara contra `PUBLIC_BASE_URL` y es
+    **tolerante**: si la respuesta de WAHA no trae `config.webhooks` devuelve OK en
+    vez de inventar una caída permanente.
+  - `SCAN_QR_CODE`/`FAILED`/`STOPPED` son **CAIDO**; `STARTING` es solo `DEGRADADO`
+    (es transitorio: tratarlo como caída daría un falso positivo en cada deploy).
+- **Dos capas de vigilancia, y sacar una deja un agujero:**
+  - **Interna** (`services/monitor.py`): tarea de fondo del backend, cada
+    `MONITOR_INTERVALO_SEGUNDOS`. Ve todo lo que rodea al proceso, pero **no puede
+    avisar si el proceso muere**. Asume **un solo worker de uvicorn** (lo que hace
+    `entrypoint.sh`); con varios workers cada uno alertaría por su cuenta.
+  - **Externa** (`.github/workflows/healthcheck.yml`): cron de GitHub Actions cada
+    5 min contra `GET /health/deep`. Es la única que detecta "Railway tumbó el
+    servicio". El cron de GitHub es *best effort* y puede correrse unos minutos.
+- **`/health` y `/health/deep` no son lo mismo y confundirlos rompe el deploy.**
+  `/health` es el healthcheck de Railway (`railway.toml`): trivial, 200 mientras el
+  proceso viva. Si devolviera error porque WAHA está caído, Railway daría el deploy
+  por fallido y **reiniciaría el backend en loop** por un problema ajeno.
+  `/health/deep` es el diagnóstico completo, protegido con `HEALTH_TOKEN`, y devuelve
+  **503 cuando algo está CAIDO** para que cualquier monitor de uptime lo note sin
+  leer el cuerpo.
+- **La alerta tiene que significar algo** (`health.decidir_alerta`, función pura y
+  testeada): no avisa al primer fallo (`MONITOR_UMBRAL_FALLOS`, un timeout suelto se
+  recupera solo), no repite la misma caída salvo cada `MONITOR_REPETIR_MINUTOS`,
+  avisa **enseguida si cambia qué está roto**, y siempre anuncia la recuperación —
+  pero solo si había una alerta abierta. Una alerta que suena por ruido se ignora, y
+  la próxima caída real la descubre otra vez el cliente.
+- **Además del chequeo periódico se alerta en el momento** en dos lugares donde el
+  operador se queda esperando: `send_text` que no se puede entregar
+  (`_alertar_no_entregado`) y una excepción no controlada procesando un mensaje
+  (`webhook._procesar_mensaje_safe`, con traceback). Van por `monitor.alertar_error`,
+  que agrupa por `clave` y no repite el mismo error dentro de 15 min: un problema
+  sistemático llenaría el chat y taparía lo demás.
+- **Env vars:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_IDS` (coma-separados),
+  `HEALTH_TOKEN` y los `MONITOR_*`. Sin token de Telegram el monitor **no arranca**
+  (lo loguea); el resto sigue funcionando igual.
+- **Tests:** `test_health.py`, unitario puro — interpretación de los estados de WAHA,
+  el chequeo de webhook y toda la máquina de `decidir_alerta`.
 
 ---
 
@@ -632,6 +687,10 @@ lo que hay que respetar al tocar dólares).
   - **`test_ajustes_caja.py`** — ajustes manuales (§Ajustes de caja): el consumo FIFO de
     un ajuste que resta USD (`consumir_lotes_fifo`, que es la misma primitiva que usa la
     venta) y las reglas de bloqueo de `_validar_ajuste` al anular uno en dólares.
+  - **`test_health.py`** — capa de salud (§10): cómo se lee cada estado de sesión de WAHA,
+    el chequeo del webhook (incluida la tolerancia a respuestas sin `config`) y la máquina
+    de `decidir_alerta` — que no avise al primer fallo, que no repita, que avise enseguida
+    si cambia qué está roto y que anuncie la recuperación.
   - **`test_apertura.py`** — fecha de corte de la carga inicial (§Apertura): el día del corte es
     inclusive, después vuelve a descontar, y sin corte definido todo es operación normal. Fija
     además que `SALDO_INICIAL` va al grupo `APERTURA` y no cuenta como ingreso del día.
