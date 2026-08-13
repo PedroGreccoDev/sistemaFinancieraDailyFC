@@ -94,14 +94,25 @@ class Diagnostico:
         """
         return "|".join(f"{c.nombre}:{c.estado.value}" for c in self.problemas)
 
-    def to_dict(self) -> dict:
+    def to_dict(self, *, detallado: bool = True) -> dict:
+        """Serializa el diagnóstico. `detallado=False` omite los `detalle`.
+
+        Los detalles cuentan cómo está armada la infra (a qué URL apunta el
+        webhook, qué host de Postgres no contesta). Es justo lo que necesita el
+        watchdog para avisar algo útil, y justo lo que no debería leer un
+        desconocido: el resumen alcanza para saber si el bot está vivo.
+        """
+        chequeos = []
+        for c in self.chequeos:
+            item = {"nombre": c.nombre, "estado": c.estado.value}
+            if detallado:
+                item["detalle"] = c.detalle
+            chequeos.append(item)
+
         return {
             "estado": self.estado.value,
             "momento": self.momento.isoformat(),
-            "chequeos": [
-                {"nombre": c.nombre, "estado": c.estado.value, "detalle": c.detalle}
-                for c in self.chequeos
-            ],
+            "chequeos": chequeos,
         }
 
 
@@ -122,7 +133,11 @@ def chequear_base_datos() -> Chequeo:
         db.execute(text("SELECT 1"))
         return Chequeo("base_datos", Estado.OK, "responde")
     except Exception as exc:  # noqa: BLE001 — cualquier fallo acá es "la BD no está"
-        return Chequeo("base_datos", Estado.CAIDO, f"no responde: {exc}")
+        # El texto crudo de psycopg trae host, puerto y usuario de la conexión.
+        # Eso va al log de Railway, que es donde se debuggea; en la respuesta y
+        # en la alerta alcanza con el tipo de error.
+        logger.error("Chequeo de base de datos falló: %s", exc)
+        return Chequeo("base_datos", Estado.CAIDO, f"no responde ({type(exc).__name__})")
     finally:
         db.close()
 

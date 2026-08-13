@@ -204,6 +204,36 @@ def test_un_fallo_aislado_entre_chequeos_ok_no_alerta() -> None:
     assert decision.estado.fallos_consecutivos == 1
 
 
+def test_el_resumen_sin_token_no_filtra_el_detalle() -> None:
+    # Los detalles cuentan a qué URL apunta el webhook y qué host de Postgres no
+    # contesta: van solo con HEALTH_TOKEN válido. Sin token se ve el estado, que
+    # es lo que un monitor de uptime necesita, y nada más.
+    diagnostico = _diag(
+        Estado.CAIDO,
+        Chequeo("base_datos", Estado.CAIDO, "no responde (OperationalError)"),
+        Chequeo("webhook_wa", Estado.OK, "1 webhook(s) configurado(s)"),
+    )
+
+    resumen = diagnostico.to_dict(detallado=False)
+    assert resumen["estado"] == "CAIDO"
+    assert [c["nombre"] for c in resumen["chequeos"]] == ["base_datos", "webhook_wa"]
+    assert all("detalle" not in c for c in resumen["chequeos"])
+
+    completo = diagnostico.to_dict()
+    assert completo["chequeos"][0]["detalle"] == "no responde (OperationalError)"
+
+
+def test_token_de_health_se_compara_en_tiempo_constante() -> None:
+    from app.api.routes.health import _token_ok
+
+    assert _token_ok("secreto", (None, "secreto")) is True
+    assert _token_ok("secreto", ("secreto", None)) is True
+    assert _token_ok("secreto", (None, None)) is False
+    assert _token_ok("secreto", ("otro", "tampoco")) is False
+    # Un prefijo correcto no alcanza (lo que un `startswith` dejaría pasar).
+    assert _token_ok("secreto", ("secret",)) is False
+
+
 def test_degradado_tambien_alerta() -> None:
     # Un webhook apuntando a otro lado no se arregla solo: hay que enterarse.
     degradado = _diag(Estado.DEGRADADO, Chequeo("webhook_wa", Estado.DEGRADADO, "otra url"))

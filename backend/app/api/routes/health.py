@@ -14,6 +14,8 @@ deploy:
 
 from __future__ import annotations
 
+import secrets
+
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
@@ -21,6 +23,15 @@ from app.core.config import get_settings
 from app.services import health as svc_health
 
 router = APIRouter(tags=["health"])
+
+
+def _token_ok(esperado: str, recibidos: tuple[str | None, ...]) -> bool:
+    """Compara el token en tiempo constante (`compare_digest`).
+
+    Con `!=` el tiempo de respuesta depende de cuántos caracteres coinciden, y
+    eso alcanza para adivinar el token a fuerza de requests.
+    """
+    return any(r is not None and secrets.compare_digest(r, esperado) for r in recibidos)
 
 
 @router.get("/health")
@@ -36,15 +47,25 @@ async def health_deep(
 ) -> JSONResponse:
     """Diagnóstico completo: BD, WAHA, sesión de WhatsApp, webhook y config.
 
-    Protegido con `HEALTH_TOKEN` (query `?token=` o header `X-Health-Token`),
-    porque el detalle cuenta cómo está armada la infra. Si la env var no está
-    configurada el endpoint queda abierto — cómodo en local, y por eso conviene
-    definirla en Railway.
+    **El token decide cuánto se cuenta, no si se responde.** Con `HEALTH_TOKEN`
+    válido devuelve el detalle de cada pieza (que es lo que hace útil la
+    alerta); sin token válido —o con la env var sin configurar— devuelve el
+    mismo estado pero **sin los detalles**, que cuentan a qué URL apunta el
+    webhook y qué host de Postgres no contesta.
+
+    Así el olvido de configurar `HEALTH_TOKEN` no abre la infra a cualquiera,
+    y a la vez un monitor de uptime sin token sigue viendo el 503.
+
+    El header `X-Health-Token` es preferible a `?token=`: los query params
+    quedan escritos en los access logs de proxies y CDNs.
     """
     esperado = get_settings().health_token
-    if esperado and token != esperado and x_health_token != esperado:
+    detallado = bool(esperado) and _token_ok(esperado, (x_health_token, token))
+
+    if esperado and not detallado and (token is not None or x_health_token is not None):
+        # Mandó un token y está mal: eso es un error, no una consulta anónima.
         raise HTTPException(status_code=401, detail="Token de health inválido")
 
     diagnostico = await svc_health.diagnosticar()
     codigo = 503 if diagnostico.estado is svc_health.Estado.CAIDO else 200
-    return JSONResponse(status_code=codigo, content=diagnostico.to_dict())
+    return JSONResponse(status_code=codigo, content=diagnostico.to_dict(detallado=detallado))

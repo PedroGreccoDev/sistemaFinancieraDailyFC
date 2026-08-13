@@ -4,6 +4,7 @@ import logging
 import re
 import traceback
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Request
@@ -52,6 +53,19 @@ _REJECT_WORDS = frozenset({
     # emojis
     "👎", "❌", "🚫",
 })
+
+
+def _ubicacion(exc: BaseException) -> str:
+    """`archivo.py:línea` del último frame de la excepción, para ubicar el error.
+
+    Es lo único del traceback que se puede mandar afuera sin riesgo de filtrar
+    datos del negocio: nombres de archivo y números de línea, sin valores.
+    """
+    tb = exc.__traceback__
+    if tb is None:
+        return "ubicación desconocida"
+    ultimo = traceback.extract_tb(tb)[-1]
+    return f"{Path(ultimo.filename).name}:{ultimo.lineno}"
 
 
 def _normalizar_repeticiones(palabra: str) -> str:
@@ -133,10 +147,15 @@ async def _procesar_mensaje_safe(
         logger.exception("Error no controlado procesando mensaje de %s: %s", msg.phone, exc)
         # El operador ve un "error inesperado" y sigue; sin este aviso nadie del
         # lado técnico se entera de que el bot dejó de poder operar.
+        #
+        # Va el tipo de error y DÓNDE ocurrió, no el traceback: el mensaje de una
+        # excepción de SQLAlchemy arrastra el SQL con sus parámetros (montos,
+        # nombres de clientes, teléfonos) y Telegram es un tercero. El detalle
+        # completo ya quedó arriba, en el log de Railway, que es donde se debuggea.
         await monitor.alertar_error(
             clave=f"webhook-{type(exc).__name__}",
             titulo="Error procesando un mensaje del bot",
-            detalle=f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}",
+            detalle=f"{type(exc).__name__} en {_ubicacion(exc)}\n\nEl detalle completo está en los logs de Railway.",
         )
         await wa_client.send_text(
             msg.phone,
