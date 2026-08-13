@@ -75,16 +75,24 @@ def test_sin_webhooks_es_caida() -> None:
     assert chequeo.estado is Estado.CAIDO
 
 
-def test_webhook_apuntando_a_otro_lado_es_degradado() -> None:
-    config = {"webhooks": [{"url": "https://viejo.test/webhook/whatsapp"}]}
+def test_webhook_apuntando_a_otra_cosa_es_degradado() -> None:
+    # Hay webhook, pero no al bot: los mensajes de WhatsApp no llegan.
+    config = {"webhooks": [{"url": "https://otro-sistema.test/api/eventos"}]}
     chequeo = interpretar_webhook(config, "https://app.test/webhook/whatsapp")
     assert chequeo.estado is Estado.DEGRADADO
-    assert "viejo.test" in chequeo.detalle
 
 
 def test_webhook_correcto_es_ok() -> None:
     config = {"webhooks": [{"url": "https://app.test/webhook/whatsapp", "events": ["message"]}]}
     assert interpretar_webhook(config, "https://app.test/webhook/whatsapp").estado is Estado.OK
+
+
+def test_webhook_por_la_red_interna_de_railway_es_ok() -> None:
+    # En el monorepo de Railway, WAHA puede apuntar legítimamente al host interno
+    # en vez del dominio público. Compararlo contra PUBLIC_BASE_URL daría una
+    # alerta falsa cada 30 minutos, que es como se arruina un sistema de alertas.
+    config = {"webhooks": [{"url": "http://backend.railway.internal:8000/webhook/whatsapp"}]}
+    assert interpretar_webhook(config, "https://app.up.railway.app/webhook/whatsapp").estado is Estado.OK
 
 
 def test_sin_datos_de_webhook_no_inventa_una_caida() -> None:

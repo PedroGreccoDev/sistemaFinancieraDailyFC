@@ -151,7 +151,14 @@ def interpretar_sesion(status: str) -> Chequeo:
     return Chequeo("sesion_wa", estado, detalle)
 
 
-def interpretar_webhook(config: dict | None, url_esperada: str) -> Chequeo:
+# Path del webhook del bot (`webhook.router` + la ruta). Se compara SOLO el path
+# y no la URL entera: en el monorepo de Railway, WAHA puede apuntar legítimamente
+# a la red interna (`backend.railway.internal`) en vez de al dominio público, y
+# marcar eso como error sería una alerta falsa cada 30 minutos.
+_PATH_WEBHOOK = "/webhook/whatsapp"
+
+
+def interpretar_webhook(config: dict | None, url_esperada: str = "") -> Chequeo:
     """Verifica que WAHA siga teniendo configurado el webhook hacia el backend.
 
     Es el chequeo que atrapa la caída silenciosa: sesión `WORKING`, gateway
@@ -159,8 +166,11 @@ def interpretar_webhook(config: dict | None, url_esperada: str) -> Chequeo:
 
     Tolerante a propósito: si la respuesta no trae `config.webhooks` (versión
     distinta de WAHA), devuelve OK en vez de inventar una caída. Y si hay
-    webhooks pero ninguno apunta a nuestra URL, avisa **DEGRADADO**, no CAIDO:
-    la URL esperada puede venir mal configurada de nuestro lado.
+    webhooks pero ninguno apunta al bot, avisa **DEGRADADO**, no CAIDO: puede
+    ser un webhook a otro sistema conviviendo con el nuestro.
+
+    `url_esperada` se acepta solo para dejar el dato en el mensaje; la decisión
+    la toma el path (ver `_PATH_WEBHOOK`).
     """
     if not config or "webhooks" not in config:
         return Chequeo("webhook_wa", Estado.OK, "sin datos de webhook para verificar")
@@ -174,11 +184,11 @@ def interpretar_webhook(config: dict | None, url_esperada: str) -> Chequeo:
         )
 
     urls = [str(w.get("url", "")) for w in webhooks if isinstance(w, dict)]
-    if url_esperada and not any(url_esperada in u for u in urls):
+    if not any(_PATH_WEBHOOK in u for u in urls):
         return Chequeo(
             "webhook_wa",
             Estado.DEGRADADO,
-            f"el webhook de WAHA apunta a {', '.join(urls) or '(vacío)'} y no a {url_esperada}",
+            f"ningún webhook de WAHA apunta a {_PATH_WEBHOOK}: los mensajes no llegan al bot",
         )
 
     return Chequeo("webhook_wa", Estado.OK, f"{len(webhooks)} webhook(s) configurado(s)")
