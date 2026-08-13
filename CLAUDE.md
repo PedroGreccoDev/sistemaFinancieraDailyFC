@@ -548,9 +548,20 @@ avisa **por Telegram** diciendo **qué** se rompió.
   `/health` es el healthcheck de Railway (`railway.toml`): trivial, 200 mientras el
   proceso viva. Si devolviera error porque WAHA está caído, Railway daría el deploy
   por fallido y **reiniciaría el backend en loop** por un problema ajeno.
-  `/health/deep` es el diagnóstico completo, protegido con `HEALTH_TOKEN`, y devuelve
-  **503 cuando algo está CAIDO** para que cualquier monitor de uptime lo note sin
-  leer el cuerpo.
+  `/health/deep` es el diagnóstico completo y devuelve **503 cuando algo está CAIDO**
+  para que cualquier monitor de uptime lo note sin leer el cuerpo.
+  - **El `HEALTH_TOKEN` decide cuánto se cuenta, no si se responde.** Con token válido
+    (`X-Health-Token`, o `?token=` que queda escrito en los access logs) vienen los
+    `detalle` de cada pieza; sin token válido —o con la env var sin configurar— va el
+    mismo estado **sin detalles**, que cuentan a qué URL apunta el webhook y qué host
+    de Postgres no contesta. Así olvidarse de configurarlo no abre la infra. Se compara
+    con `secrets.compare_digest`.
+  - **Los detalles que salen del sistema van sin datos crudos:** el chequeo de BD
+    publica el tipo de excepción, no el texto de psycopg (que trae host, puerto y
+    usuario), y la alerta de error del webhook manda `archivo:línea` en vez del
+    traceback — el mensaje de una excepción de SQLAlchemy arrastra el SQL con sus
+    parámetros (montos, clientes, teléfonos) y Telegram es un tercero. El detalle
+    completo se loguea, que es donde se debuggea.
 - **La alerta tiene que significar algo** (`health.decidir_alerta`, función pura y
   testeada): no avisa al primer fallo (`MONITOR_UMBRAL_FALLOS`, un timeout suelto se
   recupera solo), no repite la misma caída salvo cada `MONITOR_REPETIR_MINUTOS`,
