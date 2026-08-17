@@ -582,14 +582,20 @@ avisa **por Telegram** diciendo **qué** se rompió.
   avisa **enseguida si cambia qué está roto**, y siempre anuncia la recuperación —
   pero solo si había una alerta abierta. Una alerta que suena por ruido se ignora, y
   la próxima caída real la descubre otra vez el cliente.
-  - **Solo se insiste con lo que está `CAIDO`** (2026-08-17). El recordatorio periódico
-    existe para que nadie se duerma con el bot muerto; un `DEGRADADO` que el dueño ya vio
-    y decidió postergar (config pendiente) avisa **una sola vez**. Si después cambia qué
-    está degradado es firma nueva y vuelve a avisar, si empeora a `CAIDO` va sin esperar
-    la ventana, y la recuperación se anuncia igual.
+  - **El dueño pidió dos avisos y solo dos** (2026-08-17): **cuando el bot se cae y
+    cuando se levanta.** Por eso `MONITOR_ALERTAR_DEGRADADO=false` (un degradado se mira
+    en `/health/deep` cuando uno quiere, no interrumpe) y `MONITOR_AVISAR_ARRANQUE=false`
+    (un deploy normal no es noticia). Encender el primero devuelve el aviso único por
+    degradación, nunca el recordatorio periódico: **solo se insiste con lo `CAIDO`**,
+    porque ese recordatorio existe para que nadie se duerma con el bot muerto.
+  - **"Recuperado" es "ya no hay nada que alertar", no "todo `OK`"** — y la diferencia
+    era un bug real: con las env vars de config sin definir el estado normal es
+    `DEGRADADO` y nunca `OK`, así que atado a `OK` el 🟢 **no salía jamás** (se caía WAHA
+    y avisaba, volvía WAHA y el aviso de que volvió quedaba esperando un `OK` que no
+    existe). El mensaje lista lo que quedó pendiente en vez de decir "todo perfecto".
   - El estado del monitor vive **en memoria del proceso**: cada redeploy de Railway lo
-    resetea, así que un degradado en curso vuelve a avisar una vez por deploy. Sumado a
-    `MONITOR_AVISAR_ARRANQUE`, eso son dos mensajes por deploy — esperado, no un bug.
+    resetea. Con los defaults de arriba eso ya no genera mensajes; si se encienden esas
+    dos env vars, esperá un par de avisos por deploy.
 - **Además del chequeo periódico se alerta en el momento** en dos lugares donde el
   operador se queda esperando: `send_text` que no se puede entregar
   (`_alertar_no_entregado`) y una excepción no controlada procesando un mensaje
@@ -727,8 +733,9 @@ avisa **por Telegram** diciendo **qué** se rompió.
     el chequeo del webhook (incluida la tolerancia a respuestas sin `config`) y la máquina
     de `decidir_alerta` — que no avise al primer fallo, que no repita, que avise enseguida
     si cambia qué está roto y que anuncie la recuperación. Cubre además el chequeo de
-    `configuracion` (la severidad de cada env var faltante) y que un `DEGRADADO`
-    permanente avise una sola vez mientras una caída sí insiste.
+    `configuracion` (la severidad de cada env var faltante), que un `DEGRADADO` no
+    interrumpa a nadie sin dejar de mirar la caída que venga después, y que el aviso de
+    "volvió" salga **aunque el sistema siga degradado**.
   - **`test_apertura.py`** — fecha de corte de la carga inicial (§Apertura): el día del corte es
     inclusive, después vuelve a descontar, y sin corte definido todo es operación normal. Fija
     además que `SALDO_INICIAL` va al grupo `APERTURA` y no cuenta como ingreso del día.

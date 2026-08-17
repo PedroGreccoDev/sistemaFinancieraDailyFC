@@ -80,8 +80,15 @@ class Settings(BaseSettings):
     # Margen tras el deploy antes del primer chequeo (WAHA/Postgres levantando).
     monitor_demora_inicial_segundos: int = Field(default=45)
     # Avisar por Telegram cada vez que el backend arranca. Sirve para detectar
-    # reinicios inesperados de Railway (un crash-loop se ve como una tanda).
-    monitor_avisar_arranque: bool = Field(default=True)
+    # reinicios inesperados de Railway (un crash-loop se ve como una tanda), pero
+    # en un deploy normal es un mensaje que nadie pidió: apagado por decisión del
+    # dueño (2026-08-17), que solo quiere enterarse de caídas y recuperaciones.
+    monitor_avisar_arranque: bool = Field(default=False)
+    # Si un DEGRADADO merece Telegram. Apagado por la misma decisión: un degradado
+    # es una condición que se lee en /health/deep cuando uno quiere mirarla, no
+    # algo que justifique interrumpir al dueño. Encenderlo devuelve el aviso único
+    # por degradación (nunca el recordatorio periódico, que es solo para caídas).
+    monitor_alertar_degradado: bool = Field(default=False)
 
 
 @lru_cache

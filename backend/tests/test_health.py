@@ -304,38 +304,62 @@ def test_token_de_health_se_compara_en_tiempo_constante() -> None:
     assert _token_ok("secreto", ("secret",)) is False
 
 
-def test_degradado_tambien_alerta() -> None:
-    # Un webhook apuntando a otro lado no se arregla solo: hay que enterarse.
-    degradado = _diag(Estado.DEGRADADO, Chequeo("webhook_wa", Estado.DEGRADADO, "otra url"))
-    estado = decidir_alerta(EstadoAlerta(), degradado).estado
-    decision = decidir_alerta(estado, degradado)
+def _degradado(minutos: int = 0) -> Diagnostico:
+    return _diag(
+        Estado.DEGRADADO,
+        Chequeo("configuracion", Estado.DEGRADADO, "falta el número del operador"),
+        momento=T0 + timedelta(minutes=minutos),
+    )
 
+
+def test_un_degradado_no_molesta_a_nadie() -> None:
+    # Lo que pidió el dueño: avisame cuando se cae y cuando se levanta, nada más.
+    # Config pendiente deja el estado DEGRADADO por semanas; un mensaje por eso
+    # —aunque sea uno solo por deploy— es ruido que él no pidió.
+    estado = EstadoAlerta()
+    for m in (0, 2, 35, 600):
+        decision = decidir_alerta(estado, _degradado(m))
+        estado = decision.estado
+        assert decision.aviso is None
+
+
+def test_el_degradado_se_puede_encender_y_avisa_una_sola_vez() -> None:
+    # MONITOR_ALERTAR_DEGRADADO=true devuelve el aviso, pero nunca el
+    # recordatorio periódico: repetirlo cada 30 min durante semanas es
+    # exactamente cómo se aprende a ignorar el canal.
+    estado = EstadoAlerta()
+    for m in (0, 2):
+        decision = decidir_alerta(estado, _degradado(m), alertar_degradado=True)
+        estado = decision.estado
     assert decision.aviso is not None
     assert "DEGRADADO" in decision.aviso
 
-
-def test_un_degradado_avisa_una_sola_vez_y_no_insiste() -> None:
-    # El caso real: config pendiente (un número de operador que todavía no se
-    # definió) deja el estado DEGRADADO por semanas. Recordarlo cada 30 min es
-    # cómo se aprende a ignorar Telegram, y entonces la caída real pasa de largo.
-    def degradado(minutos: int) -> Diagnostico:
-        return _diag(
-            Estado.DEGRADADO,
-            Chequeo("configuracion", Estado.DEGRADADO, "falta el número del operador"),
-            momento=T0 + timedelta(minutes=minutos),
-        )
-
-    estado = EstadoAlerta()
-    for m in (0, 2):
-        decision = decidir_alerta(estado, degradado(m))
-        estado = decision.estado
-    assert decision.aviso is not None  # la primera vez sí avisa
-
-    # Horas después sigue igual: ni un mensaje más.
     for m in (35, 70, 600):
-        decision = decidir_alerta(estado, degradado(m))
+        decision = decidir_alerta(estado, _degradado(m), alertar_degradado=True)
         estado = decision.estado
         assert decision.aviso is None
+
+
+def test_avisa_que_volvio_aunque_siga_degradado() -> None:
+    # El bug que esto fija: con las env vars de config sin definir, el estado
+    # normal es DEGRADADO y NUNCA OK. Atado a OK, el aviso de "volvió" no salía
+    # jamás — se caía WAHA (🔴 llegaba), volvía WAHA, y el 🟢 quedaba esperando
+    # un OK que no existe. La mitad de lo pedido, y la que uno espera despierto.
+    estado = EstadoAlerta()
+    for _ in range(2):
+        estado = decidir_alerta(estado, _caido()).estado
+
+    decision = decidir_alerta(estado, _degradado(20))
+    assert decision.recuperado is True
+    assert "RECUPERADO" in decision.aviso
+    # Y no miente: dice qué quedó pendiente en vez de "todo perfecto".
+    assert "configuracion" in decision.aviso
+    assert decision.estado == EstadoAlerta()  # listo para la próxima caída
+
+
+def test_un_degradado_solo_no_dispara_falsa_recuperacion() -> None:
+    # Sin caída previa no hay nada que anunciar: el degradado no es un evento.
+    assert decidir_alerta(EstadoAlerta(), _degradado()).aviso is None
 
 
 def test_una_caida_si_insiste_hasta_que_se_arregle() -> None:
@@ -352,30 +376,35 @@ def test_una_caida_si_insiste_hasta_que_se_arregle() -> None:
     assert decidir_alerta(estado, tarde).aviso is not None
 
 
-def test_un_degradado_que_empeora_avisa_enseguida() -> None:
-    # Dejar de insistir no es dejar de mirar: si el degradado se convierte en
-    # caída, eso es una firma nueva y va sin esperar la ventana.
-    degradado = _diag(Estado.DEGRADADO, Chequeo("configuracion", Estado.DEGRADADO, "falta algo"))
+def test_ignorar_el_degradado_no_es_dejar_de_mirar() -> None:
+    # Callarse los degradados no puede tapar la caída que venga después: desde
+    # un degradado de meses, si se cae WAHA la alerta sale igual (con el umbral
+    # normal de dos ciclos, que es lo que filtra el timeout transitorio).
     estado = EstadoAlerta()
-    for _ in range(2):
-        estado = decidir_alerta(estado, degradado).estado
+    for m in (0, 2, 4):
+        estado = decidir_alerta(estado, _degradado(m)).estado
+    assert estado.fallos_consecutivos == 0  # el degradado no acumula nada
 
-    peor = _diag(
+    caido = _diag(
         Estado.CAIDO,
         Chequeo("sesion_wa", Estado.CAIDO, "no responde"),
-        momento=T0 + timedelta(minutes=2),
+        Chequeo("configuracion", Estado.DEGRADADO, "falta el número del operador"),
+        momento=T0 + timedelta(minutes=6),
     )
-    decision = decidir_alerta(estado, peor)
+    assert decidir_alerta(estado, caido).aviso is None  # primer fallo: espera
+    estado = decidir_alerta(estado, caido).estado
+
+    decision = decidir_alerta(estado, caido)
     assert decision.aviso is not None
     assert "sesion_wa" in decision.aviso
 
 
 def test_la_recuperacion_de_un_degradado_se_avisa_igual() -> None:
-    degradado = _diag(Estado.DEGRADADO, Chequeo("configuracion", Estado.DEGRADADO, "falta algo"))
+    # Con el aviso de degradado encendido, su recuperación también se anuncia.
     estado = EstadoAlerta()
-    for _ in range(2):
-        estado = decidir_alerta(estado, degradado).estado
+    for m in (0, 2):
+        estado = decidir_alerta(estado, _degradado(m), alertar_degradado=True).estado
 
     ok = _diag(Estado.OK, Chequeo("configuracion", Estado.OK, "completa"), momento=T0 + timedelta(hours=5))
-    decision = decidir_alerta(estado, ok)
+    decision = decidir_alerta(estado, ok, alertar_degradado=True)
     assert decision.recuperado is True

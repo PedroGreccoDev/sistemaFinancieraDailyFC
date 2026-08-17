@@ -339,10 +339,15 @@ def decidir_alerta(
     *,
     umbral_fallos: int = 2,
     repetir_cada: timedelta = timedelta(minutes=30),
+    alertar_degradado: bool = False,
 ) -> Decision:
     """Decide si este diagnóstico merece un mensaje de Telegram. Función pura.
 
-    Reglas, todas para que la alerta signifique algo cuando llega:
+    **Lo que el dueño pidió (2026-08-17): avisar cuando el bot se cae y cuando
+    se levanta. Nada más.** De ahí `alertar_degradado=False` por defecto: un
+    degradado es una condición que se mira en `/health/deep` cuando uno quiere,
+    no algo que justifique interrumpir a nadie. El resto de las reglas existen
+    para que ese aviso, cuando llega, se lea.
 
     - **Nada de alertar al primer fallo** (`umbral_fallos`): un timeout suelto
       de WAHA es normal y se recupera solo. Alertar por eso entrena al dueño a
@@ -351,22 +356,25 @@ def decidir_alerta(
       mismo (misma `firma`) se recuerda recién cada `repetir_cada`.
     - **Si cambia qué está roto, se avisa enseguida**: pasar de "sesión caída"
       a "sesión caída + BD caída" es información nueva.
+    - **Se insiste solo con lo urgente**: el recordatorio periódico es para que
+      nadie se duerma con el bot muerto. Un degradado —cuando se lo alerta— va
+      una sola vez.
     - **Siempre se avisa la recuperación**, pero solo si hubo alerta abierta:
       sin eso nadie sabe si el problema sigue.
 
-    `DEGRADADO` cuenta como falla —son avisos accionables y no se resuelven
-    solos— pero **solo se insiste con lo que está `CAIDO`**: el recordatorio
-    periódico existe para que nadie se duerma con el bot muerto, y un degradado
-    que el dueño ya vio y decidió postergar (un número de operador que todavía
-    no definió, los audios sin `OPENAI_API_KEY`) no es urgente. Repetirlo cada
-    media hora durante semanas es exactamente cómo se aprende a ignorar el
-    canal, y entonces la caída de verdad pasa desapercibida. Se avisa una vez;
-    si después cambia **qué** está degradado, eso es una firma nueva y vuelve a
-    avisar.
+    **"Recuperado" es "ya no hay nada que alertar", no "todo perfecto"** — y la
+    diferencia no es teórica: con `WHATSAPP_OPERATOR_PHONE` y `OPENAI_API_KEY`
+    sin configurar, el estado normal del sistema es `DEGRADADO`, nunca `OK`.
+    Atado a `OK`, el aviso de que el bot volvió no habría salido jamás: se caía
+    WAHA (🔴 avisa), volvía WAHA (`CAIDO` → `DEGRADADO`) y el 🟢 quedaba colgado
+    para siempre esperando un `OK` que no llega. Justo la mitad de lo que se
+    pidió, y la mitad que uno espera despierto.
     """
     ahora = diagnostico.momento
+    minima = Estado.DEGRADADO if alertar_degradado else Estado.CAIDO
+    alertable = _ORDEN[diagnostico.estado] >= _ORDEN[minima]
 
-    if diagnostico.estado is Estado.OK:
+    if not alertable:
         if previo.firma_notificada is not None:
             return Decision(estado=EstadoAlerta(), aviso=_texto_recuperado(diagnostico), recuperado=True)
         return Decision(estado=EstadoAlerta())
@@ -415,7 +423,23 @@ def _texto_caida(diagnostico: Diagnostico, *, repetido: bool = False) -> str:
 
 
 def _texto_recuperado(diagnostico: Diagnostico) -> str:
-    return f"🟢 <b>BOT RECUPERADO</b> — todo vuelve a responder.\n\n🕒 {hora_ar(diagnostico.momento)}"
+    """Anuncia que se acabó lo urgente, sin exagerar.
+
+    Si quedan degradaciones (las que no alertan por su cuenta) se listan acá:
+    decir "todo vuelve a responder" con el número de operador todavía sin
+    definir sería mentirle al que lo lee.
+    """
+    from app.services.telegram import escapar  # import local: evita ciclo de imports
+
+    lineas = ["🟢 <b>BOT RECUPERADO</b> — vuelve a operar."]
+
+    pendientes = diagnostico.problemas
+    if pendientes:
+        lineas += ["", "Queda pendiente (no urgente):"]
+        lineas += [f"🟠 <b>{escapar(c.nombre)}</b>: {escapar(c.detalle)}" for c in pendientes]
+
+    lineas += ["", f"🕒 {hora_ar(diagnostico.momento)}"]
+    return "\n".join(lineas)
 
 
 def hora_ar(momento: datetime) -> str:

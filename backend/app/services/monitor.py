@@ -54,6 +54,7 @@ async def _ciclo() -> None:
                 diagnostico,
                 umbral_fallos=max(1, settings.monitor_umbral_fallos),
                 repetir_cada=repetir,
+                alertar_degradado=settings.monitor_alertar_degradado,
             )
             estado = decision.estado
 
