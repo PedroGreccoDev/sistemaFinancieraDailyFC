@@ -239,29 +239,41 @@ async def chequear_whatsapp() -> list[Chequeo]:
 def chequear_configuracion() -> list[Chequeo]:
     """Config imprescindible para que el bot pueda operar (no requiere red).
 
-    Separa lo que **impide operar** de lo que solo recorta una función: sin
-    `ANTHROPIC_API_KEY` el bot no entiende un solo mensaje, mientras que sin
-    `OPENAI_API_KEY` sigue trabajando por texto y solo pierde los audios.
+    La severidad es por **consecuencia real**, no por "falta una variable":
+
+    - Sin `ANTHROPIC_API_KEY` el bot no entiende un solo mensaje → `CAIDO`.
+    - Sin `WHATSAPP_OPERATOR_PHONE` el filtro de operador **no se aplica**
+      (`api/routes/webhook.py`: `if operator_phone and ...`) → el bot responde
+      y opera, pero **le obedece a cualquier número**. Es un agujero de acceso
+      grave, no una caída: marcarlo `CAIDO` hacía que `/health/deep` devolviera
+      503 y el watchdog externo gritara "bot caído" cada 5 minutos por un bot
+      que funciona perfecto.
+    - Sin `OPENAI_API_KEY` sigue trabajando por texto y solo pierde los audios.
+
+    Se reportan **todas** las carencias juntas, no solo la más grave: si faltan
+    dos variables, enterarse de la segunda recién después de arreglar la
+    primera es un viaje de ida y vuelta al deploy.
     """
     settings = get_settings()
-    chequeos: list[Chequeo] = []
 
-    criticas = []
+    problemas: list[tuple[Estado, str]] = []
     if not settings.anthropic_api_key:
-        criticas.append("ANTHROPIC_API_KEY (el bot no puede interpretar mensajes)")
+        problemas.append((Estado.CAIDO, "falta ANTHROPIC_API_KEY: no puede interpretar mensajes"))
     if not settings.whatsapp_operator_phone.strip():
-        criticas.append("WHATSAPP_OPERATOR_PHONE (ignora todos los mensajes)")
-
-    if criticas:
-        chequeos.append(Chequeo("configuracion", Estado.CAIDO, "falta " + "; ".join(criticas)))
-    elif not settings.openai_api_key:
-        chequeos.append(
-            Chequeo("configuracion", Estado.DEGRADADO, "falta OPENAI_API_KEY: no transcribe audios")
+        problemas.append(
+            (
+                Estado.DEGRADADO,
+                "falta WHATSAPP_OPERATOR_PHONE: el bot le obedece a CUALQUIER número que le escriba",
+            )
         )
-    else:
-        chequeos.append(Chequeo("configuracion", Estado.OK, "completa"))
+    if not settings.openai_api_key:
+        problemas.append((Estado.DEGRADADO, "falta OPENAI_API_KEY: no transcribe audios"))
 
-    return chequeos
+    if not problemas:
+        return [Chequeo("configuracion", Estado.OK, "completa")]
+
+    estado = max((e for e, _ in problemas), key=lambda e: _ORDEN[e])
+    return [Chequeo("configuracion", estado, "; ".join(d for _, d in problemas))]
 
 
 def _url_webhook_esperada() -> str:

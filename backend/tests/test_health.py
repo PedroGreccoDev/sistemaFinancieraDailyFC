@@ -13,11 +13,15 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from types import SimpleNamespace
+
+import app.services.health as health_mod
 from app.services.health import (
     Chequeo,
     Diagnostico,
     Estado,
     EstadoAlerta,
+    chequear_configuracion,
     combinar,
     decidir_alerta,
     interpretar_sesion,
@@ -106,6 +110,64 @@ def test_url_esperada_vacia_no_compara() -> None:
     # Sin PUBLIC_BASE_URL configurada no se puede saber cuál es la URL correcta.
     config = {"webhooks": [{"url": "https://cualquiera.test/webhook/whatsapp"}]}
     assert interpretar_webhook(config, "").estado is Estado.OK
+
+
+# ── Configuración: la severidad va por consecuencia, no por variable ───
+
+def _config(monkeypatch, **faltantes: bool) -> Chequeo:
+    """Corre `chequear_configuracion` con las env vars que se indiquen vacías."""
+    settings = SimpleNamespace(
+        anthropic_api_key="" if faltantes.get("anthropic") else "sk-ant-x",
+        whatsapp_operator_phone="" if faltantes.get("operador") else "5491100000000",
+        openai_api_key="" if faltantes.get("openai") else "sk-oai-x",
+    )
+    monkeypatch.setattr(health_mod, "get_settings", lambda: settings)
+    chequeos = chequear_configuracion()
+    assert len(chequeos) == 1
+    return chequeos[0]
+
+
+def test_configuracion_completa_es_ok(monkeypatch) -> None:
+    assert _config(monkeypatch).estado is Estado.OK
+
+
+def test_sin_anthropic_es_caida(monkeypatch) -> None:
+    # Sin la key el bot no interpreta un solo mensaje: eso sí es estar caído.
+    assert _config(monkeypatch, anthropic=True).estado is Estado.CAIDO
+
+
+def test_sin_numero_de_operador_es_degradado_no_caida(monkeypatch) -> None:
+    # El caso que generaba la alerta falsa: con WHATSAPP_OPERATOR_PHONE vacía el
+    # webhook NO filtra (`if operator_phone and ...`), así que el bot funciona
+    # perfecto — pero le obedece a cualquiera. Marcarlo CAIDO ponía /health/deep
+    # en 503 y el watchdog externo gritaba "bot caído" cada 5 minutos.
+    chequeo = _config(monkeypatch, operador=True)
+    assert chequeo.estado is Estado.DEGRADADO
+    assert "CUALQUIER" in chequeo.detalle  # el detalle dice el riesgo real
+
+
+def test_sin_openai_solo_pierde_los_audios(monkeypatch) -> None:
+    chequeo = _config(monkeypatch, openai=True)
+    assert chequeo.estado is Estado.DEGRADADO
+    assert "audios" in chequeo.detalle
+
+
+def test_reporta_todas_las_carencias_no_solo_la_peor(monkeypatch) -> None:
+    # Enterarse de la segunda variable recién después de arreglar la primera es
+    # un viaje extra al deploy.
+    chequeo = _config(monkeypatch, anthropic=True, operador=True, openai=True)
+    assert chequeo.estado is Estado.CAIDO  # la peor manda en el estado global
+    assert "ANTHROPIC_API_KEY" in chequeo.detalle
+    assert "WHATSAPP_OPERATOR_PHONE" in chequeo.detalle
+    assert "OPENAI_API_KEY" in chequeo.detalle
+
+
+def test_numero_de_operador_en_blanco_cuenta_como_faltante(monkeypatch) -> None:
+    settings = SimpleNamespace(
+        anthropic_api_key="sk-ant-x", whatsapp_operator_phone="   ", openai_api_key="sk-oai-x"
+    )
+    monkeypatch.setattr(health_mod, "get_settings", lambda: settings)
+    assert chequear_configuracion()[0].estado is Estado.DEGRADADO
 
 
 # ── Estado global ──────────────────────────────────────────────────────

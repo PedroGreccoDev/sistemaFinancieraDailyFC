@@ -525,10 +525,11 @@ avisa **por Telegram** diciendo **qué** se rompió.
   WhatsApp se desvincule del celular; avisar por el canal que se cayó es imposible.
   `services/telegram.py` es el único canal de alerta y **nunca lanza**: una alerta
   que revienta el proceso que intentaba alertar es peor que no tenerla.
-- **Cuatro piezas, no una** (`services/health.py`, todas en el mismo diagnóstico):
+- **Cinco piezas, no una** (`services/health.py`, todas en el mismo diagnóstico):
   `base_datos` (`SELECT 1`), `waha` (el gateway responde), `sesion_wa` (el `status`
-  de la sesión) y `webhook_wa`. Cada chequeo trae su `detalle` en castellano y ese
-  texto va tal cual al mensaje: tiene que decirle qué hacer a quien lo lee a las 3 AM.
+  de la sesión), `webhook_wa` y `configuracion` (env vars, sin red). Cada chequeo trae
+  su `detalle` en castellano y ese texto va tal cual al mensaje: tiene que decirle qué
+  hacer a quien lo lee a las 3 AM.
   - **`webhook_wa` es el que atrapa la caída silenciosa:** sesión `WORKING`, gateway
     sano y ni un mensaje llegando porque WAHA se reinició sin su config de webhook.
     Desde afuera el bot parece perfecto. Compara contra `PUBLIC_BASE_URL` y es
@@ -536,6 +537,19 @@ avisa **por Telegram** diciendo **qué** se rompió.
     vez de inventar una caída permanente.
   - `SCAN_QR_CODE`/`FAILED`/`STOPPED` son **CAIDO**; `STARTING` es solo `DEGRADADO`
     (es transitorio: tratarlo como caída daría un falso positivo en cada deploy).
+  - **`configuracion` gradúa por consecuencia real, no por "falta una variable"**
+    (`chequear_configuracion`, corregido 2026-08-17): sin `ANTHROPIC_API_KEY` el bot no
+    interpreta un solo mensaje → **CAIDO**; sin `WHATSAPP_OPERATOR_PHONE` el filtro de
+    operador **no se aplica** (`webhook.py`: `if operator_phone and ...`), o sea que el
+    bot funciona pero **le obedece a cualquier número** → **DEGRADADO**; sin
+    `OPENAI_API_KEY` solo pierde los audios → **DEGRADADO**. Reporta **todas** las
+    carencias juntas, no solo la peor.
+    > Este chequeo fue la fábrica de falsos positivos del sistema: marcaba CAIDO por la
+    > variable del operador vacía —con el detalle al revés, "ignora todos los mensajes"—
+    > y eso ponía `/health/deep` en 503, así que el watchdog externo avisaba "bot caído"
+    > cada 5 min y fallaba el job de Actions mientras el bot andaba perfecto. Si algún
+    > chequeo nuevo describe una condición **estática y conocida**, pensá dos veces antes
+    > de darle `CAIDO`: alerta que suena siempre es alerta que se ignora.
 - **Dos capas de vigilancia, y sacar una deja un agujero:**
   - **Interna** (`services/monitor.py`): tarea de fondo del backend, cada
     `MONITOR_INTERVALO_SEGUNDOS`. Ve todo lo que rodea al proceso, pero **no puede
@@ -626,7 +640,10 @@ avisa **por Telegram** diciendo **qué** se rompió.
     vez de abortar el lote — así no hay que repetir la foto de los cuatro por uno duplicado.
     Cada alta commitea por separado, que es lo que hace posible ese comportamiento.
 - El bot opera vía WAHA (WhatsApp HTTP API) → webhook `POST /webhook/whatsapp`.
-- Solo el número configurado en `WHATSAPP_OPERATOR_PHONE` puede operar.
+- Solo el número configurado en `WHATSAPP_OPERATOR_PHONE` puede operar. **Ojo: si la env
+  var está vacía el filtro NO se aplica** (`webhook.py`: `if operator_phone and ...`) y
+  cualquiera que le escriba al bot puede operar la financiera. Es "abierto por defecto",
+  no "cerrado por defecto"; el chequeo `configuracion` de §Monitoreo lo marca DEGRADADO.
 - Flujo: mensaje → parser → (audio: Whisper) → Claude → dispatcher → BD → respuesta WA.
 - La sesión de Claude **se limpia tras cada transacción exitosa** (Regla de Limpieza).
 - Los **pasivos** se pueden registrar desde el bot via `REGISTRAR_DEUDA`; la cancelación es solo desde el panel web.
