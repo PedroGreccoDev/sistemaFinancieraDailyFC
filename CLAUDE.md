@@ -582,6 +582,14 @@ avisa **por Telegram** diciendo **qué** se rompió.
   avisa **enseguida si cambia qué está roto**, y siempre anuncia la recuperación —
   pero solo si había una alerta abierta. Una alerta que suena por ruido se ignora, y
   la próxima caída real la descubre otra vez el cliente.
+  - **Solo se insiste con lo que está `CAIDO`** (2026-08-17). El recordatorio periódico
+    existe para que nadie se duerma con el bot muerto; un `DEGRADADO` que el dueño ya vio
+    y decidió postergar (config pendiente) avisa **una sola vez**. Si después cambia qué
+    está degradado es firma nueva y vuelve a avisar, si empeora a `CAIDO` va sin esperar
+    la ventana, y la recuperación se anuncia igual.
+  - El estado del monitor vive **en memoria del proceso**: cada redeploy de Railway lo
+    resetea, así que un degradado en curso vuelve a avisar una vez por deploy. Sumado a
+    `MONITOR_AVISAR_ARRANQUE`, eso son dos mensajes por deploy — esperado, no un bug.
 - **Además del chequeo periódico se alerta en el momento** en dos lugares donde el
   operador se queda esperando: `send_text` que no se puede entregar
   (`_alertar_no_entregado`) y una excepción no controlada procesando un mensaje
@@ -718,7 +726,9 @@ avisa **por Telegram** diciendo **qué** se rompió.
   - **`test_health.py`** — capa de salud (§10): cómo se lee cada estado de sesión de WAHA,
     el chequeo del webhook (incluida la tolerancia a respuestas sin `config`) y la máquina
     de `decidir_alerta` — que no avise al primer fallo, que no repita, que avise enseguida
-    si cambia qué está roto y que anuncie la recuperación.
+    si cambia qué está roto y que anuncie la recuperación. Cubre además el chequeo de
+    `configuracion` (la severidad de cada env var faltante) y que un `DEGRADADO`
+    permanente avise una sola vez mientras una caída sí insiste.
   - **`test_apertura.py`** — fecha de corte de la carga inicial (§Apertura): el día del corte es
     inclusive, después vuelve a descontar, y sin corte definido todo es operación normal. Fija
     además que `SALDO_INICIAL` va al grupo `APERTURA` y no cuenta como ingreso del día.
