@@ -354,8 +354,15 @@ def decidir_alerta(
     - **Siempre se avisa la recuperación**, pero solo si hubo alerta abierta:
       sin eso nadie sabe si el problema sigue.
 
-    `DEGRADADO` cuenta como falla: son avisos accionables (falta una API key,
-    el webhook apunta a otro lado) y no se resuelven solos.
+    `DEGRADADO` cuenta como falla —son avisos accionables y no se resuelven
+    solos— pero **solo se insiste con lo que está `CAIDO`**: el recordatorio
+    periódico existe para que nadie se duerma con el bot muerto, y un degradado
+    que el dueño ya vio y decidió postergar (un número de operador que todavía
+    no definió, los audios sin `OPENAI_API_KEY`) no es urgente. Repetirlo cada
+    media hora durante semanas es exactamente cómo se aprende a ignorar el
+    canal, y entonces la caída de verdad pasa desapercibida. Se avisa una vez;
+    si después cambia **qué** está degradado, eso es una firma nueva y vuelve a
+    avisar.
     """
     ahora = diagnostico.momento
 
@@ -373,7 +380,8 @@ def decidir_alerta(
 
     cambio = firma != previo.firma_notificada
     vencido = (
-        previo.ultima_notificacion is not None
+        diagnostico.estado is Estado.CAIDO  # solo se insiste con lo urgente
+        and previo.ultima_notificacion is not None
         and ahora - previo.ultima_notificacion >= repetir_cada
     )
     if cambio or vencido:

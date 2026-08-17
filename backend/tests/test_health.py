@@ -312,3 +312,70 @@ def test_degradado_tambien_alerta() -> None:
 
     assert decision.aviso is not None
     assert "DEGRADADO" in decision.aviso
+
+
+def test_un_degradado_avisa_una_sola_vez_y_no_insiste() -> None:
+    # El caso real: config pendiente (un número de operador que todavía no se
+    # definió) deja el estado DEGRADADO por semanas. Recordarlo cada 30 min es
+    # cómo se aprende a ignorar Telegram, y entonces la caída real pasa de largo.
+    def degradado(minutos: int) -> Diagnostico:
+        return _diag(
+            Estado.DEGRADADO,
+            Chequeo("configuracion", Estado.DEGRADADO, "falta el número del operador"),
+            momento=T0 + timedelta(minutes=minutos),
+        )
+
+    estado = EstadoAlerta()
+    for m in (0, 2):
+        decision = decidir_alerta(estado, degradado(m))
+        estado = decision.estado
+    assert decision.aviso is not None  # la primera vez sí avisa
+
+    # Horas después sigue igual: ni un mensaje más.
+    for m in (35, 70, 600):
+        decision = decidir_alerta(estado, degradado(m))
+        estado = decision.estado
+        assert decision.aviso is None
+
+
+def test_una_caida_si_insiste_hasta_que_se_arregle() -> None:
+    # La contracara: con el bot muerto el recordatorio es justamente el punto.
+    estado = EstadoAlerta()
+    for _ in range(2):
+        estado = decidir_alerta(estado, _caido()).estado
+
+    tarde = _diag(
+        Estado.CAIDO,
+        Chequeo("sesion_wa", Estado.CAIDO, "no responde"),
+        momento=T0 + timedelta(minutes=31),
+    )
+    assert decidir_alerta(estado, tarde).aviso is not None
+
+
+def test_un_degradado_que_empeora_avisa_enseguida() -> None:
+    # Dejar de insistir no es dejar de mirar: si el degradado se convierte en
+    # caída, eso es una firma nueva y va sin esperar la ventana.
+    degradado = _diag(Estado.DEGRADADO, Chequeo("configuracion", Estado.DEGRADADO, "falta algo"))
+    estado = EstadoAlerta()
+    for _ in range(2):
+        estado = decidir_alerta(estado, degradado).estado
+
+    peor = _diag(
+        Estado.CAIDO,
+        Chequeo("sesion_wa", Estado.CAIDO, "no responde"),
+        momento=T0 + timedelta(minutes=2),
+    )
+    decision = decidir_alerta(estado, peor)
+    assert decision.aviso is not None
+    assert "sesion_wa" in decision.aviso
+
+
+def test_la_recuperacion_de_un_degradado_se_avisa_igual() -> None:
+    degradado = _diag(Estado.DEGRADADO, Chequeo("configuracion", Estado.DEGRADADO, "falta algo"))
+    estado = EstadoAlerta()
+    for _ in range(2):
+        estado = decidir_alerta(estado, degradado).estado
+
+    ok = _diag(Estado.OK, Chequeo("configuracion", Estado.OK, "completa"), momento=T0 + timedelta(hours=5))
+    decision = decidir_alerta(estado, ok)
+    assert decision.recuperado is True
