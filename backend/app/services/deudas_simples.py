@@ -576,7 +576,7 @@ def cobrar_deudas_cliente_con_cheque(
         imputado=reduccion,
         canceladas=canceladas,
         saldo_restante=(saldo_total - reduccion).quantize(Decimal("0.01")),
-        diferencia=diferencia,
+        vuelto_ars=diferencia,
         vuelto_modo=payload.vuelto_modo if diferencia > Decimal("0.00") else None,
     )
 
@@ -598,6 +598,12 @@ def cobrar_con_cheque(
 
     Los cheques son siempre en pesos: si la deuda es en USD, el cobro cruza
     monedas y la `cotizacion` imputa cuánto del saldo (en USD) queda saldado.
+
+    **Si el cheque cubre de más, el excedente se resuelve, no se informa y
+    listo**: `vuelto_modo` es obligatorio y va por el mismo camino que el cobro
+    por cliente y que el vuelto de un pasivo (§5) — o se le paga en efectivo
+    (egreso `VUELTO_PASIVO`, lo único que mueve la caja acá) o el negocio le
+    queda debiendo y se crea un pasivo a su favor.
     """
     deuda = db.scalar(
         select(DeudaSimple).where(DeudaSimple.id == deuda_id).with_for_update()
@@ -628,22 +634,29 @@ def cobrar_con_cheque(
     ).quantize(Decimal("0.01"))
 
     # El cheque vale pesos; si la deuda es en USD hay que convertir para saber
-    # cuánto del saldo salda. Se usa `convertir_a_moneda_deuda` y NO
-    # `calcular_reduccion_saldo` porque esta última rechaza un pago mayor al
-    # saldo: correcto en efectivo, pero acá el valor del cheque es fijo y un
-    # cheque "de más" es el caso normal, no un error.
+    # cuánto del saldo salda. `calcular_imputacion_y_vuelto` usa
+    # `convertir_a_moneda_deuda` y NO `calcular_reduccion_saldo`, que rechaza un
+    # pago mayor al saldo: correcto en efectivo, pero acá el valor del cheque es
+    # fijo y un cheque "de más" es el caso normal, no un error.
     equivalente = convertir_a_moneda_deuda(
         deuda.moneda, Moneda.ARS, valor_neto, payload.cotizacion
     )
     es_cross = deuda.moneda != Moneda.ARS
 
     # Diferencia en la moneda de la deuda: > 0 el negocio le queda debiendo al
-    # cliente; < 0 el cliente todavía debe el resto.
+    # cliente; < 0 el cliente todavía debe el resto. Es dato informativo.
     diferencia = (equivalente - deuda.saldo_pendiente).quantize(Decimal("0.01"))
 
-    # Se imputa como mucho el saldo: el excedente no puede dejarlo en negativo,
-    # se informa como `diferencia` a favor del cliente.
-    reduccion = min(equivalente, deuda.saldo_pendiente)
+    # `vuelto_ars` es el excedente llevado a pesos: es lo que efectivamente se le
+    # devuelve o se le queda debiendo, y va en la misma moneda del cheque.
+    reduccion, vuelto_ars = calcular_imputacion_y_vuelto(
+        deuda.moneda, deuda.saldo_pendiente, valor_neto, payload.cotizacion
+    )
+    if vuelto_ars > Decimal("0.00") and payload.vuelto_modo is None:
+        raise ValidationError(
+            f"El cheque cubre toda la deuda y sobran ${vuelto_ars}. Indicá qué "
+            "hacer con el vuelto: pagarlo en efectivo o quedar debiéndolo."
+        )
 
     fecha = payload.fecha_cobro or hoy_local()
     cheque_nuevo = Cheque(
@@ -673,6 +686,12 @@ def cobrar_con_cheque(
 
     try:
         db.add(cheque_nuevo)
+        # El vuelto referencia al cheque, así que necesita su id antes del commit.
+        db.flush()
+        if vuelto_ars > Decimal("0.00"):
+            svc_pasivos.aplicar_vuelto_cheque(
+                db, cheque_nuevo, payload.vuelto_modo, vuelto_ars, fecha
+            )
         db.commit()
         db.refresh(deuda)
         db.refresh(cheque_nuevo)
@@ -687,4 +706,6 @@ def cobrar_con_cheque(
         deuda=DeudaSimpleRead.model_validate(deuda),
         cheque_ingresado=ChequeRead.model_validate(cheque_nuevo),
         diferencia=diferencia,
+        vuelto_ars=vuelto_ars,
+        vuelto_modo=payload.vuelto_modo if vuelto_ars > Decimal("0.00") else None,
     )

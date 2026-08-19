@@ -296,10 +296,16 @@ y fecha. Conceptualmente "un fiado sin cheque y con divisa". Tabla `deudas_simpl
   efectivo — la plata se reconoce al vender o cobrar ese cheque (mismo criterio que §2 y §3),
   y por eso se inserta con `db.add()` y no con `create_cheque()`.
   - **Un cheque "de más" es el caso normal, no un error.** El cliente entrega el cheque que
-    tiene. Si vale más que el saldo, la deuda se cancela y la `diferencia` (> 0) queda a favor
-    del cliente. Por eso usa `conversion.convertir_a_moneda_deuda` (convierte sin topear) y
+    tiene. Si vale más que el saldo, la deuda se cancela y el excedente queda a favor del
+    cliente. Por eso usa `conversion.convertir_a_moneda_deuda` (convierte sin topear) y
     **no** `calcular_reduccion_saldo`, que rechaza un pago mayor al saldo — correcto para
     efectivo, roto para cheques.
+  - **El excedente se resuelve, no se informa y listo** _(unificado 2026-08-18)_: `vuelto_modo`
+    es **obligatorio** cuando sobra, exactamente igual que en el cobro por cliente y que el
+    vuelto de un pasivo (§5). `diferencia` queda como dato informativo en la moneda de la
+    deuda; **`vuelto_ars` es lo que efectivamente se devuelve**, en pesos, porque el cheque es
+    un instrumento en pesos: una deuda de 100 USD saldada con un cheque neto de $150.000 a
+    1.000 deja 50 USD de diferencia y **$50.000** de vuelto.
   - Cross-currency: los cheques son siempre ARS, así que una deuda en USD exige `cotizacion`.
 - **Editar carga:** `PATCH /deudas-simples/{id}` (`svc_deudas_simples.editar_deuda_simple`).
   `concepto`/`fecha`/`observaciones` siempre; `monto`/`moneda` solo si está `ABIERTA` y sin

@@ -109,8 +109,8 @@ export interface CobroClienteChequeResult {
   imputado: string
   canceladas: number
   saldo_restante: string
-  /** En ARS: > 0 el cheque cubrió todo y el negocio le queda debiendo esto. */
-  diferencia: string
+  /** En ARS: > 0 el cheque cubrió todo y sobró esto. */
+  vuelto_ars: string
   vuelto_modo: VueltoModo | null
 }
 
@@ -138,14 +138,20 @@ export interface CobrarDeudaSimpleConChequePayload {
   fecha_pago?: string | null
   // Requerida solo si la deuda es en USD (el cheque siempre entra en pesos).
   cotizacion?: number | null
+  // Obligatorio solo si el cheque cubre de más: mismo criterio que el cobro por
+  // cliente y que el vuelto de un pasivo.
+  vuelto_modo?: VueltoModo | null
   fecha_cobro?: string | null
 }
 
 export interface CobrarConChequeResult {
   deuda: DeudaSimple
   cheque_ingresado: Cheque
-  /** En la moneda de la deuda: > 0 el negocio le queda debiendo al cliente. */
+  /** En la moneda de la deuda: > 0 el cheque valía más; < 0 sigue debiendo. */
   diferencia: string
+  /** El excedente llevado a pesos: es lo que se devuelve o se queda debiendo. */
+  vuelto_ars: string
+  vuelto_modo: VueltoModo | null
 }
 
 export const cobrarDeudaSimpleConCheque = (

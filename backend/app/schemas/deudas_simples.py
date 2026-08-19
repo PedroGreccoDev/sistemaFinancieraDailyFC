@@ -122,9 +122,9 @@ class DeudaSimpleCobroClienteChequeResponse(BaseModel):
     """Resultado del cobro por cliente con cheque.
 
     `imputado` es cuánto bajó la deuda en total y `saldo_restante` lo que el
-    cliente sigue debiendo, ambos en la moneda de las deudas. `diferencia` va en
+    cliente sigue debiendo, ambos en la moneda de las deudas. `vuelto_ars` va en
     **ARS** —el excedente de un cheque es plata en pesos— y es > 0 solo cuando el
-    cheque cubrió todo; `vuelto_modo` dice qué se hizo con ella.
+    cheque cubrió todo; `vuelto_modo` dice qué se hizo con él.
     """
 
     deudas_afectadas: list[DeudaSimpleRead]
@@ -132,7 +132,7 @@ class DeudaSimpleCobroClienteChequeResponse(BaseModel):
     imputado: Decimal
     canceladas: int
     saldo_restante: Decimal
-    diferencia: Decimal
+    vuelto_ars: Decimal
     vuelto_modo: VueltoModo | None = None
 
 
@@ -169,6 +169,9 @@ class DeudaSimpleCobrarConChequeRequest(BaseModel):
     fecha_pago: date | None = None
     # Obligatoria solo si la deuda es en USD (el cheque siempre entra en ARS).
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+    # Obligatorio solo si el cheque cubre de más: qué se hace con el excedente.
+    # Mismo criterio que el cobro por cliente y que el vuelto de un pasivo (§5).
+    vuelto_modo: VueltoModo | None = None
     fecha_cobro: date | None = None
 
 
@@ -178,8 +181,14 @@ class DeudaSimpleCobrarConChequeResponse(BaseModel):
     `diferencia` en la moneda de la deuda: > 0 el cheque valía más que el saldo y
     el negocio le queda debiendo esa diferencia al cliente; < 0 el cliente todavía
     debe el resto; 0 justo.
+
+    `vuelto_ars` es esa misma diferencia positiva llevada a **pesos** (el
+    excedente de un cheque es plata en pesos y en pesos se devuelve), y
+    `vuelto_modo` dice qué se hizo con ella: pagarla o quedar debiéndola.
     """
 
     deuda: DeudaSimpleRead
     cheque_ingresado: ChequeRead
     diferencia: Decimal
+    vuelto_ars: Decimal
+    vuelto_modo: VueltoModo | None = None

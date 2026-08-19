@@ -102,6 +102,13 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   // A diferencia del efectivo, un cheque de más NO es error: la deuda se cancela
   // y el negocio le queda debiendo la diferencia al cliente.
   const chDiferencia = chEquivalente !== null ? Math.round((chEquivalente - saldo) * 100) / 100 : null
+  // Lo que sobra, EN PESOS: la diferencia de arriba está en la moneda de la
+  // deuda, pero el excedente de un cheque es plata en pesos y en pesos se
+  // devuelve. Sin esta conversión, una deuda en USD mostraría "sobran $50"
+  // cuando en realidad son 50 dólares.
+  const chVueltoArs = chDiferencia !== null && chDiferencia > 0
+    ? Math.round((chCross ? chDiferencia * cotizNum : chDiferencia) * 100) / 100
+    : 0
   const puedeEnviarCheque =
     chNro.trim().length > 0 && chMontoNum > 0 && chPorcentaje !== '' && chEquivalente !== null
 
@@ -122,15 +129,15 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           porcentaje_compra_cheque: chPctNum,
           fecha_pago: chFechaPago || null,
           cotizacion: chCross ? cotizNum : null,
-          vuelto_modo: (chDiferencia ?? 0) > 0 ? vueltoModo : null,
+          vuelto_modo: chVueltoArs > 0 ? vueltoModo : null,
         })
-        const dif = parseFloat(r.diferencia)
+        const vuelto = parseFloat(r.vuelto_ars)
         toast(
           'success',
-          dif > 0
-            ? vueltoModo === 'SALDAR_EFECTIVO'
-              ? `Saldó ${r.canceladas} deuda(s) · le devolviste ${fmtARS(dif)} de vuelto`
-              : `Saldó ${r.canceladas} deuda(s) · le quedás debiendo ${fmtARS(dif)}`
+          vuelto > 0
+            ? r.vuelto_modo === 'SALDAR_EFECTIVO'
+              ? `Saldó ${r.canceladas} deuda(s) · le devolviste ${fmtARS(vuelto)} de vuelto`
+              : `Saldó ${r.canceladas} deuda(s) · le quedás debiendo ${fmtARS(vuelto)}`
             : `Cobrado · saldó ${r.canceladas} deuda(s), quedan ${fmtMoneda(parseFloat(r.saldo_restante), deuda.moneda)}`,
         )
         onSuccess()
@@ -143,12 +150,16 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
         porcentaje_compra_cheque: chPctNum,
         fecha_pago: chFechaPago || null,
         cotizacion: chCross ? cotizNum : null,
+        vuelto_modo: chVueltoArs > 0 ? vueltoModo : null,
       })
       const dif = parseFloat(r.diferencia)
+      const vuelto = parseFloat(r.vuelto_ars)
       toast(
         'success',
-        dif > 0
-          ? `Deuda saldada · le quedás debiendo ${fmtMoneda(dif, deuda.moneda)}`
+        vuelto > 0
+          ? r.vuelto_modo === 'SALDAR_EFECTIVO'
+            ? `Deuda saldada · le devolviste ${fmtARS(vuelto)} de vuelto`
+            : `Deuda saldada · le quedás debiendo ${fmtARS(vuelto)}`
           : dif < 0
             ? `Cobrado · sigue debiendo ${fmtMoneda(-dif, deuda.moneda)}`
             : 'Deuda saldada con el cheque',
@@ -301,11 +312,11 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
               )}
 
               {/* El cheque cubre todo y sobra: hay que decidir qué se hace con
-                  el vuelto. Solo en el cobro agregado; en una deuda suelta el
-                  excedente se informa nada más. */}
-              {esAgregado && chDiferencia !== null && chDiferencia > 0 && (
+                  el vuelto. Vale igual para una deuda suelta que para todas las
+                  del cliente — es la misma situación. */}
+              {chVueltoArs > 0 && (
                 <div>
-                  <label style={LABEL_STYLE}>Qué hacés con los {fmtARS(chDiferencia)} que sobran</label>
+                  <label style={LABEL_STYLE}>Qué hacés con los {fmtARS(chVueltoArs)} que sobran</label>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     {([['QUEDA_DEBIENDO', 'Le quedás debiendo'], ['SALDAR_EFECTIVO', 'Se lo devolvés ahora']] as const).map(([v, txt]) => (
                       <button key={v} type="button" onClick={() => setVueltoModo(v)}
