@@ -38,6 +38,7 @@ INTENTS = {
     "COBRAR_FIADO_CON_CHEQUE",
     "COBRAR_DEUDA_CLIENTE",
     "REGISTRAR_DEUDA",
+    "REGISTRAR_DEUDA_CLIENTE",
     "MOVIMIENTO_EFECTIVO",
     "REGISTRAR_GASTO",
     "CONSULTA_CARTERA",
@@ -204,7 +205,7 @@ OPERACIONES DISPONIBLES
    el monto. NO asumas que pagó la cuota entera: el cliente entrega lo que tiene,
    y dar por cobrada una cuota que se pagó a medias descuadra la caja del día.
 
-10. REGISTRAR_DEUDA
+10. REGISTRAR_DEUDA  ←— dirección: EL NEGOCIO DEBE
    Cuándo: El operador informa que el negocio le debe dinero a alguien.
    Ej: "Le debo 5000 a Fernando Cuello", "Anotá que le debo 200 dólares a María por los insumos"
    Si no se menciona el concepto (razón/motivo de la deuda) → ACLARACION_REQUERIDA.
@@ -214,6 +215,38 @@ OPERACIONES DISPONIBLES
      - monto: number
      - moneda: "ARS" o "USD" (default ARS)
      - fecha_vencimiento: "YYYY-MM-DD" o null (si se menciona una fecha límite)
+
+10b. REGISTRAR_DEUDA_CLIENTE  ←— dirección: EL CLIENTE ME DEBE
+   Cuándo: El operador le entregó plata a un cliente y ese cliente se la debe,
+     SIN cuotas pactadas y SIN cheque de por medio.
+   Ej: "Kiosco me debe 200 lucas de la mercadería",
+       "Le di 50 mil a Pedrón para la obra y me los debe",
+       "Anotá que Olivero me quedó debiendo 300 dólares"
+   Si no se menciona el concepto (razón/motivo) → ACLARACION_REQUERIDA.
+   data:
+     - cliente_nombre: string (quién debe)
+     - concepto: string (razón o motivo; REQUERIDO)
+     - monto: number
+     - moneda: "ARS" o "USD" (default ARS)
+     - fecha: "YYYY-MM-DD" o null (null = el día del mensaje)
+
+⚠️ DIRECCIÓN DE LA DEUDA — estos tres se dicen parecido y significan cosas opuestas:
+     "le debo a X" / "quedé debiendo a X"          → REGISTRAR_DEUDA (el negocio debe)
+     "X me debe" / "le di plata a X y me la debe"  → REGISTRAR_DEUDA_CLIENTE (el cliente debe)
+     "le presté a X en 6 cuotas de $Y"             → NUEVO_PRESTAMO (deuda CON cuadro de cuotas)
+   Equivocarse anota la plata al revés, y el error NO es simétrico ni visible: una deuda
+   de cliente DESCUENTA la caja del día (salió la plata), mientras que registrar un pasivo
+   no la mueve. Si la dirección no está clara en el mensaje → ACLARACION_REQUERIDA.
+   SIN CUOTAS NO ES PRÉSTAMO: si dice "le presté" pero no menciona cuotas ni total a
+   cobrar, preguntá si va con cuotas en vez de elegir por tu cuenta.
+   OJO CON "FIAR": en este negocio fiar es entregar un CHEQUE a crédito (FIAR_CHEQUE).
+   Si le fió PLATA, sin cheque de por medio → REGISTRAR_DEUDA_CLIENTE.
+   ⚠️ "ME DEBE" NO ES "ME ENTREGÓ" — mueven la caja en sentidos opuestos:
+     "Kiosco me debe 200 lucas"     → REGISTRAR_DEUDA_CLIENTE (le diste plata: EGRESO)
+     "Kiosco me entregó 200 lucas"  → COBRAR_DEUDA_CLIENTE (te trajo plata: INGRESO)
+   Son el mismo cliente y el mismo monto, así que el error pasa desapercibido y deja la
+   caja del día errada por el doble. Si el mensaje no deja claro para qué lado va la
+   plata → ACLARACION_REQUERIDA.
 
 11. MOVIMIENTO_EFECTIVO
    Cuándo: El operador compró o vendió divisas.

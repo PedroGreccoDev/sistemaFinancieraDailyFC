@@ -38,6 +38,8 @@ from app.schemas.pasivos import PasivoCreate
 from app.services import pasivos as svc_pasivos
 from app.schemas.cheques import ChequeFiarRequest, ChequeCreate, ChequeManualTransition
 from app.schemas.clientes import ClienteCreate
+from app.schemas.deudas_simples import DeudaSimpleCreate
+from app.services import deudas_simples as svc_deudas_simples
 from app.schemas.deudores import CobroClienteCreate
 from app.services import deudores as svc_deudores
 from app.schemas.fiados import FiadoCobrarConChequeRequest, FiadoCobrarEfectivoRequest
@@ -125,6 +127,8 @@ def dispatch(
             return _cobrar_deuda_cliente(db, data, msg_at)
         if intent == "REGISTRAR_DEUDA":
             return _registrar_deuda(db, data, msg_at)
+        if intent == "REGISTRAR_DEUDA_CLIENTE":
+            return _registrar_deuda_cliente(db, data, msg_at)
         if intent == "MOVIMIENTO_EFECTIVO":
             return _movimiento_efectivo(db, data, msg_at)
         if intent == "REGISTRAR_GASTO":
@@ -557,6 +561,43 @@ def _registrar_deuda(db: Session, data: dict[str, Any], msg_at: datetime | None 
     ]
     if pasivo.fecha_vencimiento:
         lines.append(f"Vencimiento: {_fmt_date(pasivo.fecha_vencimiento)}")
+    return True, "\n".join(lines)
+
+
+def _registrar_deuda_cliente(
+    db: Session, data: dict[str, Any], msg_at: datetime | None = None
+) -> DispatchResult:
+    """Alta de una deuda libre de un cliente desde el chat (§2.b).
+
+    Es la dirección OPUESTA a `_registrar_deuda`, que anota lo que el negocio
+    debe (un pasivo). Acá la plata salió: `create_deuda_simple` asienta el egreso
+    `OTORGAMIENTO_DEUDA` del día. Por eso la respuesta dice explícitamente cuánto
+    salió de caja — si el operador quiso anotar un pasivo, lo ve en el acto."""
+    cliente_nombre = _req_str(data, "cliente_nombre")
+    concepto = _req_str(data, "concepto")
+    monto = _req_decimal(data, "monto")
+    moneda = _req_enum(data, "moneda", Moneda) if data.get("moneda") else Moneda.ARS
+    fecha = _opt_date(data, "fecha")
+
+    cliente = _find_or_create_cliente(db, cliente_nombre)
+
+    payload = DeudaSimpleCreate(
+        cliente_id=cliente.id,
+        concepto=concepto,
+        monto=monto,
+        moneda=moneda,
+        fecha=fecha or fecha_local(msg_at),
+    )
+    deuda = svc_deudas_simples.create_deuda_simple(db, payload)
+
+    simbolo = "U$D" if moneda == Moneda.USD else "$"
+    lines = [
+        "🧾 *Deuda de cliente registrada*",
+        f"Cliente: {cliente.nombre} le debe al negocio",
+        f"Concepto: {deuda.concepto}",
+        f"Monto: {simbolo}{_fmt_num(monto)}",
+        f"Salió de caja el {_fmt_date(deuda.fecha)}",
+    ]
     return True, "\n".join(lines)
 
 

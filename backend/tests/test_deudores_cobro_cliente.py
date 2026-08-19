@@ -315,3 +315,16 @@ def test_el_dispatcher_registra_el_intent() -> None:
     fuente = inspect.getsource(dispatcher.dispatch)
     assert 'intent == "COBRAR_DEUDA_CLIENTE"' in fuente
     assert hasattr(dispatcher, "_cobrar_deuda_cliente")
+
+
+def test_el_prompt_separa_me_debe_de_me_entrego() -> None:
+    """"Kiosco me debe 200 lucas" y "Kiosco me entregó 200 lucas" mueven la caja
+    al revés: la primera es un EGRESO (le diste la plata) y la segunda un INGRESO
+    (te la trajo). Mismo cliente, mismo monto, error invisible — y la caja del día
+    queda errada por el doble."""
+    from app.services.ia.claude import _SYSTEM_PROMPT
+
+    assert '"ME DEBE" NO ES "ME ENTREGÓ"' in _SYSTEM_PROMPT
+    bloque = _SYSTEM_PROMPT.split('"ME DEBE" NO ES "ME ENTREGÓ"')[1].split("11. MOVIMIENTO_EFECTIVO")[0]
+    assert "REGISTRAR_DEUDA_CLIENTE" in bloque
+    assert "COBRAR_DEUDA_CLIENTE" in bloque
