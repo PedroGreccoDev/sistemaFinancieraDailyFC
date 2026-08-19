@@ -95,9 +95,20 @@ Podés nombrar el cheque con los últimos números: **"el 681"** encuentra el 03
 |---|---|
 | "Cargué 10 mil de nafta" | Registra el gasto |
 | "Gasté milqui en YPF y 12 mil en el kiosco" | Registra los dos gastos |
-| "Le debo $50.000 a Fernando por los insumos" | Anota la deuda del negocio |
+| "Le debo $50.000 a Fernando por los insumos" | Anota la deuda **del negocio** |
+| "Kiosco me debe 200 lucas de la mercadería" | Anota la deuda **del cliente** y descuenta la plata de la caja |
 
 En las deudas **siempre decí el motivo**. Si no, te lo pregunta.
+
+**Ojo con cómo lo decís, porque son cosas opuestas:**
+
+- *"Le debo a Fernando"* → lo que **vos le debés** a alguien. No mueve la caja.
+- *"Fernando me debe"* → lo que **te deben a vos**. Descuenta la plata de la caja del día,
+  porque esa plata salió.
+- *"Le presté a Fernando en 6 cuotas"* → arma un **préstamo con cuotas**.
+
+Si le diste plata sin pactar cuotas, decilo como *"me debe"*. El bot te contesta cuánto
+salió de caja: si ahí ves un descuento que no esperabas, avisale en el momento.
 
 ### Préstamos y dólares
 
@@ -164,7 +175,7 @@ vendiste, o un cheque que usaste para pagar una deuda. Eso se resuelve en el pan
 Para esto hay que entrar al panel web:
 
 - Pagar o cancelar las deudas del negocio (las anota, no las paga).
-- "Otras deudas" de clientes.
+- **Cobrar** las "Otras deudas" de clientes (las anota, no las cobra).
 - Cobrar un préstamo por un monto que no sea una cuota entera (ej: paga $30.000 de una
   cuota de $50.000).
 - Cargar algo con fecha de otro día.

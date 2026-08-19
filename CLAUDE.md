@@ -337,9 +337,10 @@ y fecha. Conceptualmente "un fiado sin cheque y con divisa". Tabla `deudas_simpl
   `deuda_simple` para una deuda suelta (única forma de cobrar **con cheque**) y
   `deudas_cliente` para el cobro agregado, donde el `id` que viaja es el del **cliente**—.
   Incluida en el backup JSON export/import.
-- **Bot:** no hay intent para cargarlas (pendiente), pero `CONSULTA_CLIENTE` **sí las
-  informa**: si el bot omitiera una fuente, preguntar por un cliente por WhatsApp devolvería
-  un saldo incompleto mientras el panel muestra el correcto.
+- **Bot:** se cargan con el intent `REGISTRAR_DEUDA_CLIENTE` (ver §Bot: dirección de la
+  deuda) y `CONSULTA_CLIENTE` **las informa**: si el bot omitiera una fuente, preguntar por
+  un cliente por WhatsApp devolvería un saldo incompleto mientras el panel muestra el
+  correcto. **Cobrarlas desde el chat sigue siendo solo panel** (pendiente).
 
 ---
 
@@ -700,8 +701,20 @@ avisa **por Telegram** diciendo **qué** se rompió.
 - Cheques: `REGISTRAR_CHEQUE`, `VENDER_CHEQUE`, `FIAR_CHEQUE`, `COBRAR_CHEQUE`, `RECHAZAR_CHEQUE`.
 - Préstamos: `NUEVO_PRESTAMO`, `COBRAR_CUOTA`.
 - Fiados: `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
-- Otros: `REGISTRAR_DEUDA`, `MOVIMIENTO_EFECTIVO`, `REGISTRAR_GASTO`, `EDITAR_OPERACION`,
-  `REVERTIR_OPERACION`.
+- Otros: `REGISTRAR_DEUDA`, `REGISTRAR_DEUDA_CLIENTE`, `MOVIMIENTO_EFECTIVO`,
+  `REGISTRAR_GASTO`, `EDITAR_OPERACION`, `REVERTIR_OPERACION`.
+  - **Dirección de la deuda _(régimen definido 2026-08-18)_.** Tres mensajes que se dicen
+    parecido y significan cosas distintas: **"le debo a X"** → `REGISTRAR_DEUDA` (pasivo,
+    §5); **"X me debe"** → `REGISTRAR_DEUDA_CLIENTE` (deuda libre del cliente, §2.b);
+    **"le presté a X en 6 cuotas"** → `NUEVO_PRESTAMO` (§3). El error **no es simétrico**:
+    la deuda de cliente asienta un EGRESO `OTORGAMIENTO_DEUDA` el día que se carga y el
+    pasivo **no mueve la caja** al darse de alta, así que confundirlos descuadra la caja
+    por una operación que nunca ocurrió y nadie lo nota hasta leer el reporte. Por eso el
+    prompt contrasta las tres en un mismo bloque, la respuesta del bot dice **cuánto salió
+    de caja** (control inmediato del operador) y `test_bot_deuda_cliente.py` custodia la
+    separación. Dos trampas del vocabulario que resuelve el prompt: **sin cuotas no es
+    préstamo** (pregunta en vez de inventar un cuadro de cuotas) y **"fiar" acá es entregar
+    un cheque** (`FIAR_CHEQUE`), así que "le fié plata" es una deuda de cliente.
   - **`REVERTIR_OPERACION` deshace; `EDITAR_OPERACION` corrige.** Editar cambia un valor mal
     cargado ("el % era 3 no 2"); revertir deshace la operación entera ("no se vendió",
     "borrá eso"). El prompt marca la diferencia explícitamente y hay un test que la custodia.
@@ -776,6 +789,10 @@ avisa **por Telegram** diciendo **qué** se rompió.
     `configuracion` (la severidad de cada env var faltante), que un `DEGRADADO` no
     interrumpa a nadie sin dejar de mirar la caída que venga después, y que el aviso de
     "volvió" salga **aunque el sistema siga degradado**.
+  - **`test_bot_deuda_cliente.py`** — la **dirección** de la deuda en el bot (§Bot): que el
+    prompt siga contrastando "le debo a X" / "X me debe" / "le presté en N cuotas", que
+    diga por qué importa (una descuenta la caja y la otra no) y que los dos handlers no se
+    crucen —el de cliente crea una `DeudaSimple`, el del negocio un `Pasivo`—.
   - **`test_apertura.py`** — fecha de corte de la carga inicial (§Apertura): el día del corte es
     inclusive, después vuelve a descontar, y sin corte definido todo es operación normal. Fija
     además que `SALDO_INICIAL` va al grupo `APERTURA` y no cuenta como ingreso del día.
