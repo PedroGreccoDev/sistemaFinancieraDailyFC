@@ -8,6 +8,7 @@ import {
   cobrarDeudasClienteConCheque,
   type VueltoModo,
 } from '../api/deudas_simples'
+import { cobrarCliente, cobrarClienteConCheque } from '../api/deudores'
 import { fmtARS, fmtUSD } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
@@ -23,12 +24,16 @@ const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fon
 // o total): un préstamo, un fiado o una deuda libre. `saldo` y `moneda` son de la
 // deuda (los fiados son siempre ARS; préstamos y deudas libres, en su moneda).
 //
-// `deudas_cliente` es el caso agregado: todas las deudas libres abiertas de un
-// cliente en una misma moneda, cobradas de una. Ahí `id` es el **cliente**, no
-// una deuda, y `saldo` es la suma de sus saldos; el backend reparte el importe
-// de la deuda más vieja a la más nueva.
+// `deudas_cliente` es el caso agregado de "Otras deudas": todas las deudas
+// libres abiertas de un cliente en una misma moneda, cobradas de una.
+//
+// `deuda_general` es el de la pestaña General y va un paso más allá: **toda** la
+// deuda del cliente en esa moneda, cruzando cheques fiados, deudas libres y
+// préstamos. En los dos el `id` que viaja es el del **cliente**, no el de una
+// deuda, y `saldo` es la suma de sus saldos; el backend reparte el importe de la
+// operación más vieja a la más nueva.
 export interface DeudaItem {
-  tipo: 'prestamo' | 'fiado' | 'deuda_simple' | 'deudas_cliente'
+  tipo: 'prestamo' | 'fiado' | 'deuda_simple' | 'deudas_cliente' | 'deuda_general'
   id: string
   clienteNombre: string
   label: string
@@ -54,13 +59,15 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
 
-  // Forma de pago. El cobro con cheque vive acá para "otras deudas" —tanto una
-  // deuda suelta como todas las del cliente de una—; los préstamos lo tienen por
-  // cuota en su propia pestaña (necesita saber a qué cuota imputarlo) y los
-  // fiados en la suya, así que para esos dos se deriva.
+  // Forma de pago. El cheque está disponible donde el cobro no apunta a una
+  // cuota concreta: una deuda libre suelta, todas las del cliente y el total
+  // general de la pestaña General. Cobrar con cheque UNA cuota de préstamo o UN
+  // fiado vive en sus propias pestañas, que sí necesitan saber a cuál imputarlo.
   const [forma, setForma] = useState<'efectivo' | 'cheque'>('efectivo')
-  const chequeDisponible = deuda.tipo === 'deuda_simple' || deuda.tipo === 'deudas_cliente'
-  const esAgregado = deuda.tipo === 'deudas_cliente'
+  const esGeneral = deuda.tipo === 'deuda_general'
+  const chequeDisponible =
+    deuda.tipo === 'deuda_simple' || deuda.tipo === 'deudas_cliente' || esGeneral
+  const esAgregado = deuda.tipo === 'deudas_cliente' || esGeneral
 
   // Qué hacer con el vuelto cuando el cheque cubre todo y sobra. Solo aplica al
   // cobro agregado: en una deuda suelta el excedente se informa y listo.
@@ -117,6 +124,33 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
     setError(null)
     setLoading(true)
     try {
+      if (esGeneral) {
+        // `deuda.id` es el cliente: el cheque salda TODA su deuda en esa moneda
+        // —fiados, deudas libres y préstamos— de la operación más vieja a la más
+        // nueva. Si sobra, el vuelto se resuelve según vueltoModo.
+        const r = await cobrarClienteConCheque({
+          cliente_id: deuda.id,
+          moneda_deuda: deuda.moneda,
+          nro_cheque_pago: chNro.trim(),
+          banco_pago: chBanco.trim() || null,
+          monto_cheque: chMontoNum,
+          porcentaje_compra_cheque: chPctNum,
+          fecha_pago: chFechaPago || null,
+          cotizacion: chCross ? cotizNum : null,
+          vuelto_modo: chVueltoArs > 0 ? vueltoModo : null,
+        })
+        const vuelto = parseFloat(r.vuelto_ars)
+        toast(
+          'success',
+          vuelto > 0
+            ? r.vuelto_modo === 'SALDAR_EFECTIVO'
+              ? `Saldó ${r.canceladas} operación(es) · le devolviste ${fmtARS(vuelto)} de vuelto`
+              : `Saldó ${r.canceladas} operación(es) · le quedás debiendo ${fmtARS(vuelto)}`
+            : `Cobrado · saldó ${r.canceladas} operación(es), quedan ${fmtMoneda(parseFloat(r.saldo_restante), deuda.moneda)}`,
+        )
+        onSuccess()
+        return
+      }
       if (esAgregado) {
         // `deuda.id` es el cliente: el cheque salda sus deudas de la más vieja a
         // la más nueva y, si sobra, el vuelto se resuelve según vueltoModo.
@@ -186,6 +220,25 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           moneda_pago: monedaPago,
           cotizacion: cross ? cotizNum : null,
         })
+      } else if (esGeneral) {
+        // `deuda.id` es el cliente: el importe se reparte entre TODAS sus deudas
+        // de esa moneda —fiados, deudas libres y préstamos—, la más vieja primero.
+        const r = await cobrarCliente({
+          cliente_id: deuda.id,
+          moneda_deuda: deuda.moneda,
+          monto_cobrado: montoNum,
+          moneda_pago: monedaPago,
+          cotizacion: cross ? cotizNum : null,
+        })
+        const restante = parseFloat(r.saldo_restante)
+        toast(
+          'success',
+          restante <= 0
+            ? `Cobrado · ${deuda.clienteNombre} no debe más nada en ${deuda.moneda}`
+            : `Cobrado · saldó ${r.canceladas} operación(es), quedan ${fmtMoneda(restante, deuda.moneda)}`,
+        )
+        onSuccess()
+        return
       } else if (deuda.tipo === 'deudas_cliente') {
         // Acá `deuda.id` es el cliente: el importe se reparte entre sus deudas
         // abiertas de esa moneda, la más vieja primero.
@@ -222,7 +275,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
       <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '380px' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)' }}>
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>
-            {deuda.tipo === 'deudas_cliente' ? 'Cobrar al cliente' : 'Pagar deuda'}
+            {esAgregado ? 'Cobrar al cliente' : 'Pagar deuda'}
           </h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{deuda.clienteNombre} · {deuda.label}</p>
         </div>
@@ -232,9 +285,11 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
             <span style={{ fontWeight: 700, color: '#fbbf24' }}>{fmtMoneda(saldo, deuda.moneda)}</span>
           </div>
 
-          {deuda.tipo === 'deudas_cliente' && (
+          {esAgregado && (
             <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '-0.4rem' }}>
-              Se imputa a las deudas más viejas primero, hasta donde alcance.
+              {esGeneral
+                ? 'Se imputa a las operaciones más viejas primero —fiados, deudas y préstamos por igual—, hasta donde alcance.'
+                : 'Se imputa a las deudas más viejas primero, hasta donde alcance.'}
             </p>
           )}
 
@@ -370,7 +425,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
             <p style={{ fontFamily: FM, fontSize: '0.7rem', color: cancelaTotal ? '#4ade80' : '#fbbf24' }}>
               {cross && `Salda ${fmtMoneda(equivalente, deuda.moneda)} de la deuda · `}
               {cancelaTotal
-                ? (deuda.tipo === 'deudas_cliente' ? 'Salda todas sus deudas' : 'Salda la deuda completamente')
+                ? (esAgregado ? 'Salda todas sus deudas' : 'Salda la deuda completamente')
                 : `Saldo restante: ${fmtMoneda(saldo - equivalente, deuda.moneda)}`}
             </p>
           )}

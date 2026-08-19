@@ -38,6 +38,8 @@ from app.schemas.pasivos import PasivoCreate
 from app.services import pasivos as svc_pasivos
 from app.schemas.cheques import ChequeFiarRequest, ChequeCreate, ChequeManualTransition
 from app.schemas.clientes import ClienteCreate
+from app.schemas.deudores import CobroClienteCreate
+from app.services import deudores as svc_deudores
 from app.schemas.fiados import FiadoCobrarConChequeRequest, FiadoCobrarEfectivoRequest
 from app.schemas.movimientos import MovimientoEfectivoCreate
 from app.schemas.prestamos import PrestamoCreate
@@ -119,6 +121,8 @@ def dispatch(
             return _cobrar_fiado_efectivo(db, phone, data)
         if intent == "COBRAR_FIADO_CON_CHEQUE":
             return _cobrar_fiado_con_cheque(db, phone, data, msg_at)
+        if intent == "COBRAR_DEUDA_CLIENTE":
+            return _cobrar_deuda_cliente(db, data, msg_at)
         if intent == "REGISTRAR_DEUDA":
             return _registrar_deuda(db, data, msg_at)
         if intent == "MOVIMIENTO_EFECTIVO":
@@ -734,6 +738,75 @@ def _cobrar_fiado_efectivo(db: Session, phone: str, data: dict[str, Any]) -> Dis
         f"Cobrado: {_ars(monto_cobrado)}\n"
         f"Saldo restante: {_ars(fiado_actualizado.saldo_pendiente)}"
     )
+
+
+def _cobrar_deuda_cliente(
+    db: Session, data: dict[str, Any], msg_at: datetime | None = None
+) -> DispatchResult:
+    """Cobro consolidado: el cliente entregó plata contra lo que debe.
+
+    Es el equivalente por chat del botón de la pestaña General: no se elige a
+    qué deuda va —el importe se imputa de la operación más vieja a la más nueva,
+    cruzando cheques fiados, deudas libres y cuotas de préstamo—. Para cobrar
+    una deuda puntual están `COBRAR_CUOTA` y `COBRAR_FIADO_EFECTIVO`.
+
+    **La moneda de la deuda se resuelve sola** cuando el operador no la aclara:
+    si el cliente debe en una sola moneda, es esa. Si debe en las dos, se
+    pregunta en vez de elegir — imputar pesos contra la deuda en dólares (o al
+    revés) cambia el saldo de dos cajas distintas.
+    """
+    cliente_nombre = _req_str(data, "cliente_nombre")
+    monto_cobrado = _req_decimal(data, "monto_cobrado")
+    moneda_pago = _req_enum(data, "moneda_pago", Moneda) if data.get("moneda_pago") else Moneda.ARS
+    cotizacion = _opt_decimal(data, "cotizacion")
+
+    cliente = _buscar_cliente_o_error(db, cliente_nombre, estricto=True)
+
+    ars = svc_deudores.resumen_cliente(db, cliente.id, Moneda.ARS)
+    usd = svc_deudores.resumen_cliente(db, cliente.id, Moneda.USD)
+    con_deuda = [r for r in (ars, usd) if r.total > Decimal("0.00")]
+    if not con_deuda:
+        return False, f"❓ {cliente.nombre} no tiene deuda abierta."
+
+    if data.get("moneda_deuda"):
+        moneda_deuda = _req_enum(data, "moneda_deuda", Moneda)
+    elif len(con_deuda) == 1:
+        moneda_deuda = con_deuda[0].moneda
+    else:
+        return False, (
+            f"❓ {cliente.nombre} debe {_ars(ars.total)} y U$D{_fmt_num(usd.total)}. "
+            "¿Contra cuál imputo el pago, la deuda en pesos o la de dólares?"
+        )
+
+    payload = CobroClienteCreate(
+        cliente_id=cliente.id,
+        moneda_deuda=moneda_deuda,
+        monto_cobrado=monto_cobrado,
+        moneda_pago=moneda_pago,
+        cotizacion=cotizacion,
+        fecha_cobro=fecha_local(msg_at),
+    )
+    r = svc_deudores.cobrar_cliente(db, payload)
+
+    simbolo_pago = "U$D" if moneda_pago == Moneda.USD else "$"
+    simbolo_deuda = "U$D" if moneda_deuda == Moneda.USD else "$"
+    lines = [
+        f"✅ *Cobro registrado* — {r.cliente_nombre}",
+        f"Recibido: {simbolo_pago}{_fmt_num(monto_cobrado)}",
+        "",
+        "Se imputó a:",
+    ]
+    for renglon in r.renglones:
+        saldado = " ✔️ saldado" if renglon.cancelado else ""
+        lines.append(
+            f"  • {renglon.detalle} — {simbolo_deuda}{_fmt_num(renglon.imputado)}{saldado}"
+        )
+    lines.append("")
+    if r.saldo_restante <= Decimal("0.00"):
+        lines.append(f"🎉 No debe más nada en {moneda_deuda.value}.")
+    else:
+        lines.append(f"Sigue debiendo: {simbolo_deuda}{_fmt_num(r.saldo_restante)}")
+    return True, "\n".join(lines)
 
 
 def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:

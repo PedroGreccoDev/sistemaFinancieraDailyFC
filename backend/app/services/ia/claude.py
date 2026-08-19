@@ -36,6 +36,7 @@ INTENTS = {
     "COBRAR_CUOTA",
     "COBRAR_FIADO_EFECTIVO",
     "COBRAR_FIADO_CON_CHEQUE",
+    "COBRAR_DEUDA_CLIENTE",
     "REGISTRAR_DEUDA",
     "MOVIMIENTO_EFECTIVO",
     "REGISTRAR_GASTO",
@@ -172,6 +173,36 @@ OPERACIONES DISPONIBLES
      - porcentaje_compra_cheque: number (% de compra de ese cheque)
      - fecha_emision: "YYYY-MM-DD" o null
      - fecha_pago: "YYYY-MM-DD" o null
+
+9b. COBRAR_DEUDA_CLIENTE  ←— el cobro por defecto
+   Cuándo: Un cliente le entregó plata al operador para bajar lo que debe, SIN
+     decir contra qué deuda va. Es la cuenta corriente del cliente: el sistema
+     imputa el importe a sus deudas de la más vieja a la más nueva, cruzando
+     cheques fiados, deudas libres y cuotas de préstamo.
+   Ej: "Kiosco me entregó 200 lucas", "Cobré 50.000 a Pedrón",
+       "Olivero me pagó 300 mil de lo que debía", "Juan me dio 100 dólares"
+   data:
+     - cliente_nombre: string
+     - monto_cobrado: number (la plata que entregó)
+     - moneda_pago: "ARS" o "USD" (default ARS) — la plata que entregó
+     - moneda_deuda: "ARS" o "USD" o null — contra qué deuda se imputa. Ponelo
+       SOLO si el operador lo aclara ("me pagó 100 dólares de la deuda en
+       pesos"); si es null, el sistema lo resuelve solo y pregunta si el
+       cliente debe en las dos monedas.
+     - cotizacion: number o null (pesos por 1 USD; REQUERIDA si moneda_pago y
+       moneda_deuda difieren — si no la dice → ACLARACION_REQUERIDA)
+
+⚠️ CUÁL DE LOS TRES COBROS — decide QUÉ NOMBRA el mensaje:
+     "X me pagó 50 lucas" / "cobré 200 mil a X"  → COBRAR_DEUDA_CLIENTE (no dice contra qué)
+     "X pagó la 3" / "pagó 2 cuotas"             → COBRAR_CUOTA (nombra la cuota)
+     "X saldó el fiado" / "pagó el cheque"       → COBRAR_FIADO_EFECTIVO (nombra el fiado)
+   Los dos puntuales son para cuando el operador dice CONTRA QUÉ va la plata. Si
+   no lo dice, no lo adivines: el cobro general imputa a lo más viejo, que es lo
+   que el operador espera, y el resultado le muestra qué quedó saldado.
+   SIN IMPORTE NO SE COBRA — PREGUNTÁ CUÁNTO: si el mensaje no dice cuánta plata
+   le entregaron ("Juan pagó", "cobré a Pedro") → ACLARACION_REQUERIDA pidiendo
+   el monto. NO asumas que pagó la cuota entera: el cliente entrega lo que tiene,
+   y dar por cobrada una cuota que se pagó a medias descuadra la caja del día.
 
 10. REGISTRAR_DEUDA
    Cuándo: El operador informa que el negocio le debe dinero a alguien.
@@ -350,9 +381,13 @@ REGLAS CRÍTICAS
 10. Si el monto supera $500.000 ARS o 500 USD, o la operación es RECHAZAR_CHEQUE,
     pon confirmacion_requerida: true y describí la operación completa en respuesta_usuario.
     FIAR_CHEQUE solo requiere confirmación si el monto nominal del cheque supera $500.000 ARS.
-11. Ambigüedad COBRAR_CUOTA vs COBRAR_FIADO_EFECTIVO: si el operador dice "X me pagó" o
-    "cobré a X" sin más contexto, elegí COBRAR_CUOTA (más común). Si menciona "fiado",
-    "la deuda" o "lo que me debía del cheque" → COBRAR_FIADO_EFECTIVO.
+11. Ambigüedad entre los tres cobros: si el operador dice cuánto le entregaron sin
+    decir contra qué ("X me pagó 50 lucas"), elegí COBRAR_DEUDA_CLIENTE — es la
+    cuenta corriente del cliente y el sistema imputa a lo más viejo. Elegí uno
+    puntual solo si el mensaje nombra la deuda: "la 3", "dos cuotas" → COBRAR_CUOTA;
+    "el fiado", "el cheque que le fié" → COBRAR_FIADO_EFECTIVO. Y si no dice cuánta
+    plata le entregaron, preguntá el monto (ACLARACION_REQUERIDA) en vez de asumir
+    que pagó una cuota entera.
 12. Números de cheque abreviados: si el operador menciona solo los últimos dígitos
     (ej: "el 681") y en el historial hay un cheque cuyo nro termina en ese sufijo
     (ej: "03789681"), usá SIEMPRE el número completo del historial como nro_cheque.

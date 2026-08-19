@@ -18,6 +18,7 @@ from app.db.models import (
     Cuota,
     CuotaEstado,
     FrecuenciaCuotas,
+    Moneda,
     Prestamo,
     PrestamoEstado,
 )
@@ -495,6 +496,72 @@ def repartir_pago_en_cuotas(
     return aplicado
 
 
+def imputar_pago(
+    db: Session,
+    prestamo: Prestamo,
+    *,
+    reduccion: Decimal,
+    fecha: date,
+    monto_caja: Decimal | None,
+    moneda_pago: Moneda,
+    cotizacion: Decimal | None,
+) -> bool:
+    """Imputa `reduccion` (en la moneda del préstamo) a las cuotas más viejas.
+
+    **No commitea**: deja todo en la sesión para que el commit sea del servicio
+    que orquesta la operación. Es lo que permite que el cobro consolidado por
+    cliente (`svc_deudores`) toque un préstamo, un fiado y una deuda libre en
+    una sola transacción sin duplicar acá las reglas de este módulo.
+
+    `monto_caja` es la plata que entró **por este préstamo**, en `moneda_pago`;
+    `None` significa que la operación no mueve caja —el cobro con cheque, donde
+    la plata se reconoce recién al venderlo o cobrarlo—. Es **una sola línea**
+    por el efectivo real, no una por cuota: la referencia es el préstamo.
+
+    Devuelve si el préstamo quedó cancelado."""
+    pendientes = [c for c in prestamo.cuotas_detalle if c.estado != CuotaEstado.COBRADA]
+    pendientes.sort(key=lambda c: c.numero_cuota)
+
+    aplicado = repartir_pago_en_cuotas(
+        [(c.monto - c.monto_pagado).quantize(Decimal("0.01")) for c in pendientes],
+        reduccion,
+    )
+    for cuota, aplica in zip(pendientes, aplicado):
+        if aplica <= Decimal("0.00"):
+            continue
+        cuota.monto_pagado = (cuota.monto_pagado + aplica).quantize(Decimal("0.01"))
+        if cuota.monto_pagado >= cuota.monto:
+            cuota.monto_pagado = cuota.monto
+            cuota.estado = CuotaEstado.COBRADA
+            cuota.fecha_cobro = fecha
+
+    cancelado = all(c.estado == CuotaEstado.COBRADA for c in prestamo.cuotas_detalle)
+    if cancelado:
+        prestamo.estado = PrestamoEstado.CANCELADO
+
+    if monto_caja is None or monto_caja <= Decimal("0.00"):
+        return cancelado
+
+    # Una sola línea de caja por el efectivo real que entró, en la moneda pagada.
+    cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
+    detalle = f"Pago préstamo - {cliente_nombre}"
+    if cotizacion is not None:
+        detalle += f" ({reduccion} {prestamo.moneda.value} @ {cotizacion})"
+    svc_caja.registrar(
+        db,
+        fecha=fecha,
+        moneda=moneda_pago,
+        tipo=CajaTipo.INGRESO,
+        categoria=CajaCategoria.COBRO_CUOTA,
+        monto=monto_caja,
+        referencia_tipo="prestamo",
+        referencia_id=prestamo.id,
+        detalle=detalle,
+        cotizacion=cotizacion,
+    )
+    return cancelado
+
+
 def pagar_prestamo(
     db: Session, prestamo_id: uuid.UUID, payload: PrestamoPagoRequest
 ) -> Prestamo:
@@ -538,37 +605,13 @@ def pagar_prestamo(
     )
 
     fecha = payload.fecha_cobro or hoy_local()
-    aplicado = repartir_pago_en_cuotas(
-        [(c.monto - c.monto_pagado).quantize(Decimal("0.01")) for c in pendientes],
-        reduccion,
-    )
-    for cuota, aplica in zip(pendientes, aplicado):
-        if aplica <= Decimal("0.00"):
-            continue
-        cuota.monto_pagado = (cuota.monto_pagado + aplica).quantize(Decimal("0.01"))
-        if cuota.monto_pagado >= cuota.monto:
-            cuota.monto_pagado = cuota.monto
-            cuota.estado = CuotaEstado.COBRADA
-            cuota.fecha_cobro = fecha
-
-    if all(c.estado == CuotaEstado.COBRADA for c in prestamo.cuotas_detalle):
-        prestamo.estado = PrestamoEstado.CANCELADO
-
-    # Una sola línea de caja por el efectivo real que entró, en la moneda pagada.
-    cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
-    detalle = f"Pago préstamo - {cliente_nombre}"
-    if es_cross:
-        detalle += f" ({reduccion} {prestamo.moneda.value} @ {payload.cotizacion})"
-    svc_caja.registrar(
+    imputar_pago(
         db,
+        prestamo,
+        reduccion=reduccion,
         fecha=fecha,
-        moneda=payload.moneda_pago,
-        tipo=CajaTipo.INGRESO,
-        categoria=CajaCategoria.COBRO_CUOTA,
-        monto=payload.monto_pagado,
-        referencia_tipo="prestamo",
-        referencia_id=prestamo.id,
-        detalle=detalle,
+        monto_caja=payload.monto_pagado,
+        moneda_pago=payload.moneda_pago,
         cotizacion=payload.cotizacion if es_cross else None,
     )
 

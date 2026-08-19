@@ -83,11 +83,23 @@ Podés nombrar el cheque con los últimos números: **"el 681"** encuentra el 03
 
 | Decís | Hace |
 |---|---|
-| "Juan pagó" | Cobra la próxima cuota que vence |
+| "Kiosco me entregó 200 lucas" | Baja **todo lo que debe**, de lo más viejo a lo más nuevo |
+| "Cobré 50 mil a Pedrón" | Lo mismo: no hace falta decir contra qué deuda va |
+| "Juan pagó" | **Te pregunta cuánto te dio** — sin el monto no cobra |
 | "Pedro pagó la 3" | Cobra esa cuota |
 | "María abonó 2 cuotas" | Cobra dos |
 | "Juan me pagó $50.000 del fiado" | Cobra el fiado (acepta pagos parciales) |
 | "Juan me trajo el cheque 9988 de $100.000 al 2% para el fiado" | Entra el cheque y salda el fiado |
+
+**Cuando el cliente te entrega plata y no aclarás contra qué, el bot le baja lo que
+debe empezando por lo más viejo** — le da igual si eso es un cheque que le fiaste, una
+deuda común o una cuota de un préstamo. Después te contesta qué quedó saldado, así lo
+ves en el momento. Si querés que vaya a una deuda puntual, nombrala ("la cuota", "el
+fiado"). Y si el cliente te debe en pesos **y** en dólares, te pregunta contra cuál va.
+
+**Decile siempre cuánta plata te dieron.** Si escribís "Juan pagó" a secas, el bot te
+pregunta el monto en vez de cobrar. Es a propósito: el cliente entrega lo que tiene, y
+dar por cobrada una cuota entera cuando te dieron la mitad te descuadra la caja del día.
 
 ### Plata que sale
 

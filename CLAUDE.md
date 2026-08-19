@@ -354,12 +354,64 @@ y fecha. Conceptualmente "un fiado sin cheque y con divisa". Tabla `deudas_simpl
     por el operador si le devuelve la plata o le queda debiendo.
 - **Panel:** vive en la pestaña **"Otras deudas"** de Deudores y en el consolidado
   **General** (botón "Nuevo"); se cobra con el modal compartido `ModalPagarDeuda` —tipo
-  `deuda_simple` para una deuda suelta (única forma de cobrar **con cheque**) y
-  `deudas_cliente` para el cobro agregado, donde el `id` que viaja es el del **cliente**—.
-  Incluida en el backup JSON export/import.
+  `deuda_simple` para una deuda suelta y `deudas_cliente` para todas las deudas libres del
+  cliente, donde el `id` que viaja es el del **cliente**—. Desde General se cobra la deuda
+  **total** del cliente, que además incluye fiados y préstamos (§2.c). Incluida en el backup
+  JSON export/import.
 - **Bot:** no hay intent para cargarlas (pendiente), pero `CONSULTA_CLIENTE` **sí las
   informa**: si el bot omitiera una fuente, preguntar por un cliente por WhatsApp devolvería
   un saldo incompleto mientras el panel muestra el correcto.
+
+---
+
+### 2.c Deuda consolidada del cliente _(pestaña General — régimen definido 2026-08-19)_
+
+Un cliente puede deberle al negocio por tres caminos a la vez: un cheque fiado (§2), una
+deuda libre (§2.b) y las cuotas de un préstamo (§3). **Cuando entrega plata no está pagando
+una de esas: está pagando lo que debe.** La pestaña **General** de Deudores es esa operación
+—una sola cuota común sobre las tres fuentes—; servicio `svc_deudores`
+(`app/services/deudores.py`), router `/deudores`.
+
+- **El botón Pagar es del cliente, no del renglón _(pedido de los operadores)_.** La pantalla
+  muestra el detalle de cada deuda para que se vea de dónde sale el número, pero **sin botón
+  por renglón**: al pie va el total y un único botón. Cobrar una deuda puntual sigue estando
+  en la pestaña de su módulo (Préstamos / Otras deudas / Fiados), que es donde el operador
+  elige contra qué imputa.
+- **Imputación FIFO por fecha de ORIGEN, cruzando tipos** (`fecha_fiado`, `fecha` de la deuda
+  libre, `fecha_inicio` del préstamo): si el renglón más viejo es un fiado y el siguiente un
+  préstamo, primero se llena el fiado. Empatan por `created_at` y, si tampoco alcanza, por
+  tipo (`_ORDEN_TIPO`) — solo para que el reparto sea determinista, no por prioridad de
+  negocio. Dentro de un préstamo el importe sigue cayendo en la cuota más vieja (§3).
+  **No es por vencimiento**: la cuota vencida hace más tiempo no se adelanta a una deuda más
+  antigua (decisión del dueño, 2026-08-19).
+- **Un total por moneda, con su propio botón.** ARS y USD son cajas distintas y no se suman:
+  el cobro declara `moneda_deuda`. **Los cheques fiados son siempre en pesos**, así que en un
+  cobro en USD solo entran deudas libres y préstamos en dólares. El pago sí puede venir en la
+  otra moneda con su cotización, como en cada módulo por separado.
+- **Cada operación alcanzada asienta su propia línea de caja**, con la categoría y la
+  referencia de su módulo (`COBRO_FIADO`/`fiado`, `COBRO_DEUDA`/`deuda_simple_cobro`,
+  `COBRO_CUOTA`/`prestamo`). No hay una línea única "cobro al cliente": anular una de esas
+  operaciones borra sus líneas por referencia, y una línea compartida se llevaría puesta
+  plata de las otras. Por eso tampoco hizo falta tocar `_ENTIDADES` (§Anulación).
+- **Quién imputa es el módulo dueño, no este servicio.** `svc_fiados.imputar_cobro`,
+  `svc_deudas_simples.imputar_cobro` y `svc_prestamos.imputar_pago` son los mismos helpers
+  que usan los cobros de cada pestaña, extraídos para que **no commiteen**: el commit es del
+  cobro consolidado, así que las tres imputaciones y sus líneas entran o no entran juntas.
+  Duplicar acá las reglas de cada módulo (cuándo cancela, qué categoría de caja) es
+  exactamente lo que haría divergir el cobro general del puntual.
+- **Cobro con cheque** (`POST /deudores/cobrar-cliente-con-cheque`): salda por el **valor
+  neto**, imputado FIFO igual que el efectivo, y **no asienta caja** —el cheque entra
+  `EN_CARTERA` a nombre del cliente y la plata se reconoce al venderlo o cobrarlo—. El
+  excedente lo resuelve `svc_pasivos.aplicar_vuelto_cheque` (§5), el mismo mecanismo que el
+  vuelto de un pasivo y el de §2.b: `vuelto_modo` es **obligatorio si sobra**, y el vuelto va
+  en **ARS** aunque la deuda sea en dólares.
+- **Endpoints:** `POST /deudores/cobrar-cliente` (efectivo), `POST
+  /deudores/cobrar-cliente-con-cheque`, `GET /deudores/clientes/{id}?moneda=` (lo que debe,
+  con su detalle — lo consume el bot).
+- **Panel:** `DeudoresGeneral.tsx` arma el consolidado **en el front** con las tres consultas
+  que ya hacía; el cobro va por el modal compartido `ModalPagarDeuda` con tipo
+  `deuda_general`, donde el `id` que viaja es el del **cliente**.
+- **Bot:** intent `COBRAR_DEUDA_CLIENTE` (ver §Bot).
 
 ---
 
@@ -717,11 +769,22 @@ avisa **por Telegram** diciendo **qué** se rompió.
 - Los **pasivos** se pueden registrar desde el bot via `REGISTRAR_DEUDA`; la cancelación es solo desde el panel web.
 - Los **gastos operativos** sí son registrables desde el bot via intent `REGISTRAR_GASTO` (editables por concepto/hora/monto desde el chat).
 - Los **fiados** son operables desde el bot: `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
+- **El cobro por defecto es el consolidado (`COBRAR_DEUDA_CLIENTE`, §2.c), no el puntual.**
+  "Kiosco me entregó 200 lucas" no dice contra qué deuda va, y no hay que adivinarlo: se
+  imputa a lo más viejo cruzando fiados, deudas libres y préstamos, y la respuesta le detalla
+  al operador qué quedó saldado. Los puntuales (`COBRAR_CUOTA`, `COBRAR_FIADO_EFECTIVO`)
+  quedan para cuando el mensaje **nombra** la deuda. Dos cosas que el prompt cubre:
+  **sin importe no se cobra, se pregunta** _(decisión del dueño, 2026-08-19)_ — "Juan pagó"
+  a secas ya no cobra la cuota entera, porque el cliente entrega lo que tiene y dar por
+  cobrada una cuota pagada a medias asienta en la caja del día plata que no entró—; y **si
+  el cliente debe en las dos monedas el handler pregunta** en vez de elegir, porque imputar
+  pesos contra la deuda en dólares mueve dos cajas distintas.
 
 **Intents soportados por el dispatcher** (`services/whatsapp/dispatcher.py`):
 - Cheques: `REGISTRAR_CHEQUE`, `VENDER_CHEQUE`, `FIAR_CHEQUE`, `COBRAR_CHEQUE`, `RECHAZAR_CHEQUE`.
 - Préstamos: `NUEVO_PRESTAMO`, `COBRAR_CUOTA`.
 - Fiados: `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
+- Deuda del cliente: `COBRAR_DEUDA_CLIENTE` (consolidado de las tres fuentes, §2.c).
 - Otros: `REGISTRAR_DEUDA`, `MOVIMIENTO_EFECTIVO`, `REGISTRAR_GASTO`, `EDITAR_OPERACION`,
   `REVERTIR_OPERACION`.
   - **`REVERTIR_OPERACION` deshace; `EDITAR_OPERACION` corrige.** Editar cambia un valor mal
@@ -782,6 +845,13 @@ avisa **por Telegram** diciendo **qué** se rompió.
     la caja del día un centavo abajo—. Cubre también `calcular_imputacion_y_vuelto` (cobro
     con cheque): cheque que no alcanza, justo y de más, y que el vuelto de una deuda en USD
     se devuelva en pesos.
+  - **`test_deudores_cobro_cliente.py`** — cobro consolidado por cliente (§2.c): que
+    `armar_renglones` ordene las tres fuentes por fecha de origen **cruzando tipos**, que los
+    fiados no entren en un cobro en dólares (son siempre ARS), que las operaciones sin saldo
+    queden afuera, y que un importe imputado caiga en el módulo correcto — cada uno con su
+    categoría y su referencia de caja, y ninguna línea cuando el pago es con cheque. Custodia
+    además el prompt del bot: que el cobro general sea el default, y que un mensaje sin
+    importe ("Juan pagó") pida el monto en vez de asumir una cuota entera.
   - **`test_anulacion.py`** — reglas de bloqueo del motor de anulación (§Anulación): fiado con
     cobros encima, cheque usado para pagar un pasivo, compra de USD ya consumida y venta que no
     es la última. Incluye dos tests que **custodian el catálogo `_ENTIDADES`**: si una entidad

@@ -5,7 +5,7 @@ import { getFiados } from '../api/fiados'
 import { getDeudasSimples } from '../api/deudas_simples'
 import { getClientes } from '../api/clientes'
 import { fmtARS, fmtUSD } from '../lib/fmt'
-import { chip, btnSolid, btnBordered, btnFlat } from '../lib/ui'
+import { chip, btnSolid, btnBordered } from '../lib/ui'
 import { IconPlus, IconRefresh } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
 import ModalPagarDeuda, { type DeudaItem } from '../components/ModalPagarDeuda'
@@ -112,27 +112,57 @@ function construirResumen(
 
 // ── Tarjeta de un deudor ──────────────────────────────────────────────
 
+// El total de una moneda y el botón que lo cobra. Es el corazón de esta
+// pestaña: el operador no elige contra qué deuda va la plata —el backend la
+// imputa de la operación más vieja a la más nueva—, así que el botón vive acá y
+// no en cada renglón. Para cobrar una deuda puntual están sus propias pestañas.
+function TotalMoneda({
+  deudor,
+  moneda,
+  total,
+  onPagar,
+}: {
+  deudor: DeudorResumen
+  moneda: Moneda
+  total: number
+  onPagar: (d: DeudaItem) => void
+}) {
+  const operaciones = deudor.deudas.filter((d) => d.moneda === moneda).length
+  const color = moneda === 'USD' ? '#38bdf8' : '#fbbf24'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+      <div>
+        <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)' }}>
+          Total {moneda} · {operaciones} operación{operaciones > 1 ? 'es' : ''}
+        </p>
+        <p style={{ fontFamily: FN, fontSize: '1.45rem', color, lineHeight: 1.1, overflowWrap: 'anywhere' }}>{fmtMoneda(total, moneda)}</p>
+      </div>
+      <button
+        onClick={() =>
+          onPagar({
+            tipo: 'deuda_general',
+            id: deudor.clienteId,
+            clienteNombre: deudor.nombre,
+            label: `Deuda total en ${moneda}`,
+            saldo: total,
+            moneda,
+          })
+        }
+        style={{ ...btnSolid('success'), fontSize: '0.78rem', padding: '0.5rem 1.15rem' }}
+      >
+        Pagar
+      </button>
+    </div>
+  )
+}
+
 function DeudorCard({ deudor, onPagar }: { deudor: DeudorResumen; onPagar: (d: DeudaItem) => void }) {
   return (
     <div className="lift" style={{ ...CARD, padding: '1rem 1.15rem' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
-        <h3 style={{ fontFamily: FM, fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word' }}>{deudor.nombre}</h3>
-        <div style={{ display: 'flex', gap: '1.25rem', textAlign: 'right' }}>
-          {deudor.totalArs > 0.009 && (
-            <div>
-              <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)' }}>Total ARS</p>
-              <p style={{ fontFamily: FN, fontSize: '1.2rem', color: '#fbbf24', lineHeight: 1.1, overflowWrap: 'anywhere' }}>{fmtARS(deudor.totalArs)}</p>
-            </div>
-          )}
-          {deudor.totalUsd > 0.009 && (
-            <div>
-              <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)' }}>Total USD</p>
-              <p style={{ fontFamily: FN, fontSize: '1.2rem', color: '#38bdf8', lineHeight: 1.1, overflowWrap: 'anywhere' }}>{fmtUSD(deudor.totalUsd)}</p>
-            </div>
-          )}
-        </div>
-      </div>
+      <h3 style={{ fontFamily: FM, fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word' }}>{deudor.nombre}</h3>
 
+      {/* Detalle: de dónde sale el total. Sin botón por renglón — acá se le
+          cobra al cliente, no a una deuda. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--bd-006)' }}>
         {deudor.deudas.map((d) => (
           <div key={`${d.tipo}-${d.id}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem' }}>
@@ -140,12 +170,20 @@ function DeudorCard({ deudor, onPagar }: { deudor: DeudorResumen; onPagar: (d: D
               <span style={chip(d.tipo === 'prestamo' ? 'primary' : d.tipo === 'deuda_simple' ? 'warning' : 'secondary')}>{d.tipo === 'prestamo' ? 'Préstamo' : d.tipo === 'deuda_simple' ? 'Deuda' : 'Fiado'}</span>
               <span style={{ fontFamily: FM, fontSize: '0.76rem', color: 'rgba(100,116,139,0.85)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexShrink: 0 }}>
-              <span style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-1)', whiteSpace: 'nowrap' }}>{fmtMoneda(d.saldo, d.moneda)}</span>
-              <button onClick={() => onPagar(d)} style={{ ...btnFlat('success'), fontSize: '0.7rem', padding: '0.3rem 0.7rem' }}>Pagar</button>
-            </div>
+            <span style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-1)', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtMoneda(d.saldo, d.moneda)}</span>
           </div>
         ))}
+      </div>
+
+      {/* El total y su botón, una fila por moneda: ARS y USD son cajas
+          distintas y no se suman entre sí. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid var(--bd-006)' }}>
+        {deudor.totalArs > 0.009 && (
+          <TotalMoneda deudor={deudor} moneda="ARS" total={deudor.totalArs} onPagar={onPagar} />
+        )}
+        {deudor.totalUsd > 0.009 && (
+          <TotalMoneda deudor={deudor} moneda="USD" total={deudor.totalUsd} onPagar={onPagar} />
+        )}
       </div>
     </div>
   )
@@ -205,7 +243,7 @@ export default function DeudoresGeneral() {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
           <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>General</h1>
-          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Deuda consolidada de cada cliente (préstamos + cheques fiados)</p>
+          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Lo que cada cliente debe en total: cheques fiados, deudas y préstamos en una sola cuota</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button onClick={() => setCreando(true)} style={{ ...btnSolid('primary'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', padding: '0.45rem 0.875rem' }}><IconPlus size={15} />Nuevo</button>

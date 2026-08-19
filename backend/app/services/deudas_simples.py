@@ -148,6 +148,65 @@ def calcular_imputacion_y_vuelto(
     return imputado, diferencia
 
 
+def imputar_cobro(
+    db: Session,
+    deuda: DeudaSimple,
+    *,
+    cliente_nombre: str,
+    imputado: Decimal,
+    fecha: date,
+    monto_caja: Decimal | None,
+    moneda_pago: Moneda,
+    cotizacion: Decimal | None,
+) -> bool:
+    """Imputa `imputado` al saldo de la deuda y asienta su línea de caja.
+
+    **No commitea**: deja todo en la sesión para que el commit sea del servicio
+    que orquesta la operación. Es lo que permite que el cobro consolidado por
+    cliente (`svc_deudores`) toque una deuda libre, un fiado y un préstamo en
+    una sola transacción sin duplicar acá las reglas de este módulo.
+
+    `monto_caja` es la plata que entró **por esta deuda**, en `moneda_pago`;
+    `None` significa que la operación no mueve caja (cobro con cheque). Un
+    `monto_caja` en cero tampoco asienta línea: al prorratear un cobro
+    cross-moneda una deuda ínfima puede quedar en $0,00 — se le imputa el saldo
+    igual, pero una línea de caja en cero no va.
+
+    `cotizacion` viene con valor solo si el cobro cruza monedas; en ese caso se
+    guarda como `cotizacion_pago` la primera vez, como default editable.
+
+    Devuelve si la deuda quedó cancelada."""
+    deuda.saldo_pendiente, cancelada = aplicar_cobro(deuda.saldo_pendiente, imputado)
+    if cancelada:
+        deuda.estado = DeudaSimpleEstado.CANCELADA
+        deuda.fecha_cancelacion = fecha
+
+    if cotizacion is not None and deuda.cotizacion_pago is None:
+        deuda.cotizacion_pago = cotizacion
+
+    if monto_caja is None or monto_caja <= Decimal("0.00"):
+        return cancelada
+
+    detalle = f"Cobro deuda - {cliente_nombre} - {deuda.concepto}"
+    if cotizacion is not None:
+        detalle += f" ({imputado} {deuda.moneda.value} @ {cotizacion})"
+
+    # Cobrar la deuda hace entrar plata a la caja en la moneda cobrada (incluye parciales).
+    svc_caja.registrar(
+        db,
+        fecha=fecha,
+        moneda=moneda_pago,
+        tipo=CajaTipo.INGRESO,
+        categoria=CajaCategoria.COBRO_DEUDA,
+        monto=monto_caja,
+        referencia_tipo=_REF_COBRO,
+        referencia_id=deuda.id,
+        detalle=detalle,
+        cotizacion=cotizacion,
+    )
+    return cancelada
+
+
 def get_deuda_simple(db: Session, deuda_id: uuid.UUID) -> DeudaSimple:
     deuda = db.get(DeudaSimple, deuda_id)
     if deuda is None:
@@ -284,31 +343,14 @@ def cobrar_deuda_simple(
     )
 
     fecha = payload.fecha_cobro or hoy_local()
-    deuda.saldo_pendiente, cancelada = aplicar_cobro(deuda.saldo_pendiente, reduccion)
-    if cancelada:
-        deuda.estado = DeudaSimpleEstado.CANCELADA
-        deuda.fecha_cancelacion = fecha
-
-    # La primera cotización cross-moneda queda como default editable para próximos cobros.
-    if es_cross and deuda.cotizacion_pago is None:
-        deuda.cotizacion_pago = payload.cotizacion
-
-    cliente_nombre = deuda.cliente.nombre if deuda.cliente else "—"
-    detalle = f"Cobro deuda - {cliente_nombre} - {deuda.concepto}"
-    if es_cross:
-        detalle += f" ({reduccion} {deuda.moneda.value} @ {payload.cotizacion})"
-
-    # Cobrar la deuda hace entrar plata a la caja en la moneda cobrada (incluye parciales).
-    svc_caja.registrar(
+    imputar_cobro(
         db,
+        deuda,
+        cliente_nombre=deuda.cliente.nombre if deuda.cliente else "—",
+        imputado=reduccion,
         fecha=fecha,
-        moneda=payload.moneda_pago,
-        tipo=CajaTipo.INGRESO,
-        categoria=CajaCategoria.COBRO_DEUDA,
-        monto=payload.monto_cobrado,
-        referencia_tipo=_REF_COBRO,
-        referencia_id=deuda.id,
-        detalle=detalle,
+        monto_caja=payload.monto_cobrado,
+        moneda_pago=payload.moneda_pago,
         cotizacion=payload.cotizacion if es_cross else None,
     )
 
@@ -385,35 +427,17 @@ def cobrar_deudas_cliente(
         if imputa <= Decimal("0.00"):
             continue
 
-        deuda.saldo_pendiente, cancelada = aplicar_cobro(deuda.saldo_pendiente, imputa)
-        if cancelada:
-            deuda.estado = DeudaSimpleEstado.CANCELADA
-            deuda.fecha_cancelacion = fecha
+        if imputar_cobro(
+            db,
+            deuda,
+            cliente_nombre=cliente.nombre,
+            imputado=imputa,
+            fecha=fecha,
+            monto_caja=plata,
+            moneda_pago=payload.moneda_pago,
+            cotizacion=payload.cotizacion if es_cross else None,
+        ):
             canceladas += 1
-
-        if es_cross and deuda.cotizacion_pago is None:
-            deuda.cotizacion_pago = payload.cotizacion
-
-        detalle = f"Cobro deuda - {cliente.nombre} - {deuda.concepto}"
-        if es_cross:
-            detalle += f" ({imputa} {deuda.moneda.value} @ {payload.cotizacion})"
-
-        # Una deuda ínfima puede quedar en $0,00 al prorratear un cobro
-        # cross-moneda: se le imputa el saldo igual, pero no se asienta una línea
-        # de caja en cero. El total sigue cerrando (el residuo va a la última).
-        if plata > Decimal("0.00"):
-            svc_caja.registrar(
-                db,
-                fecha=fecha,
-                moneda=payload.moneda_pago,
-                tipo=CajaTipo.INGRESO,
-                categoria=CajaCategoria.COBRO_DEUDA,
-                monto=plata,
-                referencia_tipo=_REF_COBRO,
-                referencia_id=deuda.id,
-                detalle=detalle,
-                cotizacion=payload.cotizacion if es_cross else None,
-            )
 
         afectadas.append(deuda)
 
@@ -543,13 +567,17 @@ def cobrar_deudas_cliente_con_cheque(
     for deuda, (imputa, _sin_caja) in zip(deudas, repartido):
         if imputa <= Decimal("0.00"):
             continue
-        deuda.saldo_pendiente, cancelada = aplicar_cobro(deuda.saldo_pendiente, imputa)
-        if cancelada:
-            deuda.estado = DeudaSimpleEstado.CANCELADA
-            deuda.fecha_cancelacion = fecha
+        if imputar_cobro(
+            db,
+            deuda,
+            cliente_nombre=cliente.nombre,
+            imputado=imputa,
+            fecha=fecha,
+            monto_caja=None,  # el cheque no mueve caja: entra a cartera
+            moneda_pago=Moneda.ARS,
+            cotizacion=payload.cotizacion if es_cross else None,
+        ):
             canceladas += 1
-        if es_cross and deuda.cotizacion_pago is None:
-            deuda.cotizacion_pago = payload.cotizacion
         afectadas.append(deuda)
 
     if diferencia > Decimal("0.00"):
