@@ -1,7 +1,13 @@
 import { useState } from 'react'
 import { pagarPrestamo } from '../api/prestamos'
 import { cobrarEfectivo } from '../api/fiados'
-import { cobrarDeudaSimple, cobrarDeudaSimpleConCheque, cobrarDeudasCliente } from '../api/deudas_simples'
+import {
+  cobrarDeudaSimple,
+  cobrarDeudaSimpleConCheque,
+  cobrarDeudasCliente,
+  cobrarDeudasClienteConCheque,
+  type VueltoModo,
+} from '../api/deudas_simples'
 import { fmtARS, fmtUSD } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
@@ -48,11 +54,17 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
 
-  // Forma de pago. El cobro con cheque vive acá para "otras deudas"; los
-  // préstamos lo tienen por cuota en su propia pestaña (necesita saber a qué
-  // cuota imputarlo) y los fiados en la suya, así que para esos dos se deriva.
+  // Forma de pago. El cobro con cheque vive acá para "otras deudas" —tanto una
+  // deuda suelta como todas las del cliente de una—; los préstamos lo tienen por
+  // cuota en su propia pestaña (necesita saber a qué cuota imputarlo) y los
+  // fiados en la suya, así que para esos dos se deriva.
   const [forma, setForma] = useState<'efectivo' | 'cheque'>('efectivo')
-  const chequeDisponible = deuda.tipo === 'deuda_simple'
+  const chequeDisponible = deuda.tipo === 'deuda_simple' || deuda.tipo === 'deudas_cliente'
+  const esAgregado = deuda.tipo === 'deudas_cliente'
+
+  // Qué hacer con el vuelto cuando el cheque cubre todo y sobra. Solo aplica al
+  // cobro agregado: en una deuda suelta el excedente se informa y listo.
+  const [vueltoModo, setVueltoModo] = useState<VueltoModo>('QUEDA_DEBIENDO')
 
   const [chNro, setChNro] = useState('')
   const [chBanco, setChBanco] = useState('')
@@ -98,6 +110,32 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
     setError(null)
     setLoading(true)
     try {
+      if (esAgregado) {
+        // `deuda.id` es el cliente: el cheque salda sus deudas de la más vieja a
+        // la más nueva y, si sobra, el vuelto se resuelve según vueltoModo.
+        const r = await cobrarDeudasClienteConCheque({
+          cliente_id: deuda.id,
+          moneda_deuda: deuda.moneda,
+          nro_cheque_pago: chNro.trim(),
+          banco_pago: chBanco.trim() || null,
+          monto_cheque: chMontoNum,
+          porcentaje_compra_cheque: chPctNum,
+          fecha_pago: chFechaPago || null,
+          cotizacion: chCross ? cotizNum : null,
+          vuelto_modo: (chDiferencia ?? 0) > 0 ? vueltoModo : null,
+        })
+        const dif = parseFloat(r.diferencia)
+        toast(
+          'success',
+          dif > 0
+            ? vueltoModo === 'SALDAR_EFECTIVO'
+              ? `Saldó ${r.canceladas} deuda(s) · le devolviste ${fmtARS(dif)} de vuelto`
+              : `Saldó ${r.canceladas} deuda(s) · le quedás debiendo ${fmtARS(dif)}`
+            : `Cobrado · saldó ${r.canceladas} deuda(s), quedan ${fmtMoneda(parseFloat(r.saldo_restante), deuda.moneda)}`,
+        )
+        onSuccess()
+        return
+      }
       const r = await cobrarDeudaSimpleConCheque(deuda.id, {
         nro_cheque_pago: chNro.trim(),
         banco_pago: chBanco.trim() || null,
@@ -250,15 +288,37 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
                   {chDiferencia !== null && (
                     <span style={{ color: chDiferencia > 0 ? '#fbbf24' : chDiferencia < 0 ? 'rgba(100,116,139,0.8)' : '#4ade80' }}>
                       {chDiferencia > 0
-                        ? `Cancela la deuda y le quedás debiendo ${fmtMoneda(chDiferencia, deuda.moneda)}`
+                        ? `Cancela ${esAgregado ? 'todas sus deudas' : 'la deuda'} y sobran ${fmtMoneda(chDiferencia, deuda.moneda)}`
                         : chDiferencia < 0
                           ? `Sigue debiendo ${fmtMoneda(-chDiferencia, deuda.moneda)}`
-                          : 'Cancela la deuda justo'}
+                          : `Cancela ${esAgregado ? 'todas sus deudas' : 'la deuda'} justo`}
                     </span>
                   )}
                   <span style={{ color: 'rgba(100,116,139,0.55)', fontSize: '0.68rem' }}>
                     El cheque entra a cartera. No mueve la caja hasta que lo vendas o lo cobres.
                   </span>
+                </div>
+              )}
+
+              {/* El cheque cubre todo y sobra: hay que decidir qué se hace con
+                  el vuelto. Solo en el cobro agregado; en una deuda suelta el
+                  excedente se informa nada más. */}
+              {esAgregado && chDiferencia !== null && chDiferencia > 0 && (
+                <div>
+                  <label style={LABEL_STYLE}>Qué hacés con los {fmtARS(chDiferencia)} que sobran</label>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    {([['QUEDA_DEBIENDO', 'Le quedás debiendo'], ['SALDAR_EFECTIVO', 'Se lo devolvés ahora']] as const).map(([v, txt]) => (
+                      <button key={v} type="button" onClick={() => setVueltoModo(v)}
+                        style={{ ...(vueltoModo === v ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.45rem', fontSize: '0.72rem' }}>
+                        {txt}
+                      </button>
+                    ))}
+                  </div>
+                  <p style={{ fontFamily: FM, fontSize: '0.68rem', marginTop: '0.25rem', color: 'rgba(100,116,139,0.55)' }}>
+                    {vueltoModo === 'QUEDA_DEBIENDO'
+                      ? 'Se anota como deuda del negocio a su favor, en Deudas. No mueve la caja.'
+                      : 'Sale de la caja de pesos hoy, como vuelto.'}
+                  </p>
                 </div>
               )}
 

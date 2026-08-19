@@ -11,6 +11,8 @@ from app.db.session import get_db
 from app.schemas.deudas_simples import (
     DeudaSimpleCobrarConChequeRequest,
     DeudaSimpleCobrarConChequeResponse,
+    DeudaSimpleCobroClienteChequeCreate,
+    DeudaSimpleCobroClienteChequeResponse,
     DeudaSimpleCobroClienteCreate,
     DeudaSimpleCobroClienteResponse,
     DeudaSimpleCreate,
@@ -47,6 +49,18 @@ def cobrar_deudas_cliente(
     Se imputa de la deuda más vieja a la más nueva, en una sola moneda; cada
     deuda alcanzada asienta su propia línea de caja."""
     return service.cobrar_deudas_cliente(db, payload)
+
+
+@router.post("/cobrar-cliente-con-cheque", response_model=DeudaSimpleCobroClienteChequeResponse)
+def cobrar_deudas_cliente_con_cheque(
+    payload: DeudaSimpleCobroClienteChequeCreate, db: DbSession
+) -> DeudaSimpleCobroClienteChequeResponse:
+    """Cobra todas las deudas abiertas de un cliente con un solo cheque.
+
+    Salda por el valor neto del cheque, de la deuda más vieja a la más nueva. Si
+    el cheque cubre todo y sobra, `vuelto_modo` decide qué se hace con la
+    diferencia: pagarla en efectivo o quedar debiéndola."""
+    return service.cobrar_deudas_cliente_con_cheque(db, payload)
 
 
 @router.get("/{deuda_id}", response_model=DeudaSimpleRead)

@@ -23,6 +23,8 @@ from app.schemas.cheques import ChequeRead
 from app.schemas.deudas_simples import (
     DeudaSimpleCobrarConChequeRequest,
     DeudaSimpleCobrarConChequeResponse,
+    DeudaSimpleCobroClienteChequeCreate,
+    DeudaSimpleCobroClienteChequeResponse,
     DeudaSimpleCobroClienteCreate,
     DeudaSimpleCobroClienteResponse,
     DeudaSimpleCreate,
@@ -31,11 +33,13 @@ from app.schemas.deudas_simples import (
     DeudaSimpleUpdate,
 )
 from app.services import caja as svc_caja
+from app.services import pasivos as svc_pasivos
 from app.services.conversion import calcular_reduccion_saldo, convertir_a_moneda_deuda
 from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
     NotFoundError,
+    ValidationError,
 )
 
 # referencia_tipo del EGRESO de origen (el alta) y del INGRESO de cada cobro. Se
@@ -110,6 +114,38 @@ def repartir_cobro_fifo(
             acumulado = (acumulado + plata).quantize(centavo)
         repartido.append((aplica, plata))
     return repartido
+
+
+def calcular_imputacion_y_vuelto(
+    moneda_deuda: Moneda,
+    saldo_total: Decimal,
+    valor_neto_cheque: Decimal,
+    cotizacion: Decimal | None,
+) -> tuple[Decimal, Decimal]:
+    """Cuánto salda un cheque de la deuda total de un cliente y cuánto sobra.
+
+    Devuelve `(imputado, diferencia)`. `imputado` va en la moneda de las deudas y
+    está topeado al saldo total: nunca deja saldos negativos. `diferencia` va en
+    **ARS** aunque las deudas sean en dólares, porque el excedente de un cheque
+    es plata en pesos y en pesos se resuelve el vuelto.
+
+    Un cheque que cubre de más **no es un error**: el cliente entrega el que
+    tiene. Por eso convierte con `convertir_a_moneda_deuda` (que no topea ni
+    valida el exceso) y no con `calcular_reduccion_saldo`, que rechazaría el
+    pago. Pura (sin BD): testeable en el estilo de `tests/`."""
+    equivalente = convertir_a_moneda_deuda(
+        moneda_deuda, Moneda.ARS, valor_neto_cheque, cotizacion
+    )
+    imputado = min(equivalente, saldo_total)
+    sobrante = equivalente - saldo_total
+    if sobrante <= Decimal("0.00"):
+        return imputado, Decimal("0.00")
+
+    es_cross = moneda_deuda != Moneda.ARS
+    diferencia = (sobrante * cotizacion if es_cross else sobrante).quantize(
+        Decimal("0.01")
+    )
+    return imputado, diferencia
 
 
 def get_deuda_simple(db: Session, deuda_id: uuid.UUID) -> DeudaSimple:
@@ -396,6 +432,152 @@ def cobrar_deudas_cliente(
         imputado=reduccion,
         canceladas=canceladas,
         saldo_restante=saldo_restante,
+    )
+
+
+def cobrar_deudas_cliente_con_cheque(
+    db: Session,
+    payload: DeudaSimpleCobroClienteChequeCreate,
+    created_at: datetime | None = None,
+) -> DeudaSimpleCobroClienteChequeResponse:
+    """Cobra TODAS las deudas abiertas de un cliente con un solo cheque.
+
+    Es el cobro de la fila del cliente, pero recibiendo un cheque en vez de
+    efectivo. El cheque salda por su **valor neto** y se imputa de la deuda más
+    vieja a la más nueva, igual que el efectivo.
+
+    **No asienta caja por el cobro**: el cheque entra a cartera y la plata se
+    reconoce recién al venderlo o cobrarlo (mismo criterio que §2, §3 y el cobro
+    con cheque de una deuda suelta).
+
+    **Un cheque que cubre de más es el caso normal**, no un error: el cliente
+    entrega el cheque que tiene. Por eso se convierte con
+    `convertir_a_moneda_deuda` (sin topear) y el excedente se resuelve con
+    `svc_pasivos.aplicar_vuelto_cheque`, el mismo mecanismo que el vuelto de un
+    pasivo (§5): o se le paga en efectivo —lo único que mueve la caja acá— o el
+    negocio le queda debiendo y se crea un pasivo a su favor."""
+    cliente = db.get(Cliente, payload.cliente_id)
+    if cliente is None:
+        raise NotFoundError("Cliente no encontrado.")
+
+    deudas = list(
+        db.scalars(
+            select(DeudaSimple)
+            .where(
+                DeudaSimple.cliente_id == payload.cliente_id,
+                DeudaSimple.moneda == payload.moneda_deuda,
+                DeudaSimple.estado == DeudaSimpleEstado.ABIERTA,
+                DeudaSimple.anulado_at.is_(None),
+            )
+            .order_by(DeudaSimple.fecha.asc(), DeudaSimple.created_at.asc())
+            .with_for_update()
+        )
+    )
+    if not deudas:
+        raise ConflictError(
+            f"{cliente.nombre} no tiene deudas abiertas en {payload.moneda_deuda.value}."
+        )
+
+    # Solo choca contra cheques vivos: uno anulado libera su número (migración 0017).
+    ya_existe = db.scalar(
+        select(Cheque).where(
+            Cheque.nro_cheque == payload.nro_cheque_pago,
+            Cheque.banco == payload.banco_pago,
+            Cheque.anulado_at.is_(None),
+        )
+    )
+    if ya_existe is not None:
+        banco_txt = f" del banco {payload.banco_pago}" if payload.banco_pago else ""
+        raise ConflictError(
+            f"Ya existe un cheque Nº '{payload.nro_cheque_pago}'{banco_txt}."
+        )
+
+    saldo_total = sum(
+        (d.saldo_pendiente for d in deudas), Decimal("0.00")
+    ).quantize(Decimal("0.01"))
+
+    valor_neto = (
+        payload.monto_cheque
+        * (_CIEN - payload.porcentaje_compra_cheque)
+        / _CIEN
+    ).quantize(Decimal("0.01"))
+
+    es_cross = payload.moneda_deuda != Moneda.ARS
+    reduccion, diferencia = calcular_imputacion_y_vuelto(
+        payload.moneda_deuda, saldo_total, valor_neto, payload.cotizacion
+    )
+    if diferencia > Decimal("0.00") and payload.vuelto_modo is None:
+        raise ValidationError(
+            f"El cheque cubre toda la deuda y sobran ${diferencia}. Indicá qué "
+            "hacer con el vuelto: pagarlo en efectivo o quedar debiéndolo."
+        )
+
+    fecha = payload.fecha_cobro or hoy_local()
+
+    cheque_nuevo = Cheque(
+        nro_cheque=payload.nro_cheque_pago,
+        banco=payload.banco_pago,
+        monto=payload.monto_cheque,
+        porcentaje_compra=payload.porcentaje_compra_cheque,
+        fecha_emision=payload.fecha_emision,
+        fecha_pago=payload.fecha_pago,
+        estado=ChequeEstado.EN_CARTERA,
+        ganancia=Decimal("0.00"),
+        cliente_origen_id=cliente.id,
+    )
+    if created_at is not None:
+        cheque_nuevo.created_at = created_at
+    # db.add() y no create_cheque(): recibir un cheque como pago NO es comprarlo,
+    # así que no corresponde el egreso COMPRA_CHEQUE.
+    db.add(cheque_nuevo)
+    db.flush()  # necesita id para la referencia de caja del vuelto
+
+    # El cheque no mueve caja, así que acá solo se imputan saldos: el segundo
+    # elemento del reparto (el efectivo por deuda) no se usa.
+    repartido = repartir_cobro_fifo(
+        [d.saldo_pendiente for d in deudas], reduccion, Decimal("0.00")
+    )
+
+    afectadas: list[DeudaSimple] = []
+    canceladas = 0
+    for deuda, (imputa, _sin_caja) in zip(deudas, repartido):
+        if imputa <= Decimal("0.00"):
+            continue
+        deuda.saldo_pendiente, cancelada = aplicar_cobro(deuda.saldo_pendiente, imputa)
+        if cancelada:
+            deuda.estado = DeudaSimpleEstado.CANCELADA
+            deuda.fecha_cancelacion = fecha
+            canceladas += 1
+        if es_cross and deuda.cotizacion_pago is None:
+            deuda.cotizacion_pago = payload.cotizacion
+        afectadas.append(deuda)
+
+    if diferencia > Decimal("0.00"):
+        svc_pasivos.aplicar_vuelto_cheque(
+            db, cheque_nuevo, payload.vuelto_modo, diferencia, fecha
+        )
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError("Ya existe un cheque con ese número.") from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo registrar el cobro con cheque.") from exc
+
+    db.refresh(cheque_nuevo)
+    for deuda in afectadas:
+        db.refresh(deuda)
+
+    return DeudaSimpleCobroClienteChequeResponse(
+        deudas_afectadas=[DeudaSimpleRead.model_validate(d) for d in afectadas],
+        cheque_ingresado=ChequeRead.model_validate(cheque_nuevo),
+        imputado=reduccion,
+        canceladas=canceladas,
+        saldo_restante=(saldo_total - reduccion).quantize(Decimal("0.01")),
+        diferencia=diferencia,
+        vuelto_modo=payload.vuelto_modo if diferencia > Decimal("0.00") else None,
     )
 
 

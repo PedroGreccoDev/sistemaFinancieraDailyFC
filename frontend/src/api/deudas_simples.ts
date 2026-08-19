@@ -77,6 +77,52 @@ export const cobrarDeudasCliente = (payload: CobrarDeudasClientePayload): Promis
   })
 
 /**
+ * Cobro de TODAS las deudas abiertas de un cliente con un solo cheque.
+ *
+ * Salda por el valor neto del cheque, de la deuda más vieja a la más nueva. Si
+ * cubre todo y sobra, `vuelto_modo` decide qué se hace con la diferencia (que
+ * va en pesos, porque el cheque es un instrumento en pesos): pagarla en
+ * efectivo —lo único que mueve la caja acá— o quedar debiéndola, que crea un
+ * pasivo a favor del cliente. Mismo mecanismo que el vuelto de un pasivo.
+ */
+export type VueltoModo = 'SALDAR_EFECTIVO' | 'QUEDA_DEBIENDO'
+
+export interface CobrarDeudasClienteConChequePayload {
+  cliente_id: string
+  moneda_deuda: Moneda
+  nro_cheque_pago: string
+  banco_pago?: string | null
+  monto_cheque: number
+  porcentaje_compra_cheque: number
+  fecha_emision?: string | null
+  fecha_pago?: string | null
+  // Requerida solo si las deudas son en USD (el cheque siempre entra en pesos).
+  cotizacion?: number | null
+  // Obligatorio solo si el cheque cubre todo y sobra.
+  vuelto_modo?: VueltoModo | null
+  fecha_cobro?: string | null
+}
+
+export interface CobroClienteChequeResult {
+  deudas_afectadas: DeudaSimple[]
+  cheque_ingresado: Cheque
+  imputado: string
+  canceladas: number
+  saldo_restante: string
+  /** En ARS: > 0 el cheque cubrió todo y el negocio le queda debiendo esto. */
+  diferencia: string
+  vuelto_modo: VueltoModo | null
+}
+
+export const cobrarDeudasClienteConCheque = (
+  payload: CobrarDeudasClienteConChequePayload,
+): Promise<CobroClienteChequeResult> =>
+  apiFetch<CobroClienteChequeResult>('/deudas-simples/cobrar-cliente-con-cheque', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+/**
  * Cobro de una deuda libre entregando un cheque en vez de efectivo.
  *
  * El cheque entra a cartera a nombre del cliente y salda por su valor neto

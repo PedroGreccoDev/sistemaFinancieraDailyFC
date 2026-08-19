@@ -228,7 +228,7 @@ def cancelar_con_cheque(
             pasivo.estado = PasivoEstado.CANCELADA
             pasivo.fecha_cancelacion = fecha_canc
             if diferencia > Decimal("0.00"):
-                _aplicar_vuelto(db, cheque, payload.vuelto_modo, diferencia, fecha_canc)
+                aplicar_vuelto_cheque(db, cheque, payload.vuelto_modo, diferencia, fecha_canc)
         else:
             pasivo.saldo_pendiente = (-diferencia).quantize(Decimal("0.01"))
 
@@ -243,17 +243,21 @@ def cancelar_con_cheque(
         raise DatabaseWriteError("No se pudo cancelar la deuda con cheque.") from exc
 
 
-def _aplicar_vuelto(
+def aplicar_vuelto_cheque(
     db: Session,
     cheque: Cheque,
     modo: str | None,
     diferencia: Decimal,
     fecha: date,
 ) -> None:
-    """Resuelve el vuelto cuando un cheque cubre de más un pasivo (diferencia > 0).
+    """Resuelve el vuelto cuando un cheque cubre de más (diferencia > 0).
 
     El vuelto es en ARS (el cheque es un instrumento en pesos).
-    """
+
+    La usan los dos lados del negocio: pagar un pasivo con un cheque de más
+    (§5) y cobrarle a un cliente con un cheque que supera todo lo que debe
+    (§2.b). Es la misma situación —el cheque no se puede recortar a medida— y
+    tiene que resolverse igual en ambos, por eso vive acá y es pública."""
     cliente = cheque.cliente_origen
     cliente_nombre = cliente.nombre if cliente else "cliente"
 

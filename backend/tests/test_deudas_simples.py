@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from app.services.deudas_simples import aplicar_cobro, repartir_cobro_fifo
+from app.db.models import Moneda
+from app.services.deudas_simples import (
+    aplicar_cobro,
+    calcular_imputacion_y_vuelto,
+    repartir_cobro_fifo,
+)
 
 
 def _cobro(saldo: str, reduccion: str) -> tuple[Decimal, bool]:
@@ -203,3 +208,55 @@ def test_sin_saldo_no_imputa_ni_asienta_nada() -> None:
     """Sin nada que imputar no puede quedar ninguna línea de caja colgada."""
     repartido = repartir_cobro_fifo(_d("0.00", "0.00"), Decimal("500"), Decimal("500"))
     assert repartido == [(Decimal("0.00"), Decimal("0.00"))] * 2
+
+
+# ── Cobro por cliente CON CHEQUE: imputación y vuelto ──────────────────
+
+def _vuelto(saldo: str, neto: str, moneda: Moneda = Moneda.ARS, cotiz: str | None = None):
+    return calcular_imputacion_y_vuelto(
+        moneda, Decimal(saldo), Decimal(neto), Decimal(cotiz) if cotiz else None
+    )
+
+
+def test_el_cheque_que_no_alcanza_no_deja_vuelto() -> None:
+    """Cheque neto de 25.000 contra 60.000 de deuda: salda lo que puede y el
+    cliente sigue debiendo. No hay nada a su favor."""
+    imputado, diferencia = _vuelto("60000", "25000")
+    assert imputado == Decimal("25000")
+    assert diferencia == Decimal("0.00")
+
+
+def test_el_cheque_justo_no_deja_vuelto() -> None:
+    imputado, diferencia = _vuelto("60000", "60000")
+    assert imputado == Decimal("60000")
+    assert diferencia == Decimal("0.00")
+
+
+def test_el_cheque_de_mas_cancela_todo_y_el_resto_queda_a_favor() -> None:
+    """El caso que pidió el dueño: el cheque cubre TODAS las deudas y sobra.
+
+    Se imputa solo lo adeudado —nunca deja saldos negativos— y la diferencia
+    pasa a favor del cliente: el negocio le queda debiendo esa plata."""
+    imputado, diferencia = _vuelto("60000", "90000")
+    assert imputado == Decimal("60000")
+    assert diferencia == Decimal("30000.00")
+
+
+def test_el_vuelto_de_una_deuda_en_usd_se_devuelve_en_pesos() -> None:
+    """Las deudas pueden ser en dólares, pero el cheque es un instrumento en
+    pesos: lo que sobra es plata en pesos y en pesos se paga el vuelto.
+
+    Deuda 100 USD, cheque neto $150.000 a 1000 → salda los 100 USD y sobran
+    50 USD, que son $50.000."""
+    imputado, diferencia = _vuelto("100", "150000", Moneda.USD, "1000")
+    assert imputado == Decimal("100")
+    assert diferencia == Decimal("50000.00")
+
+
+def test_el_cobro_con_cheque_no_reparte_efectivo() -> None:
+    """El cheque no mueve la caja: entra a cartera y la plata se reconoce al
+    venderlo o cobrarlo. El reparto imputa saldos pero no puede dejar ninguna
+    línea de caja, ni siquiera en cero."""
+    repartido = repartir_cobro_fifo(_d("10000", "20000"), Decimal("25000"), Decimal("0.00"))
+    assert [imputa for imputa, _ in repartido] == _d("10000.00", "15000.00")
+    assert all(plata == Decimal("0.00") for _, plata in repartido)

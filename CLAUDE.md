@@ -332,6 +332,20 @@ y fecha. Conceptualmente "un fiado sin cheque y con divisa". Tabla `deudas_simpl
     cross-moneda el efectivo se prorratea y **el residuo del redondeo cae en la última deuda
     alcanzada**, para que la suma de las líneas sea exactamente lo que entró — prorratear y
     redondear cada una dejaría la caja del día unos centavos abajo.
+- **Cobro por cliente CON CHEQUE** (`POST /deudas-simples/cobrar-cliente-con-cheque`,
+  `svc_deudas_simples.cobrar_deudas_cliente_con_cheque`): el cliente salda **todas** sus deudas
+  de una moneda entregando un solo cheque. Salda por el **valor neto**, imputado FIFO igual que
+  el efectivo, y **no asienta caja**: el cheque entra `EN_CARTERA` a su nombre y la plata se
+  reconoce al venderlo o cobrarlo.
+  - **Un cheque que cubre de más es el caso normal** —el cliente entrega el que tiene—, así que
+    convierte con `convertir_a_moneda_deuda` (sin topear) y **no** con `calcular_reduccion_saldo`,
+    que lo rechazaría. El cálculo vive en la función pura `calcular_imputacion_y_vuelto`.
+  - **La diferencia va en ARS aunque las deudas sean en USD**: el excedente de un cheque es plata
+    en pesos y en pesos se devuelve. La resuelve `svc_pasivos.aplicar_vuelto_cheque` (§5), el
+    **mismo** mecanismo que el vuelto de un pasivo: `SALDAR_EFECTIVO` (egreso `VUELTO_PASIVO`,
+    lo único que mueve la caja en esta operación) o `QUEDA_DEBIENDO` (crea un pasivo a favor del
+    cliente, sin caja). **`vuelto_modo` es obligatorio si hay diferencia**: el sistema no elige
+    por el operador si le devuelve la plata o le queda debiendo.
 - **Panel:** vive en la pestaña **"Otras deudas"** de Deudores y en el consolidado
   **General** (botón "Nuevo"); se cobra con el modal compartido `ModalPagarDeuda` —tipo
   `deuda_simple` para una deuda suelta (única forma de cobrar **con cheque**) y
@@ -416,7 +430,9 @@ que marcan `COBRADA` fijan `monto_pagado = monto`.
   **(a)** paga la diferencia al cliente en efectivo/transferencia y queda saldada, o
   **(b)** el negocio queda debiendo → se crea **automáticamente un pasivo a favor del cliente**
   por el monto del vuelto. **✅ Implementado:** `svc_pasivos.cancelar_con_cheque` exige `vuelto_modo`
-  cuando hay diferencia; `_aplicar_vuelto` resuelve `SALDAR_EFECTIVO` (egreso `VUELTO_PASIVO` en ARS)
+  cuando hay diferencia; `aplicar_vuelto_cheque` —**pública y compartida** con el cobro de deudas
+  de cliente con cheque (§2.b): es la misma situación y tiene que resolverse igual en los dos
+  lados del negocio— resuelve `SALDAR_EFECTIVO` (egreso `VUELTO_PASIVO` en ARS)
   o `QUEDA_DEBIENDO` (crea el pasivo a favor, sin movimiento de caja).
 - Campos: `acreedor`, `concepto`, `monto`, `moneda`, `fecha_vencimiento` (opcional).
 - **Editar carga:** `PATCH /pasivos/{id}` (`svc_pasivos.editar_pasivo`). `acreedor`/`concepto`/`fecha_vencimiento`/`observaciones` siempre; `monto`/`moneda` solo si está `PENDIENTE` y sin pagos parciales (`saldo == monto`), y al cambiar el monto se recalcula el saldo. El alta no genera línea de caja, así que no hay nada que resincronizar. En el panel, botón "Editar" por fila en Deudas.
@@ -757,7 +773,9 @@ avisa **por Telegram** diciendo **qué** se rompió.
     además `repartir_cobro_fifo` (cobro por cliente): que llene la deuda más vieja primero,
     que no reparta más de lo adeudado y que **las líneas de caja sumen exactamente lo que
     entró** en un cobro cross-moneda —el caso donde prorratear y redondear cada una dejaría
-    la caja del día un centavo abajo—.
+    la caja del día un centavo abajo—. Cubre también `calcular_imputacion_y_vuelto` (cobro
+    con cheque): cheque que no alcanza, justo y de más, y que el vuelto de una deuda en USD
+    se devuelva en pesos.
   - **`test_anulacion.py`** — reglas de bloqueo del motor de anulación (§Anulación): fiado con
     cobros encima, cheque usado para pagar un pasivo, compra de USD ya consumida y venta que no
     es la última. Incluye dos tests que **custodian el catálogo `_ENTIDADES`**: si una entidad

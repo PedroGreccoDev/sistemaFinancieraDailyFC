@@ -8,6 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import DeudaSimpleEstado, Moneda
 from app.schemas.cheques import ChequeRead
+# El vuelto de un cheque "de más" se resuelve igual que en pasivos (§5): o se
+# paga en efectivo, o el negocio queda debiendo. Se reusa el mismo tipo para que
+# no aparezcan dos vocabularios para la misma decisión.
+from app.schemas.pasivos import VueltoModo
 
 
 class DeudaSimpleCreate(BaseModel):
@@ -87,6 +91,49 @@ class DeudaSimpleRead(BaseModel):
     cotizacion_pago: Decimal | None
     created_at: datetime
     updated_at: datetime
+
+
+class DeudaSimpleCobroClienteChequeCreate(BaseModel):
+    """Cobro de TODAS las deudas abiertas de un cliente con un solo cheque.
+
+    El cheque salda por su **valor neto** (`monto × (1 − %compra)`), imputado de
+    la deuda más vieja a la más nueva. Un cheque que vale más que todo lo que el
+    cliente debe es el caso normal —el cliente entrega el que tiene—, así que la
+    diferencia queda a favor suyo y `vuelto_modo` decide qué se hace con ella
+    (obligatorio solo si hay diferencia). Mismo mecanismo que el vuelto de un
+    pasivo pagado con cheque de más (§5).
+
+    Los cheques son siempre en pesos: cobrar deudas en USD exige `cotizacion`."""
+
+    cliente_id: UUID
+    moneda_deuda: Moneda
+    nro_cheque_pago: str = Field(min_length=1, max_length=64)
+    banco_pago: str | None = Field(default=None, max_length=120)
+    monto_cheque: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    porcentaje_compra_cheque: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
+    fecha_emision: date | None = None
+    fecha_pago: date | None = None
+    cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+    vuelto_modo: VueltoModo | None = None
+    fecha_cobro: date | None = None
+
+
+class DeudaSimpleCobroClienteChequeResponse(BaseModel):
+    """Resultado del cobro por cliente con cheque.
+
+    `imputado` es cuánto bajó la deuda en total y `saldo_restante` lo que el
+    cliente sigue debiendo, ambos en la moneda de las deudas. `diferencia` va en
+    **ARS** —el excedente de un cheque es plata en pesos— y es > 0 solo cuando el
+    cheque cubrió todo; `vuelto_modo` dice qué se hizo con ella.
+    """
+
+    deudas_afectadas: list[DeudaSimpleRead]
+    cheque_ingresado: ChequeRead
+    imputado: Decimal
+    canceladas: int
+    saldo_restante: Decimal
+    diferencia: Decimal
+    vuelto_modo: VueltoModo | None = None
 
 
 class DeudaSimpleCobroClienteResponse(BaseModel):
