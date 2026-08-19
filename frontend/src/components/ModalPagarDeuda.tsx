@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { pagarPrestamo } from '../api/prestamos'
 import { cobrarEfectivo } from '../api/fiados'
-import { cobrarDeudaSimple, cobrarDeudaSimpleConCheque } from '../api/deudas_simples'
+import { cobrarDeudaSimple, cobrarDeudaSimpleConCheque, cobrarDeudasCliente } from '../api/deudas_simples'
 import { fmtARS, fmtUSD } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
@@ -16,8 +16,13 @@ const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fon
 // Una deuda concreta a la que se puede imputar un pago de importe libre (parcial
 // o total): un préstamo, un fiado o una deuda libre. `saldo` y `moneda` son de la
 // deuda (los fiados son siempre ARS; préstamos y deudas libres, en su moneda).
+//
+// `deudas_cliente` es el caso agregado: todas las deudas libres abiertas de un
+// cliente en una misma moneda, cobradas de una. Ahí `id` es el **cliente**, no
+// una deuda, y `saldo` es la suma de sus saldos; el backend reparte el importe
+// de la deuda más vieja a la más nueva.
 export interface DeudaItem {
-  tipo: 'prestamo' | 'fiado' | 'deuda_simple'
+  tipo: 'prestamo' | 'fiado' | 'deuda_simple' | 'deudas_cliente'
   id: string
   clienteNombre: string
   label: string
@@ -132,6 +137,25 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           moneda_pago: monedaPago,
           cotizacion: cross ? cotizNum : null,
         })
+      } else if (deuda.tipo === 'deudas_cliente') {
+        // Acá `deuda.id` es el cliente: el importe se reparte entre sus deudas
+        // abiertas de esa moneda, la más vieja primero.
+        const r = await cobrarDeudasCliente({
+          cliente_id: deuda.id,
+          moneda_deuda: deuda.moneda,
+          monto_cobrado: montoNum,
+          moneda_pago: monedaPago,
+          cotizacion: cross ? cotizNum : null,
+        })
+        const restante = parseFloat(r.saldo_restante)
+        toast(
+          'success',
+          restante <= 0
+            ? `Cobrado · ${deuda.clienteNombre} no debe más nada en ${deuda.moneda}`
+            : `Cobrado · saldó ${r.canceladas} deuda(s), quedan ${fmtMoneda(restante, deuda.moneda)}`,
+        )
+        onSuccess()
+        return
       } else {
         await cobrarEfectivo(deuda.id, montoNum, 'panel-web', {
           moneda_pago: monedaPago,
@@ -148,7 +172,9 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
     <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
       <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '380px' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)' }}>
-          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Pagar deuda</h2>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>
+            {deuda.tipo === 'deudas_cliente' ? 'Cobrar al cliente' : 'Pagar deuda'}
+          </h2>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{deuda.clienteNombre} · {deuda.label}</p>
         </div>
         <form onSubmit={forma === 'cheque' ? handleSubmitCheque : handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
@@ -156,6 +182,12 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
             <span style={{ color: 'rgba(100,116,139,0.65)' }}>Saldo pendiente</span>
             <span style={{ fontWeight: 700, color: '#fbbf24' }}>{fmtMoneda(saldo, deuda.moneda)}</span>
           </div>
+
+          {deuda.tipo === 'deudas_cliente' && (
+            <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '-0.4rem' }}>
+              Se imputa a las deudas más viejas primero, hasta donde alcance.
+            </p>
+          )}
 
           {/* Con qué paga el cliente */}
           {chequeDisponible && (
@@ -266,7 +298,9 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           {equivalente !== null && !superaSaldo && (
             <p style={{ fontFamily: FM, fontSize: '0.7rem', color: cancelaTotal ? '#4ade80' : '#fbbf24' }}>
               {cross && `Salda ${fmtMoneda(equivalente, deuda.moneda)} de la deuda · `}
-              {cancelaTotal ? 'Salda la deuda completamente' : `Saldo restante: ${fmtMoneda(saldo - equivalente, deuda.moneda)}`}
+              {cancelaTotal
+                ? (deuda.tipo === 'deudas_cliente' ? 'Salda todas sus deudas' : 'Salda la deuda completamente')
+                : `Saldo restante: ${fmtMoneda(saldo - equivalente, deuda.moneda)}`}
             </p>
           )}
           {superaSaldo && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171' }}>El pago equivale a {fmtMoneda(equivalente!, deuda.moneda)} y supera el saldo pendiente</p>}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from app.services.deudas_simples import aplicar_cobro
+from app.services.deudas_simples import aplicar_cobro, repartir_cobro_fifo
 
 
 def _cobro(saldo: str, reduccion: str) -> tuple[Decimal, bool]:
@@ -122,3 +122,84 @@ def test_deuda_en_usd_cobrada_con_cheque_convierte_por_cotizacion() -> None:
         Moneda.USD, Decimal("1000.00"), Moneda.ARS, neto, Decimal("1000")
     )
     assert reduccion == Decimal("1000.00")  # 1.000.000 / 1.000 = 1.000 USD
+
+
+# ── Cobro por cliente: reparto FIFO entre sus deudas ───────────────────
+
+def _d(*valores: str) -> list[Decimal]:
+    return [Decimal(v) for v in valores]
+
+
+def test_reparto_llena_la_deuda_mas_vieja_primero() -> None:
+    """El cobro entra por la deuda más vieja; la nueva recibe solo el resto."""
+    repartido = repartir_cobro_fifo(
+        _d("10000", "10000"), Decimal("12000"), Decimal("12000")
+    )
+    assert [imputa for imputa, _ in repartido] == _d("10000.00", "2000.00")
+
+
+def test_reparto_no_toca_las_deudas_que_no_alcanza() -> None:
+    # Un cobro chico se queda en la primera: las otras dos quedan intactas.
+    repartido = repartir_cobro_fifo(
+        _d("10000", "5000", "3000"), Decimal("4000"), Decimal("4000")
+    )
+    assert [imputa for imputa, _ in repartido] == _d("4000.00", "0.00", "0.00")
+
+
+def test_reparto_no_reparte_mas_que_el_total_adeudado() -> None:
+    """Si la reducción supera lo que el cliente debe, se imputa solo lo adeudado.
+
+    En el servicio esto no debería pasar (`calcular_reduccion_saldo` ya topea al
+    saldo total), pero la función no puede depender de eso: repartir de más
+    dejaría una deuda con saldo negativo."""
+    repartido = repartir_cobro_fifo(
+        _d("1000", "1000"), Decimal("5000"), Decimal("5000")
+    )
+    assert sum((imputa for imputa, _ in repartido), Decimal("0.00")) == Decimal("2000.00")
+
+
+def test_en_una_sola_moneda_la_linea_de_caja_es_lo_imputado() -> None:
+    """Cobro en la misma moneda de la deuda: cada deuda asienta exactamente lo
+    que se le imputó, sin prorrateo de por medio."""
+    repartido = repartir_cobro_fifo(
+        _d("10000", "10000"), Decimal("15000"), Decimal("15000")
+    )
+    assert repartido == [
+        (Decimal("10000.00"), Decimal("10000.00")),
+        (Decimal("5000.00"), Decimal("5000.00")),
+    ]
+
+
+def test_cross_moneda_las_lineas_suman_exactamente_lo_que_entro() -> None:
+    """Tres deudas iguales pagadas con un importe que no divide justo.
+
+    Prorratear y redondear cada línea daría 33,33 × 3 = 99,99 y **la caja del día
+    cerraría un centavo abajo de lo que entró**. El residuo va a la última deuda
+    alcanzada, así que la suma es exacta."""
+    efectivo = Decimal("100.00")
+    repartido = repartir_cobro_fifo(_d("10", "10", "10"), Decimal("30.00"), efectivo)
+
+    assert [plata for _, plata in repartido] == _d("33.33", "33.33", "33.34")
+    assert sum((plata for _, plata in repartido), Decimal("0.00")) == efectivo
+
+
+def test_cross_moneda_reparte_proporcional_a_lo_imputado() -> None:
+    """La deuda que absorbe el doble de saldo recibe el doble de la plata."""
+    repartido = repartir_cobro_fifo(
+        _d("200", "100"), Decimal("300.00"), Decimal("300000.00")
+    )
+    assert [plata for _, plata in repartido] == _d("200000.00", "100000.00")
+
+
+def test_una_sola_deuda_alcanzada_se_lleva_todo_el_efectivo() -> None:
+    repartido = repartir_cobro_fifo(
+        _d("1000", "1000"), Decimal("400.00"), Decimal("560000.00")
+    )
+    assert repartido[0] == (Decimal("400.00"), Decimal("560000.00"))
+    assert repartido[1] == (Decimal("0.00"), Decimal("0.00"))
+
+
+def test_sin_saldo_no_imputa_ni_asienta_nada() -> None:
+    """Sin nada que imputar no puede quedar ninguna línea de caja colgada."""
+    repartido = repartir_cobro_fifo(_d("0.00", "0.00"), Decimal("500"), Decimal("500"))
+    assert repartido == [(Decimal("0.00"), Decimal("0.00"))] * 2

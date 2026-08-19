@@ -44,6 +44,39 @@ export const cobrarDeudaSimple = (id: string, payload: CobrarDeudaSimplePayload)
   })
 
 /**
+ * Cobro de un importe libre contra TODAS las deudas abiertas de un cliente.
+ *
+ * Es el cobro de la fila del cliente: el importe se imputa de la deuda más
+ * vieja a la más nueva, sin que el operador elija a cuál va. `moneda_deuda`
+ * dice contra qué deudas se cobra (ARS y USD no se suman entre sí); el pago
+ * puede venir en la otra moneda con su cotización, como en el cobro suelto.
+ */
+export interface CobrarDeudasClientePayload {
+  cliente_id: string
+  moneda_deuda: Moneda
+  monto_cobrado: number
+  moneda_pago: Moneda
+  // Requerida solo si moneda_pago difiere de moneda_deuda ($/USD).
+  cotizacion?: number | null
+  fecha_cobro?: string | null
+}
+
+export interface CobroClienteResult {
+  /** Las deudas que recibieron parte del importe, la más vieja primero. */
+  deudas_afectadas: DeudaSimple[]
+  /** Cuánto bajó la deuda en total, en la moneda de las deudas. */
+  imputado: string
+  canceladas: number
+  saldo_restante: string
+}
+
+export const cobrarDeudasCliente = (payload: CobrarDeudasClientePayload): Promise<CobroClienteResult> =>
+  apiFetch<CobroClienteResult>('/deudas-simples/cobrar-cliente', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+/**
  * Cobro de una deuda libre entregando un cheque en vez de efectivo.
  *
  * El cheque entra a cartera a nombre del cliente y salda por su valor neto

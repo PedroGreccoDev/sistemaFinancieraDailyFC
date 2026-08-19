@@ -304,10 +304,42 @@ y fecha. Conceptualmente "un fiado sin cheque y con divisa". Tabla `deudas_simpl
 - **Editar carga:** `PATCH /deudas-simples/{id}` (`svc_deudas_simples.editar_deuda_simple`).
   `concepto`/`fecha`/`observaciones` siempre; `monto`/`moneda` solo si está `ABIERTA` y sin
   cobros parciales (`saldo == monto`); al editar se resincroniza el egreso de origen.
-- **Solo panel web** (no hay intent de bot). En el panel vive en la pestaña **"Otras
-  deudas"** de Deudores y en el consolidado **General** (botón "Nuevo"); se cobra con el
-  modal compartido `ModalPagarDeuda` (tipo `deuda_simple`) y el alta con
-  `ModalNuevaDeudaSimple`. Incluida en el backup JSON export/import.
+  **Editar es para corregir una carga mal hecha, no para agregarle plata a un cliente**:
+  cada entrega nueva es una deuda nueva (ver abajo), porque cada una tiene su propio egreso
+  con la fecha del día en que salió.
+- **La pantalla es por CLIENTE, no por deuda _(régimen definido 2026-08-18)_.** La pestaña
+  "Otras deudas" agrupa las deudas en **una fila por cliente**, con `Saldo ARS` y
+  `Saldo USD` en columnas separadas —las monedas nunca se suman entre sí— y el detalle de
+  cada deuda al desplegar (con sus botones Editar/Eliminar por deuda). El cliente conserva
+  su fila aunque ya no deba nada, para poder sumarle la próxima; el filtro
+  **Con saldo / Todos** decide a quién se lista. La agrupación se arma **en el front**
+  (`agrupar()` en `DeudoresOtras.tsx`), no hay endpoint de agregación: por eso un alta que
+  venga del panel o de cualquier otro lado aparece sola bajo su cliente.
+  - **"Sumar deuda" crea un registro nuevo, no edita el anterior** (`ModalNuevaDeudaSimple`
+    con `clienteFijo`). Funciona aunque las deudas previas estén canceladas o tengan cobros
+    encima: son operaciones distintas. Aplastarlas en un solo monto editable obligaría a
+    elegir con qué fecha asentar el egreso y reescribiría días de caja ya cerrados.
+- **Cobro por cliente con imputación FIFO** (`POST /deudas-simples/cobrar-cliente`,
+  `svc_deudas_simples.cobrar_deudas_cliente`): el operador cobra un importe libre sin elegir
+  a qué deuda va. Se imputa **de la más vieja a la más nueva** (por `fecha`, igual que
+  `repartir_pago_en_cuotas` en §3), sobre las deudas abiertas de **una** moneda
+  (`moneda_deuda`); el pago puede venir en la otra con su cotización.
+  - **Cada deuda alcanzada asienta su propia línea `COBRO_DEUDA`.** No es cosmético: anular
+    una deuda borra sus líneas por referencia, y una línea compartida entre dos deudas se
+    llevaría puesta plata de la otra.
+  - El reparto vive en la función pura `repartir_cobro_fifo`, que reparte **dos** magnitudes:
+    lo imputado (en la moneda de la deuda) y el efectivo (en la moneda cobrada). En un cobro
+    cross-moneda el efectivo se prorratea y **el residuo del redondeo cae en la última deuda
+    alcanzada**, para que la suma de las líneas sea exactamente lo que entró — prorratear y
+    redondear cada una dejaría la caja del día unos centavos abajo.
+- **Panel:** vive en la pestaña **"Otras deudas"** de Deudores y en el consolidado
+  **General** (botón "Nuevo"); se cobra con el modal compartido `ModalPagarDeuda` —tipo
+  `deuda_simple` para una deuda suelta (única forma de cobrar **con cheque**) y
+  `deudas_cliente` para el cobro agregado, donde el `id` que viaja es el del **cliente**—.
+  Incluida en el backup JSON export/import.
+- **Bot:** no hay intent para cargarlas (pendiente), pero `CONSULTA_CLIENTE` **sí las
+  informa**: si el bot omitiera una fuente, preguntar por un cliente por WhatsApp devolvería
+  un saldo incompleto mientras el panel muestra el correcto.
 
 ---
 
@@ -679,6 +711,10 @@ avisa **por Telegram** diciendo **qué** se rompió.
     que no es la última se rechazan igual desde el chat.
   - Siempre pide **confirmación** (`confirmacion_requerida: true`): es destructiva.
 - Consultas (lectura): `CONSULTA_CARTERA`, `CONSULTA_CLIENTE`, `CONSULTA_PRESTAMOS`.
+  - **`CONSULTA_CLIENTE` tiene que cubrir las tres fuentes de deuda de un cliente:**
+    préstamos activos, fiados abiertos y **otras deudas** (§2.b). Una fuente que falte no
+    da error: el bot contesta "no tiene deudas activas" con toda seguridad mientras el
+    panel muestra el saldo. Un módulo nuevo de deuda de cliente se da de alta acá.
 
 ---
 
@@ -691,7 +727,7 @@ avisa **por Telegram** diciendo **qué** se rompió.
 - Las transacciones críticas usan `SELECT ... FOR UPDATE` para evitar race conditions.
 - **Fechas/horas en hora local de Argentina (ART), no UTC.** Usar los helpers de `app/core/fechas.py` (`hoy_local`, etc.); los gastos guardan `hora_operacion` (migración `0008`).
 - **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad.
-- **Sección "Deudores" (frontend):** agrupa lo que los **clientes** le deben al negocio (≠ "Deudas"/Pasivos, que es al revés). Cuatro pestañas: **General** (índice, `/deudores` → `DeudoresGeneral`), **Préstamos** (`/deudores/prestamos`), **Cheques fiados** (`/deudores/cheques-fiados`) y **Otras deudas** (`/deudores/otras` → `DeudoresOtras`, las deudas simples — ver §2.b). La pestaña **General** es una **vista consolidada por cliente** (total ARS y USD sumando préstamos + fiados + deudas simples) armada **en el front** desde `/prestamos`, `/fiados` y `/deudas-simples` (no hay endpoint de agregación); tiene un botón **"Nuevo"** que abre `ModalNuevaDeudaSimple`. El **pago de importe libre** (parcial o total, cross-currency) vive en el componente compartido `components/ModalPagarDeuda.tsx` (llama a `pagar_prestamo`, `cobrar_con_efectivo` o `cobrar_deuda_simple` según el `tipo` de deuda) y se usa en General, Préstamos y Otras deudas (botón "Pago libre"/"Cobrar", además del cobro por cuota entera). No reemplaza el cobro directo desde las otras pestañas.
+- **Sección "Deudores" (frontend):** agrupa lo que los **clientes** le deben al negocio (≠ "Deudas"/Pasivos, que es al revés). Cuatro pestañas: **General** (índice, `/deudores` → `DeudoresGeneral`), **Préstamos** (`/deudores/prestamos`), **Cheques fiados** (`/deudores/cheques-fiados`) y **Otras deudas** (`/deudores/otras` → `DeudoresOtras`, las deudas simples **agrupadas por cliente** — ver §2.b). La pestaña **General** es una **vista consolidada por cliente** (total ARS y USD sumando préstamos + fiados + deudas simples) armada **en el front** desde `/prestamos`, `/fiados` y `/deudas-simples` (no hay endpoint de agregación); tiene un botón **"Nuevo"** que abre `ModalNuevaDeudaSimple`. El **pago de importe libre** (parcial o total, cross-currency) vive en el componente compartido `components/ModalPagarDeuda.tsx` (llama a `pagar_prestamo`, `cobrar_con_efectivo`, `cobrar_deuda_simple` o `cobrar_deudas_cliente` según el `tipo` de deuda; con `deudas_cliente` el `id` que viaja es el del **cliente**, no el de una deuda) y se usa en General, Préstamos y Otras deudas (botón "Pago libre"/"Cobrar", además del cobro por cuota entera). No reemplaza el cobro directo desde las otras pestañas.
 
 ---
 
@@ -717,7 +753,11 @@ avisa **por Telegram** diciendo **qué** se rompió.
   - **`test_prestamos_pago.py`** — `repartir_pago_en_cuotas` (imputación a la cuota más vieja
     primero, parcial/total, saltea saldadas, no reparte de más) + cross-currency del préstamo.
   - **`test_deudas_simples.py`** — `aplicar_cobro` de una deuda simple (§2.b): nuevo saldo y
-    transición a cancelada en cobros parciales/totales, sin dejar saldo negativo.
+    transición a cancelada en cobros parciales/totales, sin dejar saldo negativo. Cubre
+    además `repartir_cobro_fifo` (cobro por cliente): que llene la deuda más vieja primero,
+    que no reparta más de lo adeudado y que **las líneas de caja sumen exactamente lo que
+    entró** en un cobro cross-moneda —el caso donde prorratear y redondear cada una dejaría
+    la caja del día un centavo abajo—.
   - **`test_anulacion.py`** — reglas de bloqueo del motor de anulación (§Anulación): fiado con
     cobros encima, cheque usado para pagar un pasivo, compra de USD ya consumida y venta que no
     es la última. Incluye dos tests que **custodian el catálogo `_ENTIDADES`**: si una entidad

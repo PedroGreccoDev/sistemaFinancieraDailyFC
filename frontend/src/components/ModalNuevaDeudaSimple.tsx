@@ -18,12 +18,18 @@ const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fon
  * monto, moneda, fecha y observaciones. Registrarla saca la plata de la caja
  * (egreso); luego se cobra —total o parcial, en cualquier moneda— desde General o
  * la pestaña "Otras deudas". Permite dar de alta un cliente nuevo en el momento.
+ *
+ * Con `clienteFijo` es el "Sumar deuda" de la fila del cliente: **cada entrega de
+ * plata entra como una deuda nueva**, con su razón y su fecha, y no editando el
+ * monto de una anterior. Por eso funciona aunque las deudas previas ya tengan
+ * cobros encima o estén canceladas: son operaciones distintas, cada una con su
+ * egreso en el libro de caja el día que ocurrió.
  */
-export default function ModalNuevaDeudaSimple({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+export default function ModalNuevaDeudaSimple({ onClose, onSuccess, clienteFijo }: { onClose: () => void; onSuccess: () => void; clienteFijo?: { id: string; nombre: string } }) {
   const queryClient = useQueryClient()
   const toast = useToast()
 
-  const [clienteId, setClienteId] = useState('')
+  const [clienteId, setClienteId] = useState(clienteFijo?.id ?? '')
   const [concepto, setConcepto] = useState('')
   const [monto, setMonto] = useState('')
   const [moneda, setMoneda] = useState<Moneda>('ARS')
@@ -80,15 +86,21 @@ export default function ModalNuevaDeudaSimple({ onClose, onSuccess }: { onClose:
     <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
       <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
-          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Nueva deuda</h2>
-          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Deuda de un cliente con el negocio (sale de caja al registrarla)</p>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>{clienteFijo ? 'Sumar deuda' : 'Nueva deuda'}</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>
+            {clienteFijo
+              ? `Nueva deuda de ${clienteFijo.nombre} (sale de caja al registrarla)`
+              : 'Deuda de un cliente con el negocio (sale de caja al registrarla)'}
+          </p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
 
           {/* Cliente */}
           <div>
             <label style={LABEL_STYLE}>Cliente</label>
-            {!mostrandoNuevoCliente ? (
+            {clienteFijo ? (
+              <div style={{ ...INPUT_STYLE, background: 'var(--ov-003)', fontWeight: 700 }}>{clienteFijo.nombre}</div>
+            ) : !mostrandoNuevoCliente ? (
               <>
                 <select value={clienteId} onChange={(e) => setClienteId(e.target.value)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
                   <option value="">Seleccionar cliente…</option>

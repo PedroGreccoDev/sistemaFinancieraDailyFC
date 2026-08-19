@@ -11,6 +11,8 @@ from app.db.session import get_db
 from app.schemas.deudas_simples import (
     DeudaSimpleCobrarConChequeRequest,
     DeudaSimpleCobrarConChequeResponse,
+    DeudaSimpleCobroClienteCreate,
+    DeudaSimpleCobroClienteResponse,
     DeudaSimpleCreate,
     DeudaSimplePagoRequest,
     DeudaSimpleRead,
@@ -34,6 +36,17 @@ def list_deudas(
 @router.post("", response_model=DeudaSimpleRead, status_code=201)
 def crear_deuda(payload: DeudaSimpleCreate, db: DbSession) -> DeudaSimpleRead:
     return service.create_deuda_simple(db, payload)
+
+
+@router.post("/cobrar-cliente", response_model=DeudaSimpleCobroClienteResponse)
+def cobrar_deudas_cliente(
+    payload: DeudaSimpleCobroClienteCreate, db: DbSession
+) -> DeudaSimpleCobroClienteResponse:
+    """Cobra un importe libre contra todas las deudas abiertas de un cliente.
+
+    Se imputa de la deuda más vieja a la más nueva, en una sola moneda; cada
+    deuda alcanzada asienta su propia línea de caja."""
+    return service.cobrar_deudas_cliente(db, payload)
 
 
 @router.get("/{deuda_id}", response_model=DeudaSimpleRead)

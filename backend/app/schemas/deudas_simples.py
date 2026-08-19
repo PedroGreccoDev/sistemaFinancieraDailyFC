@@ -51,6 +51,26 @@ class DeudaSimplePagoRequest(BaseModel):
     fecha_cobro: date | None = None
 
 
+class DeudaSimpleCobroClienteCreate(BaseModel):
+    """Cobro de un importe libre contra todas las deudas abiertas de un cliente.
+
+    Es el cobro de la fila del cliente en "Otras deudas": el importe se imputa a
+    las deudas de la más vieja a la más nueva, sin que el operador tenga que
+    elegir a cuál va.
+
+    `moneda_deuda` dice contra qué deudas se cobra: ARS y USD son cajas distintas
+    y no se suman entre sí. `monto_cobrado` es lo que entra a caja, en
+    `moneda_pago`, que puede diferir; en ese caso `cotizacion` ($/USD) imputa
+    cuánto del saldo queda saldado."""
+
+    cliente_id: UUID
+    moneda_deuda: Moneda
+    monto_cobrado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    moneda_pago: Moneda
+    cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+    fecha_cobro: date | None = None
+
+
 class DeudaSimpleRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -67,6 +87,21 @@ class DeudaSimpleRead(BaseModel):
     cotizacion_pago: Decimal | None
     created_at: datetime
     updated_at: datetime
+
+
+class DeudaSimpleCobroClienteResponse(BaseModel):
+    """Resultado del cobro por cliente.
+
+    `deudas_afectadas` son las deudas que recibieron parte del importe, en el
+    orden en que se imputaron (la más vieja primero). `imputado` es cuánto bajó
+    la deuda en total y `saldo_restante` lo que el cliente sigue debiendo, ambos
+    en la moneda de las deudas.
+    """
+
+    deudas_afectadas: list[DeudaSimpleRead]
+    imputado: Decimal
+    canceladas: int
+    saldo_restante: Decimal
 
 
 class DeudaSimpleCobrarConChequeRequest(BaseModel):

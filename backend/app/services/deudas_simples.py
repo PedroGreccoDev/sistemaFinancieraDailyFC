@@ -23,6 +23,8 @@ from app.schemas.cheques import ChequeRead
 from app.schemas.deudas_simples import (
     DeudaSimpleCobrarConChequeRequest,
     DeudaSimpleCobrarConChequeResponse,
+    DeudaSimpleCobroClienteCreate,
+    DeudaSimpleCobroClienteResponse,
     DeudaSimpleCreate,
     DeudaSimplePagoRequest,
     DeudaSimpleRead,
@@ -55,6 +57,59 @@ def aplicar_cobro(
     testeable en el estilo de `tests/`."""
     nuevo = (saldo_pendiente - reduccion).quantize(Decimal("0.01"))
     return nuevo, nuevo == Decimal("0.00")
+
+
+def repartir_cobro_fifo(
+    saldos: list[Decimal], reduccion: Decimal, efectivo: Decimal
+) -> list[tuple[Decimal, Decimal]]:
+    """Reparte un cobro entre las deudas de un cliente, en el orden recibido.
+
+    `saldos` son los saldos pendientes de las deudas abiertas, ordenados como se
+    quiera imputar (la más vieja primero). `reduccion` es cuánto baja el saldo en
+    total (en la moneda de las deudas) y `efectivo` es la plata que realmente
+    entró (en la moneda cobrada, que puede ser otra). Devuelve por deuda
+    `(imputado, efectivo)`: lo primero baja su saldo, lo segundo es el monto de
+    **su** línea de caja.
+
+    Se reparten las **dos** magnitudes porque cada deuda asienta su propia línea
+    `COBRO_DEUDA` (anular una deuda borra sus líneas por referencia; una línea
+    compartida entre dos deudas se llevaría puesta plata de la otra). En un cobro
+    cross-moneda el efectivo se prorratea por lo imputado, y **el residuo del
+    redondeo cae en la última deuda alcanzada**: así la suma de las líneas es
+    exactamente lo que entró y la caja del día no cierra por unos centavos menos.
+
+    Pura (sin BD): testeable en el estilo de `tests/`."""
+    cero = Decimal("0.00")
+    centavo = Decimal("0.01")
+
+    imputado: list[Decimal] = []
+    restante = reduccion
+    for saldo in saldos:
+        disponible = saldo if saldo > cero else cero
+        aplica = min(restante, disponible) if restante > cero else cero
+        aplica = aplica.quantize(centavo)
+        imputado.append(aplica)
+        restante = (restante - aplica).quantize(centavo)
+
+    alcanzadas = [i for i, aplica in enumerate(imputado) if aplica > cero]
+    if not alcanzadas:
+        return [(cero, cero) for _ in saldos]
+
+    total_imputado = sum(imputado, cero)
+    ultima = alcanzadas[-1]
+    repartido: list[tuple[Decimal, Decimal]] = []
+    acumulado = cero
+    for i, aplica in enumerate(imputado):
+        if aplica <= cero:
+            repartido.append((cero, cero))
+            continue
+        if i == ultima:
+            plata = (efectivo - acumulado).quantize(centavo)
+        else:
+            plata = (efectivo * aplica / total_imputado).quantize(centavo)
+            acumulado = (acumulado + plata).quantize(centavo)
+        repartido.append((aplica, plata))
+    return repartido
 
 
 def get_deuda_simple(db: Session, deuda_id: uuid.UUID) -> DeudaSimple:
@@ -228,6 +283,120 @@ def cobrar_deuda_simple(
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("No se pudo registrar el cobro de la deuda.") from exc
+
+
+def cobrar_deudas_cliente(
+    db: Session, payload: DeudaSimpleCobroClienteCreate
+) -> DeudaSimpleCobroClienteResponse:
+    """Cobra un importe libre contra **todas** las deudas abiertas de un cliente.
+
+    Es el cobro de la fila del cliente en "Otras deudas": el operador recibe la
+    plata y no tiene por qué decidir a qué deuda va. Se imputa **de la más vieja
+    a la más nueva** (por la fecha de la deuda), mismo criterio que el pago libre
+    de un préstamo (`repartir_pago_en_cuotas`, §3).
+
+    Se cobra contra las deudas de **una** moneda (`moneda_deuda`): ARS y USD son
+    dos cajas distintas y no se suman. El pago sí puede venir en la otra moneda,
+    como en el cobro de una deuda suelta.
+
+    Cada deuda alcanzada asienta **su propia** línea `COBRO_DEUDA` (ver
+    `repartir_cobro_fifo`), y la que se salda pasa a CANCELADA."""
+    cliente = db.get(Cliente, payload.cliente_id)
+    if cliente is None:
+        raise NotFoundError("Cliente no encontrado.")
+
+    deudas = list(
+        db.scalars(
+            select(DeudaSimple)
+            .where(
+                DeudaSimple.cliente_id == payload.cliente_id,
+                DeudaSimple.moneda == payload.moneda_deuda,
+                DeudaSimple.estado == DeudaSimpleEstado.ABIERTA,
+                DeudaSimple.anulado_at.is_(None),
+            )
+            .order_by(DeudaSimple.fecha.asc(), DeudaSimple.created_at.asc())
+            .with_for_update()
+        )
+    )
+    if not deudas:
+        raise ConflictError(
+            f"{cliente.nombre} no tiene deudas abiertas en {payload.moneda_deuda.value}."
+        )
+
+    saldo_total = sum(
+        (d.saldo_pendiente for d in deudas), Decimal("0.00")
+    ).quantize(Decimal("0.01"))
+
+    es_cross = payload.moneda_pago != payload.moneda_deuda
+    # Cuánto del total (en la moneda de las deudas) salda este cobro; valida la
+    # cotización y que no se cobre más de lo que el cliente debe.
+    reduccion = calcular_reduccion_saldo(
+        payload.moneda_deuda,
+        saldo_total,
+        payload.moneda_pago,
+        payload.monto_cobrado,
+        payload.cotizacion,
+    )
+
+    fecha = payload.fecha_cobro or hoy_local()
+    repartido = repartir_cobro_fifo(
+        [d.saldo_pendiente for d in deudas], reduccion, payload.monto_cobrado
+    )
+
+    afectadas: list[DeudaSimple] = []
+    canceladas = 0
+    for deuda, (imputa, plata) in zip(deudas, repartido):
+        if imputa <= Decimal("0.00"):
+            continue
+
+        deuda.saldo_pendiente, cancelada = aplicar_cobro(deuda.saldo_pendiente, imputa)
+        if cancelada:
+            deuda.estado = DeudaSimpleEstado.CANCELADA
+            deuda.fecha_cancelacion = fecha
+            canceladas += 1
+
+        if es_cross and deuda.cotizacion_pago is None:
+            deuda.cotizacion_pago = payload.cotizacion
+
+        detalle = f"Cobro deuda - {cliente.nombre} - {deuda.concepto}"
+        if es_cross:
+            detalle += f" ({imputa} {deuda.moneda.value} @ {payload.cotizacion})"
+
+        # Una deuda ínfima puede quedar en $0,00 al prorratear un cobro
+        # cross-moneda: se le imputa el saldo igual, pero no se asienta una línea
+        # de caja en cero. El total sigue cerrando (el residuo va a la última).
+        if plata > Decimal("0.00"):
+            svc_caja.registrar(
+                db,
+                fecha=fecha,
+                moneda=payload.moneda_pago,
+                tipo=CajaTipo.INGRESO,
+                categoria=CajaCategoria.COBRO_DEUDA,
+                monto=plata,
+                referencia_tipo=_REF_COBRO,
+                referencia_id=deuda.id,
+                detalle=detalle,
+                cotizacion=payload.cotizacion if es_cross else None,
+            )
+
+        afectadas.append(deuda)
+
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo registrar el cobro del cliente.") from exc
+
+    for deuda in afectadas:
+        db.refresh(deuda)
+
+    saldo_restante = (saldo_total - reduccion).quantize(Decimal("0.01"))
+    return DeudaSimpleCobroClienteResponse(
+        deudas_afectadas=[DeudaSimpleRead.model_validate(d) for d in afectadas],
+        imputado=reduccion,
+        canceladas=canceladas,
+        saldo_restante=saldo_restante,
+    )
 
 
 def cobrar_con_cheque(

@@ -17,6 +17,8 @@ from app.db.models import (
     Cliente,
     Cuota,
     CuotaEstado,
+    DeudaSimple,
+    DeudaSimpleEstado,
     Fiado,
     FiadoEstado,
     GastoOperativo,
@@ -1370,7 +1372,10 @@ def _consulta_cartera(db: Session) -> DispatchResult:
 
 
 def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
-    """Muestra el resumen de deudas activas de un cliente: préstamos y fiados."""
+    """Resumen de lo que un cliente debe: préstamos, fiados y otras deudas (§2.b).
+
+    Tiene que decir lo mismo que la sección Deudores del panel: si el bot omite
+    una fuente, el operador consulta por WhatsApp y se lleva un saldo incompleto."""
     cliente_nombre = _req_str(data, "cliente_nombre")
     cliente = _buscar_cliente_o_error(db, cliente_nombre)
 
@@ -1429,6 +1434,36 @@ def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
         lines.append("📋 *Fiados abiertos:*")
         for f in fiados:
             lines.append(f"  • Cheque Nº {f.cheque_nro} | Saldo: {_ars(f.saldo_pendiente)}")
+
+    # Otras deudas (deudas libres, §2.b): no tienen cuotas ni cheque detrás, pero
+    # son plata que el cliente debe igual. Sin este bloque el bot contestaba "no
+    # tiene deudas activas" mientras el panel mostraba su saldo.
+    otras: list[DeudaSimple] = list(
+        db.scalars(
+            select(DeudaSimple).where(
+                DeudaSimple.cliente_id == cliente.id,
+                DeudaSimple.estado == DeudaSimpleEstado.ABIERTA,
+                DeudaSimple.anulado_at.is_(None),
+            ).order_by(DeudaSimple.fecha.asc())
+        ).all()
+    )
+    if otras:
+        hay_algo = True
+        lines.append("")
+        lines.append("🧾 *Otras deudas:*")
+        for d in otras:
+            simbolo = "U$D" if d.moneda == Moneda.USD else "$"
+            lines.append(
+                f"  • {d.concepto} | Saldo: {simbolo}{_fmt_num(d.saldo_pendiente)}"
+                f" ({_fmt_date(d.fecha)})"
+            )
+        # El total por moneda: es lo que el operador va a querer cobrar de una.
+        for moneda in (Moneda.ARS, Moneda.USD):
+            del_moneda = [d for d in otras if d.moneda == moneda]
+            if len(del_moneda) > 1:
+                simbolo = "U$D" if moneda == Moneda.USD else "$"
+                total = sum((d.saldo_pendiente for d in del_moneda), Decimal("0.00"))
+                lines.append(f"  Total {moneda.value}: {simbolo}{_fmt_num(total)}")
 
     if not hay_algo:
         lines.append("\nNo tiene deudas activas registradas.")
