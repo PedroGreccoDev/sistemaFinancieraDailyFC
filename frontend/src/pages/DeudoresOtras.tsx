@@ -296,8 +296,8 @@ export default function DeudoresOtras() {
 
                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem', flexWrap: 'wrap' }}>
                       <button onClick={() => setSumandoA({ id: g.clienteId, nombre: g.nombre })} style={{ ...btnBordered('neutral'), flex: '1 1 auto', fontSize: '0.72rem', padding: '0.4rem' }}>+ Sumar deuda</button>
-                      {g.saldoARS > 0 && <button onClick={() => setCobrando(cobroDeCliente(g, 'ARS'))} style={{ ...btnFlat('success'), flex: '1 1 auto', fontSize: '0.72rem', padding: '0.4rem' }}>Cobrar ARS</button>}
-                      {g.saldoUSD > 0 && <button onClick={() => setCobrando(cobroDeCliente(g, 'USD'))} style={{ ...btnFlat('success'), flex: '1 1 auto', fontSize: '0.72rem', padding: '0.4rem' }}>Cobrar USD</button>}
+                      {g.saldoARS > 0 && <button onClick={() => setCobrando(cobroDeCliente(g, 'ARS'))} style={{ ...btnFlat('success'), flex: '1 1 auto', fontSize: '0.72rem', padding: '0.4rem' }}>Cobrar deuda ARS</button>}
+                      {g.saldoUSD > 0 && <button onClick={() => setCobrando(cobroDeCliente(g, 'USD'))} style={{ ...btnFlat('success'), flex: '1 1 auto', fontSize: '0.72rem', padding: '0.4rem' }}>Cobrar deuda USD</button>}
                     </div>
                   </div>
 
@@ -362,8 +362,8 @@ export default function DeudoresOtras() {
                         <td style={{ ...TD, textAlign: 'right' }}>
                           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                             <button onClick={() => setSumandoA({ id: g.clienteId, nombre: g.nombre })} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>+ Sumar deuda</button>
-                            {g.saldoARS > 0 && <button onClick={() => setCobrando(cobroDeCliente(g, 'ARS'))} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Cobrar ARS</button>}
-                            {g.saldoUSD > 0 && <button onClick={() => setCobrando(cobroDeCliente(g, 'USD'))} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Cobrar USD</button>}
+                            {g.saldoARS > 0 && <button onClick={() => setCobrando(cobroDeCliente(g, 'ARS'))} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Cobrar deuda ARS</button>}
+                            {g.saldoUSD > 0 && <button onClick={() => setCobrando(cobroDeCliente(g, 'USD'))} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Cobrar deuda USD</button>}
                           </div>
                         </td>
                       </tr>,
