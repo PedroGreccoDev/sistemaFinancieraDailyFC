@@ -334,6 +334,15 @@ def _imputar(
     )
 
 
+# API compartida con `svc_compensaciones`. Una compensación imputa contra la
+# deuda del cliente exactamente igual que este cobro —lo único distinto es de
+# dónde salió la plata—, así que reusa estos tres en vez de duplicar el reparto:
+# duplicarlo es lo que haría divergir la compensación del cobro normal.
+cargar_renglones = _cargar_renglones
+imputar_renglon = _imputar
+cliente_o_error = _cliente_o_error
+
+
 def cobrar_cliente(
     db: Session, payload: CobroClienteCreate
 ) -> CobroClienteResponse:

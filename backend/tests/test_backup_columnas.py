@@ -24,6 +24,8 @@ from app.db.models import (
     AjusteCaja,
     Cheque,
     Cliente,
+    Compensacion,
+    CompensacionImputacion,
     Cuota,
     DeudaSimple,
     Fiado,
@@ -48,6 +50,8 @@ _TABLAS = [
     ("_DS", backup._DS, DeudaSimple),
     ("_MC", backup._MC, MovimientoCaja),
     ("_AJ", backup._AJ, AjusteCaja),
+    ("_CO", backup._CO, Compensacion),
+    ("_CI", backup._CI, CompensacionImputacion),
 ]
 
 

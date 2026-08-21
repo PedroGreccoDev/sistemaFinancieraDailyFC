@@ -35,6 +35,7 @@ from app.db.models import (
     CajaTipo,
     Cheque,
     ChequeEstado,
+    Compensacion,
     DeudaSimple,
     Fiado,
     GastoOperativo,
@@ -84,6 +85,11 @@ _ENTIDADES: dict[str, _Spec] = {
     "pasivo":             _Spec(Pasivo,             ("pasivo",),                            "deuda del negocio"),
     "gasto":              _Spec(GastoOperativo,     ("gasto",),                             "gasto"),
     "ajuste_caja":        _Spec(AjusteCaja,         ("ajuste_caja",),                       "ajuste de caja"),
+    # Sin refs: una compensación no asienta nada en el libro de caja —esa plata
+    # nunca pasó por acá—, así que no hay líneas que revertir. Lo que hay que
+    # deshacer son los saldos de los dos lados, y de eso se encarga
+    # `svc_compensaciones.revertir` (ver `anular`).
+    "compensacion":       _Spec(Compensacion,       (),                                     "compensación"),
 }
 
 
@@ -208,6 +214,12 @@ def _describir(obj, spec: _Spec) -> str:
         return f"{obj.concepto} — {obj.acreedor} — {obj.moneda.value} {obj.monto:,.2f}"
     if isinstance(obj, GastoOperativo):
         return f"{obj.concepto} — {obj.moneda.value} {obj.monto:,.2f}"
+    if isinstance(obj, Compensacion):
+        cliente = obj.cliente.nombre if obj.cliente else "cliente"
+        acreedor = obj.pasivo.acreedor if obj.pasivo else "acreedor"
+        return (
+            f"{cliente} le transfirió {obj.moneda.value} {obj.monto:,.2f} a {acreedor}"
+        )
     return spec.label
 
 
@@ -450,6 +462,29 @@ def anular(
         raise ValidationError("Se requiere un motivo para anular la operación.")
 
     spec = _spec(entidad)
+
+    # La compensación no deja rastro en el libro de caja: deshacerla es devolver
+    # saldos en los dos lados (cliente y acreedor), y eso lo sabe hacer su propio
+    # servicio. Pasa por acá igual para que el panel y el bot la deshagan por la
+    # misma puerta que todo el resto, con operador y motivo.
+    if entidad == "compensacion":
+        from app.services import compensaciones as svc_compensaciones
+
+        comp = db.get(Compensacion, entidad_id)
+        if comp is None:
+            raise NotFoundError("No se encontró la compensación con ese identificador.")
+        descripcion = _describir(comp, spec)
+        restituido = svc_compensaciones.revertir(
+            db, entidad_id, operador_id=operador_id, motivo=motivo
+        )
+        return Impacto(
+            entidad=entidad,
+            entidad_id=entidad_id,
+            descripcion=descripcion,
+            lineas=[],
+            arrastra=restituido,
+        )
+
     obj = db.scalar(select(spec.modelo).where(spec.modelo.id == entidad_id).with_for_update())
     if obj is None:
         raise NotFoundError(f"No se encontró {spec.label} con ese identificador.")

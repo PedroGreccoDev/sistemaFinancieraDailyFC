@@ -934,3 +934,115 @@ class ConfiguracionApertura(Base):
     def saldo_definido(self) -> bool:
         """True si ya se cargó el efectivo de apertura (es por única vez)."""
         return self.definido_at is not None
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: Compensacion
+# ══════════════════════════════════════════════════════════════════════
+
+class Compensacion(AnulableMixin, Base):
+    """Saldar la deuda de un cliente contra una deuda del negocio.
+
+    El negocio le debe a Y y X le debe al negocio; en vez de cobrarle a X y
+    pagarle a Y, **X le transfiere directo a Y**. Bajan las dos deudas y la caja
+    del negocio no se mueve: esa plata nunca pasó por acá.
+
+    **No asienta ninguna línea en el libro de caja**, y esa es toda la gracia.
+    Cargarlo como dos operaciones sueltas —un cobro y un pago— deja un INGRESO y
+    un EGRESO que no existieron: el neto del día da igual, pero el reporte
+    muestra plata moviéndose que nadie tocó. Esa vía sigue disponible; esta es
+    una operación más, no un reemplazo.
+
+    La entidad existe para que la operación tenga registro propio: sin ella dos
+    saldos bajan sin nada que lo explique, y no habría cómo revertirla.
+    """
+
+    __tablename__ = "compensaciones"
+    __table_args__ = (
+        sa.CheckConstraint("monto > 0", name="ck_compensaciones_monto_positive"),
+        sa.CheckConstraint("excedente >= 0", name="ck_compensaciones_excedente_no_negativo"),
+        sa.CheckConstraint(
+            "cotizacion IS NULL OR cotizacion > 0",
+            name="ck_compensaciones_cotizacion_positive",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    fecha:      Mapped[date] = mapped_column(sa.Date(), index=True)
+    cliente_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), sa.ForeignKey("clientes.id", ondelete="RESTRICT"), index=True
+    )
+    pasivo_id:  Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), sa.ForeignKey("pasivos.id", ondelete="RESTRICT"), index=True
+    )
+    # Lo que se transfirió, en la moneda en que se transfirió: el hecho real de
+    # la operación. De acá salen las dos imputaciones.
+    moneda: Mapped[Moneda] = mapped_column(sa.Enum(Moneda, name="moneda", create_type=False))
+    monto:  Mapped[Decimal] = mapped_column(sa.Numeric(18, 2))
+    # Contra qué moneda de la deuda del cliente imputa (ARS y USD no se suman).
+    moneda_deuda: Mapped[Moneda] = mapped_column(sa.Enum(Moneda, name="moneda", create_type=False))
+    # $/USD dictada por el operador, solo si alguna pata cruza monedas.
+    cotizacion:   Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 6), nullable=True)
+    # Cuánto bajó cada lado, en su propia moneda.
+    imputado_cliente: Mapped[Decimal] = mapped_column(sa.Numeric(18, 2))
+    imputado_pasivo:  Mapped[Decimal] = mapped_column(sa.Numeric(18, 2))
+    # Excedente a favor del cliente (transfirió más de lo que debía) y el pasivo
+    # que se le creó por él, para poder revertirlo.
+    excedente:           Mapped[Decimal] = mapped_column(sa.Numeric(18, 2), default=Decimal("0.00"))
+    pasivo_excedente_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), sa.ForeignKey("pasivos.id", ondelete="SET NULL"), nullable=True
+    )
+    observaciones: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
+    )
+
+    cliente: Mapped["Cliente"] = relationship("Cliente", foreign_keys=[cliente_id], lazy="selectin")
+    pasivo:  Mapped["Pasivo"]  = relationship("Pasivo", foreign_keys=[pasivo_id], lazy="selectin")
+    imputaciones: Mapped[list["CompensacionImputacion"]] = relationship(
+        "CompensacionImputacion",
+        back_populates="compensacion",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+
+class CompensacionImputacion(Base):
+    """Cuánto le tocó a cada renglón de deuda del cliente en una compensación.
+
+    Se guarda el efecto **real** de la imputación, medido contra el saldo de cada
+    renglón antes y después. Revertir es devolver exactamente eso: recalcular el
+    reparto al revés daría otra cosa apenas el cliente reciba otro cobro entre
+    medio, y esa diferencia sería plata que aparece o desaparece.
+
+    Del préstamo se anota la **cuota**, no el préstamo: ahí es donde cae la plata
+    (`repartir_pago_en_cuotas`, §3), y devolverle el total al préstamo sin saber
+    de qué cuota salió lo repartiría distinto.
+    """
+
+    __tablename__ = "compensacion_imputaciones"
+    __table_args__ = (
+        sa.CheckConstraint("monto > 0", name="ck_compensacion_imputaciones_monto_positive"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    compensacion_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), sa.ForeignKey("compensaciones.id", ondelete="CASCADE"), index=True
+    )
+    # 'fiado' | 'deuda_simple' | 'cuota'
+    entidad_tipo: Mapped[str] = mapped_column(sa.String(30))
+    entidad_id:   Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True))
+    monto:        Mapped[Decimal] = mapped_column(sa.Numeric(18, 2))
+    # Si este renglón quedó saldado por la compensación: al revertir hay que
+    # reabrirlo, y saberlo evita reabrir lo que ya venía cerrado.
+    cancelo:      Mapped[bool] = mapped_column(sa.Boolean(), default=False)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+
+    compensacion: Mapped["Compensacion"] = relationship(
+        "Compensacion", back_populates="imputaciones"
+    )

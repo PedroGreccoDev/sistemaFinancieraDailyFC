@@ -15,6 +15,8 @@ from app.db.models import (
     AjusteCaja,
     Cheque,
     Cliente,
+    Compensacion,
+    CompensacionImputacion,
     Cuota,
     DeudaSimple,
     Fiado,
@@ -107,6 +109,19 @@ _AJ = [
     "id", "fecha", "moneda", "tipo", "motivo", "monto", "cotizacion_usd",
     "lote_id", "descripcion", "operador_id", "created_at", "updated_at", *_ANUL,
 ]
+_CO = [
+    "id", "fecha", "cliente_id", "pasivo_id", "moneda", "monto", "moneda_deuda",
+    "cotizacion", "imputado_cliente", "imputado_pasivo",
+    # El excedente y el pasivo que se le creó al cliente por él: sin el vínculo,
+    # revertir la compensación no encuentra qué anular y esa plata le queda a
+    # favor para siempre.
+    "excedente", "pasivo_excedente_id",
+    "observaciones", "created_at", "updated_at", *_ANUL,
+]
+_CI = [
+    "id", "compensacion_id", "entidad_tipo", "entidad_id", "monto", "cancelo",
+    "created_at",
+]
 
 # ── Validación de schema ────────────────────────────────────────────────────
 
@@ -124,6 +139,8 @@ _REQUIRED: dict[str, frozenset[str]] = {
     "movimientos_caja":     frozenset({"id", "fecha", "moneda", "tipo", "categoria", "monto"}),
     "deudas_simples":       frozenset({"id", "cliente_id", "concepto", "monto", "saldo_pendiente", "moneda", "estado", "fecha"}),
     "ajustes_caja":         frozenset({"id", "fecha", "moneda", "tipo", "motivo", "monto"}),
+    "compensaciones":       frozenset({"id", "fecha", "cliente_id", "pasivo_id", "moneda", "monto", "moneda_deuda"}),
+    "compensacion_imputaciones": frozenset({"id", "compensacion_id", "entidad_tipo", "entidad_id", "monto"}),
 }
 
 
@@ -195,6 +212,12 @@ def exportar_json(db: Session) -> dict:
             "deudas_simples":       [_serialize(r, _DS) for r in db.query(DeudaSimple).all()],
             "movimientos_caja":     [_serialize(r, _MC) for r in db.query(MovimientoCaja).all()],
             "ajustes_caja":         [_serialize(r, _AJ) for r in db.query(AjusteCaja).all()],
+            "compensaciones":       [_serialize(r, _CO) for r in db.query(Compensacion).all()],
+            # El detalle por renglón viaja aparte: es lo que permite revertir una
+            # compensación devolviendo exactamente lo que sacó de cada deuda.
+            "compensacion_imputaciones": [
+                _serialize(r, _CI) for r in db.query(CompensacionImputacion).all()
+            ],
         },
     }
 
@@ -239,6 +262,7 @@ _DT_MO   = frozenset({"fecha_operacion"})
 _DATE_MC = frozenset({"fecha"})
 _DATE_DS = frozenset({"fecha", "fecha_cancelacion"})
 _DATE_AJ = frozenset({"fecha"})
+_DATE_CO = frozenset({"fecha"})
 
 
 def importar_json(db: Session, data: dict) -> dict[str, int]:
@@ -261,6 +285,7 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
     try:
         # `ajustes_caja` va primero: referencia a `movimientos_efectivo` por su lote.
         for tbl in (
+            "compensacion_imputaciones", "compensaciones",
             "ajustes_caja", "movimientos_caja", "cuotas", "fiados", "deudas_simples",
             "movimientos_efectivo", "prestamos", "cheques", "pasivos",
             "gastos_operativos", "clientes",
@@ -283,6 +308,9 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         bulk(MovimientoCaja,     [_cv(r, date_cols=_DATE_MC) for r in tablas.get("movimientos_caja", [])])
         # Después de movimientos_efectivo: cada ajuste en USD apunta a su lote.
         bulk(AjusteCaja,         [_cv(r, date_cols=_DATE_AJ) for r in tablas.get("ajustes_caja", [])])
+        # Después de clientes y pasivos: la compensación apunta a los dos.
+        bulk(Compensacion,       [_cv(r, date_cols=_DATE_CO) for r in tablas.get("compensaciones", [])])
+        bulk(CompensacionImputacion, [_cv(r) for r in tablas.get("compensacion_imputaciones", [])])
 
         db.commit()
     except Exception:
@@ -293,6 +321,7 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         "clientes", "cheques", "prestamos", "cuotas",
         "movimientos_efectivo", "fiados", "pasivos", "gastos_operativos",
         "deudas_simples", "movimientos_caja", "ajustes_caja",
+        "compensaciones", "compensacion_imputaciones",
     )
     return {t: len(tablas.get(t, [])) for t in tabla_names}
 

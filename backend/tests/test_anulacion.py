@@ -182,6 +182,12 @@ def test_toda_entidad_anulable_declara_sus_referencias_de_caja() -> None:
         "pasivo": ("pasivo",),
         "gasto": ("gasto",),
         "ajuste_caja": ("ajuste_caja",),
+        # Única excepción con tupla vacía, y a propósito: una compensación no
+        # asienta nada en el libro —la plata fue del cliente al acreedor sin
+        # pasar por la caja del negocio—, así que no hay líneas que revertir.
+        # Lo que se deshace son los saldos de los dos lados, y de eso se encarga
+        # `svc_compensaciones.revertir`, al que `anular` delega.
+        "compensacion": (),
     }
     assert {k: v.refs for k, v in _ENTIDADES.items()} == esperado
 
