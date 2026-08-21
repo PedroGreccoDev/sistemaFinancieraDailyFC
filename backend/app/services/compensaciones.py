@@ -172,14 +172,25 @@ def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
 
     # Lado del acreedor: transferirle más de lo que el negocio le debe lo dejaría
     # a él debiéndole al negocio, que es otra operación. `calcular_reduccion_saldo`
-    # valida la cotización y rechaza el exceso.
-    imputado_pasivo = calcular_reduccion_saldo(
-        pasivo.moneda,
-        pasivo.saldo_pendiente,
-        payload.moneda,
-        payload.monto,
-        payload.cotizacion,
-    )
+    # valida la cotización y rechaza el exceso; el mensaje se reescribe porque el
+    # suyo habla de "el pago" y acá el que pagó no fue el negocio.
+    try:
+        imputado_pasivo = calcular_reduccion_saldo(
+            pasivo.moneda,
+            pasivo.saldo_pendiente,
+            payload.moneda,
+            payload.monto,
+            payload.cotizacion,
+        )
+    except ValidationError as exc:
+        if "supera el saldo" not in str(exc):
+            raise
+        raise ValidationError(
+            f"{cliente_nombre} le habría transferido más de lo que le debés a "
+            f"{pasivo.acreedor} ({pasivo.saldo_pendiente} {pasivo.moneda.value} de "
+            f"saldo). Si le transfirió de más, esa diferencia es otra operación: "
+            "cargala aparte."
+        ) from exc
 
     # Lado del cliente: acá sí puede sobrar —paga lo que tiene—, así que se
     # convierte sin topear y el excedente se resuelve aparte.
