@@ -8,6 +8,10 @@ export interface PasivoCreatePayload {
   moneda: Moneda
   fecha_vencimiento: string | null
   observaciones: string | null
+  // Solo cuando le prestaron plata al negocio: además de anotar la deuda, asienta
+  // el ingreso del efectivo que entró al cajón.
+  ingreso_caja?: boolean
+  fecha_ingreso?: string | null
 }
 
 export const getPasivos = (estado?: PasivoEstado): Promise<Pasivo[]> => {
@@ -27,6 +31,8 @@ export interface PasivoUpdatePayload {
   moneda?: Moneda
   fecha_vencimiento?: string | null
   observaciones?: string | null
+  ingreso_caja?: boolean
+  fecha_ingreso?: string | null
 }
 
 export const editarPasivo = (id: string, payload: PasivoUpdatePayload): Promise<Pasivo> =>

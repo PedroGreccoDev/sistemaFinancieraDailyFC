@@ -20,6 +20,12 @@ class PasivoCreate(BaseModel):
     moneda: Moneda
     fecha_vencimiento: date | None = None
     observaciones: str | None = None
+    # ¿Entró la plata al cajón con esta deuda? True solo cuando alguien le PRESTÓ
+    # dinero al negocio: asienta el INGRESO_PASIVO del día. El default es la deuda
+    # comercial de siempre (le debo al proveedor), que no mueve la caja.
+    ingreso_caja: bool = False
+    # Día en que entró esa plata; solo con `ingreso_caja`. Null = el día de alta.
+    fecha_ingreso: date | None = None
 
 
 class PasivoUpdate(BaseModel):
@@ -27,7 +33,9 @@ class PasivoUpdate(BaseModel):
 
     Campos opcionales (`exclude_unset`). `acreedor`, `concepto`, `fecha_vencimiento`
     y `observaciones` se editan siempre. `monto`/`moneda` solo si la deuda está
-    PENDIENTE y sin pagos parciales (saldo == monto); el servicio recalcula el saldo."""
+    PENDIENTE y sin pagos parciales (saldo == monto); el servicio recalcula el saldo.
+    `ingreso_caja`/`fecha_ingreso` corrigen si con la deuda entró plata (y cuándo);
+    el servicio rehace la línea de caja del alta sin tocar los pagos ya hechos."""
 
     acreedor: str | None = Field(default=None, min_length=1, max_length=200)
     concepto: str | None = Field(default=None, min_length=1)
@@ -35,6 +43,8 @@ class PasivoUpdate(BaseModel):
     moneda: Moneda | None = None
     fecha_vencimiento: date | None = None
     observaciones: str | None = None
+    ingreso_caja: bool | None = None
+    fecha_ingreso: date | None = None
 
 
 class PasivoPagoRequest(BaseModel):
@@ -77,6 +87,10 @@ class PasivoRead(BaseModel):
     observaciones: str | None
     # Cotización de la primera cancelación cross-moneda; default para los pagos siguientes.
     cotizacion_pago: Decimal | None
+    # True = con esta deuda entró plata al cajón (se la prestaron al negocio) y el
+    # alta asentó un INGRESO_PASIVO en `fecha_ingreso`.
+    ingreso_caja: bool
+    fecha_ingreso: date | None
     created_at: datetime
     updated_at: datetime
 

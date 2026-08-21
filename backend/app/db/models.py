@@ -93,6 +93,10 @@ class CajaCategoria(str, enum.Enum):
     GASTO                = "GASTO"
     PAGO_PASIVO          = "PAGO_PASIVO"
     VUELTO_PASIVO        = "VUELTO_PASIVO"
+    # Plata que ENTRÓ al tomar una deuda: alguien le prestó al negocio. El pasivo
+    # queda debiéndose igual, pero el efectivo ya está en el cajón (ver
+    # `Pasivo.ingreso_caja`). Es la contracara de PAGO_PASIVO, que lo saca al devolverlo.
+    INGRESO_PASIVO       = "INGRESO_PASIVO"
     OTORGAMIENTO_DEUDA   = "OTORGAMIENTO_DEUDA"
     COBRO_DEUDA          = "COBRO_DEUDA"
     # Efectivo que ya estaba en el cajón al poner el sistema en marcha. No es un
@@ -645,6 +649,12 @@ class Pasivo(AnulableMixin, Base):
     __tablename__ = "pasivos"
     __table_args__ = (
         sa.CheckConstraint("monto > 0", name="ck_pasivos_monto_positive"),
+        # Si entró plata, tiene que constar cuándo: sin fecha no hay día al que
+        # imputar el ingreso ni línea de caja que resincronizar.
+        sa.CheckConstraint(
+            "NOT ingreso_caja OR fecha_ingreso IS NOT NULL",
+            name="ck_pasivos_ingreso_caja_fecha",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -666,6 +676,17 @@ class Pasivo(AnulableMixin, Base):
     # Cotización ($/USD) de la PRIMERA cancelación en moneda distinta a la deuda.
     # Se setea una sola vez y sirve de default editable para los pagos siguientes.
     cotizacion_pago:   Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 4), nullable=True)
+
+    # ¿Con esta deuda entró plata al cajón? True cuando alguien le PRESTÓ dinero al
+    # negocio: el pasivo se anota igual, pero además asienta el INGRESO_PASIVO del
+    # día. False (el default) es la deuda comercial de siempre —le debo al proveedor
+    # por la mercadería—, donde no entró un peso y la caja no se toca.
+    ingreso_caja:      Mapped[bool]           = mapped_column(
+        sa.Boolean(), nullable=False, server_default=sa.false(), default=False
+    )
+    # Día en que entró esa plata (local ART). Solo con `ingreso_caja`; es la fecha
+    # de la línea de caja, guardada acá para poder resincronizarla si se edita.
+    fecha_ingreso:     Mapped[date | None]    = mapped_column(sa.Date(), nullable=True)
 
     # De qué compra salió este pasivo: 'movimiento_efectivo' (dólares comprados a
     # deber) o 'cheque' (cheque comprado a deber). NULL = cargado a mano.

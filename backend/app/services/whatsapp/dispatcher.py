@@ -35,7 +35,7 @@ from app.db.models import (
 )
 from app.schemas.gastos_operativos import GastoOperativoCreate
 from app.services import gastos_operativos as svc_gastos
-from app.schemas.pasivos import PasivoCreate
+from app.schemas.pasivos import PasivoCreate, PasivoUpdate
 from app.services import pasivos as svc_pasivos
 from app.schemas.cheques import ChequeFiarRequest, ChequeCreate, ChequeManualTransition
 from app.schemas.clientes import ClienteCreate
@@ -555,11 +555,19 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
 
 
 def _registrar_deuda(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
+    """Alta de una deuda del negocio desde el chat (§5).
+
+    `ingreso_caja` distingue los dos casos que se dicen parecido: la deuda comercial
+    de siempre —que no mueve la caja— y la plata que le prestaron al negocio, que
+    además entra al cajón. La respuesta dice cuál de los dos se anotó, para que el
+    operador lo corrija en el momento si el bot leyó mal el mensaje."""
     acreedor = _req_str(data, "acreedor")
     concepto = _req_str(data, "concepto")
     monto = _req_decimal(data, "monto")
     moneda = _req_enum(data, "moneda", Moneda) if data.get("moneda") else Moneda.ARS
     fecha_vencimiento = _opt_date(data, "fecha_vencimiento")
+    ingreso_caja = bool(data.get("ingreso_caja"))
+    fecha_ingreso = _opt_date(data, "fecha_ingreso")
 
     payload = PasivoCreate(
         acreedor=acreedor,
@@ -567,18 +575,25 @@ def _registrar_deuda(db: Session, data: dict[str, Any], msg_at: datetime | None 
         monto=monto,
         moneda=moneda,
         fecha_vencimiento=fecha_vencimiento,
+        ingreso_caja=ingreso_caja,
+        fecha_ingreso=fecha_ingreso,
     )
     pasivo = svc_pasivos.create_pasivo(db, payload, created_at=msg_at)
 
     simbolo = "U$D" if moneda == Moneda.USD else "$"
+    titulo = "💰 *Préstamo recibido*" if pasivo.ingreso_caja else "📋 *Deuda registrada*"
     lines = [
-        f"📋 *Deuda registrada*",
+        titulo,
         f"Acreedor: {pasivo.acreedor}",
         f"Concepto: {pasivo.concepto}",
         f"Monto: {simbolo}{_fmt_num(monto)}",
     ]
     if pasivo.fecha_vencimiento:
         lines.append(f"Vencimiento: {_fmt_date(pasivo.fecha_vencimiento)}")
+    if pasivo.ingreso_caja:
+        lines.append(f"Entró a caja el {_fmt_date(pasivo.fecha_ingreso)}")
+    else:
+        lines.append("No mueve la caja (se descuenta cuando la pagues)")
     return True, "\n".join(lines)
 
 
@@ -1609,27 +1624,42 @@ def _editar_pasivo(db: Session, identificador: str, campo: str, nuevo_valor: Any
     if pasivo is None:
         return False, f"❓ No encontré ningún pasivo pendiente para '{identificador}'."
 
-    campos_validos = {"acreedor", "concepto", "monto", "moneda", "fecha_vencimiento"}
+    campos_validos = {
+        "acreedor", "concepto", "monto", "moneda", "fecha_vencimiento", "ingreso_caja",
+    }
     if campo not in campos_validos:
         return False, (
             f"⚠️ Campo inválido: '{campo}'. "
             f"Para pasivos podés corregir: {', '.join(sorted(campos_validos))}."
         )
 
+    # "Esa plata me la prestaron" / "no, no entró plata": corrige si el alta debía
+    # asentar el ingreso. Es el error más caro de esta operación —la caja del día
+    # queda corta o larga por el monto entero— y se arregla desde el mismo chat.
+    if campo == "ingreso_caja":
+        entro = _parse_bool_val(nuevo_valor)
+        acreedor_txt = pasivo.acreedor
+        svc_pasivos.editar_pasivo(db, pasivo.id, PasivoUpdate(ingreso_caja=entro))
+        estado = "Entró a caja" if entro else "No mueve la caja"
+        return True, f"✅ *Pasivo con {acreedor_txt}* — corregido.\n{estado}"
+
+    # Toda corrección pasa por el servicio: es el que recalcula el saldo al cambiar
+    # el monto y el que rehace la línea de caja si esa deuda trajo plata (§5).
+    # Escribir los campos a mano acá dejaba el saldo con el monto viejo.
     if campo in ("acreedor", "concepto"):
         anterior = getattr(pasivo, campo)
-        setattr(pasivo, campo, str(nuevo_valor).strip())
-        db.commit()
-        return True, f"✅ *Pasivo* — {campo} corregido.\n'{anterior}' → '{nuevo_valor}'"
+        nuevo_txt = str(nuevo_valor).strip()
+        svc_pasivos.editar_pasivo(db, pasivo.id, PasivoUpdate(**{campo: nuevo_txt}))
+        return True, f"✅ *Pasivo* — {campo} corregido.\n'{anterior}' → '{nuevo_txt}'"
 
     if campo == "monto":
         nuevo = _parse_decimal_val(nuevo_valor)
         simbolo = "$" if pasivo.moneda == Moneda.ARS else "U$D"
         anterior = f"{simbolo}{_fmt_num(pasivo.monto)}"
-        pasivo.monto = nuevo
-        db.commit()
+        acreedor_txt = pasivo.acreedor
+        svc_pasivos.editar_pasivo(db, pasivo.id, PasivoUpdate(monto=nuevo))
         return True, (
-            f"✅ *Pasivo con {pasivo.acreedor}* — monto corregido.\n"
+            f"✅ *Pasivo con {acreedor_txt}* — monto corregido.\n"
             f"{anterior} → {simbolo}{_fmt_num(nuevo)}"
         )
 
@@ -1639,20 +1669,20 @@ def _editar_pasivo(db: Session, identificador: str, campo: str, nuevo_valor: Any
         except ValueError:
             return False, f"⚠️ Moneda inválida: '{nuevo_valor}'. Válidas: ARS, USD."
         anterior = pasivo.moneda.value
-        pasivo.moneda = nueva_moneda
-        db.commit()
+        acreedor_txt = pasivo.acreedor
+        svc_pasivos.editar_pasivo(db, pasivo.id, PasivoUpdate(moneda=nueva_moneda))
         return True, (
-            f"✅ *Pasivo con {pasivo.acreedor}* — moneda corregida.\n"
+            f"✅ *Pasivo con {acreedor_txt}* — moneda corregida.\n"
             f"{anterior} → {nueva_moneda.value}"
         )
 
     # campo == "fecha_vencimiento"
     nuevo_d = _parse_date_val(nuevo_valor)
     anterior = _fmt_date(pasivo.fecha_vencimiento)
-    pasivo.fecha_vencimiento = nuevo_d
-    db.commit()
+    acreedor_txt = pasivo.acreedor
+    svc_pasivos.editar_pasivo(db, pasivo.id, PasivoUpdate(fecha_vencimiento=nuevo_d))
     return True, (
-        f"✅ *Pasivo con {pasivo.acreedor}* — vencimiento corregido.\n"
+        f"✅ *Pasivo con {acreedor_txt}* — vencimiento corregido.\n"
         f"{anterior} → {_fmt_date(nuevo_d)}"
     )
 
@@ -1980,6 +2010,23 @@ def _parse_decimal_val(val: Any) -> Decimal:
         return Decimal(str(val))
     except InvalidOperation:
         raise ValueError(f"Valor inválido (se esperaba un número): {val!r}")
+
+
+_SI = {"true", "1", "si", "sí", "sip", "dale", "entro", "entró", "yes"}
+_NO = {"false", "0", "no", "nop", "nada", "ninguno"}
+
+
+def _parse_bool_val(val: Any) -> bool:
+    """Sí/no del operador. Rechaza lo que no reconoce en vez de asumir `False`:
+    el default silencioso acá borraría un ingreso de caja que sí existió."""
+    if isinstance(val, bool):
+        return val
+    txt = str(val).strip().lower()
+    if txt in _SI:
+        return True
+    if txt in _NO:
+        return False
+    raise ValueError(f"No entendí si va o no ({val!r}). Contestá 'sí' o 'no'.")
 
 
 def _parse_date_val(val: Any) -> date | None:

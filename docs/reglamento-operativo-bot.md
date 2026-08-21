@@ -150,7 +150,7 @@ en el cajón. En un solo mensaje no te podés olvidar.
 |---|---|
 | "Cargué 10 mil de nafta" | Registra el gasto |
 | "Gasté milqui en YPF y 12 mil en el kiosco" | Registra los dos gastos |
-| "Le debo $50.000 a Fernando por los insumos" | Anota la deuda **del negocio** |
+| "Le debo $50.000 a Fernando por los insumos" | Anota la deuda **del negocio** (no mueve la caja) |
 | "Kiosco me debe 200 lucas de la mercadería" | Anota la deuda **del cliente** y descuenta la plata de la caja |
 
 En las deudas **siempre decí el motivo**. Si no, te lo pregunta.
@@ -161,9 +161,30 @@ En las deudas **siempre decí el motivo**. Si no, te lo pregunta.
 - *"Fernando me debe"* → lo que **te deben a vos**. Descuenta la plata de la caja del día,
   porque esa plata salió.
 - *"Le presté a Fernando en 6 cuotas"* → arma un **préstamo con cuotas**.
+- *"Fernando me prestó 500 lucas"* → **te dieron la plata a vos**: entra a la caja y queda
+  anotada como deuda tuya con Fernando.
 
 Si le diste plata sin pactar cuotas, decilo como *"me debe"*. El bot te contesta cuánto
 salió de caja: si ahí ves un descuento que no esperabas, avisale en el momento.
+
+### Cuando te prestan plata a vos
+
+| Decís | Hace |
+|---|---|
+| "Fernando me prestó 500 lucas para el lote de dólares" | Anota la deuda **y suma los $500.000 a la caja** |
+| "Pedí prestados 300 mil a mi hermano" | Lo mismo |
+| "Le debo $50.000 a Fernando por los insumos" | Solo anota la deuda: **no entra plata** |
+
+La diferencia es si **la plata llegó a tus manos**. Cuando te prestan, el cajón tiene esa
+plata de más y la caja del día tiene que mostrarlo; cuando le quedás debiendo al proveedor
+por la mercadería, no entró un peso.
+
+El bot te contesta cuál de las dos anotó: *"Entró a caja el 21/08/26"* o *"No mueve la
+caja"*. **Si esa línea dice lo contrario de lo que pasó, avisale en el momento** —
+*"esa plata me la prestaron, entró a caja"* o *"no, no entró plata"*— y lo corrige.
+
+Devolver el préstamo es pagar la deuda como cualquier otra: se hace desde el panel y ahí
+sale de la caja.
 
 ### Préstamos y dólares
 
@@ -318,6 +339,7 @@ Hay **dos cajas separadas: pesos y dólares.** Un gasto en dólares no baja la c
 | Te pagan una cuota de préstamo | lo que cobraste |
 | Te pagan un fiado en efectivo | lo que cobraste (aunque sea parcial) |
 | Vendés dólares | los pesos que recibiste |
+| Te prestan plata | lo que te dieron (y queda anotado como deuda tuya) |
 
 ### Lo que hace SALIR plata
 
@@ -332,7 +354,8 @@ Hay **dos cajas separadas: pesos y dólares.** Un gasto en dólares no baja la c
 ### Lo que NO mueve la caja (aunque lo parezca)
 
 - **Anotar una deuda del negocio.** Todavía no pagaste nada. Mueve la caja recién cuando
-  la pagás (y eso se hace desde el panel).
+  la pagás (y eso se hace desde el panel). **La excepción es cuando te prestan plata**: ahí
+  la deuda nace y la plata entra al cajón, así que sí suma a la caja del día.
 - **Fiar un cheque.** No entró plata: entregaste el papel a crédito. Entra cuando el
   cliente te paga.
 - **Recibir un cheque como pago** de un fiado o de una cuota. No entró efectivo, entró un

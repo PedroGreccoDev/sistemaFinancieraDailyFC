@@ -24,6 +24,7 @@ const CATEGORIA_LABEL: Record<string, string> = {
   VENTA_USD: 'Venta de USD',
   OTORGAMIENTO_PRESTAMO: 'Préstamo otorgado',
   GASTO: 'Gasto',
+  INGRESO_PASIVO: 'Préstamo recibido',
   PAGO_PASIVO: 'Pago de deuda',
   VUELTO_PASIVO: 'Vuelto a cliente',
   OTORGAMIENTO_DEUDA: 'Deuda otorgada',

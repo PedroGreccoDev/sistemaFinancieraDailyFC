@@ -70,13 +70,25 @@ def borrar_por_referencia_tipo(db: Session, referencia_tipo: str) -> None:
 
 
 def borrar_por_referencia(
-    db: Session, referencia_tipo: str, referencia_id: uuid.UUID
+    db: Session,
+    referencia_tipo: str,
+    referencia_id: uuid.UUID,
+    categoria: CajaCategoria | None = None,
 ) -> None:
     """Elimina (sin commit) los movimientos de caja de una entidad origen.
 
     Lo usan las ediciones que rehacen el impacto de caja de una operación
-    (ej. corregir el monto de un gasto ya asentado)."""
-    db.query(MovimientoCaja).filter(
+    (ej. corregir el monto de un gasto ya asentado).
+
+    `categoria` acota el barrido a un solo tipo de línea. Hace falta cuando una
+    misma entidad asienta líneas de significados distintos bajo la misma
+    referencia: un pasivo lleva el INGRESO_PASIVO de su alta y un PAGO_PASIVO por
+    cada pago, y rehacer el primero no debe borrar los segundos —esa plata salió
+    de verdad—."""
+    q = db.query(MovimientoCaja).filter(
         MovimientoCaja.referencia_tipo == referencia_tipo,
         MovimientoCaja.referencia_id == referencia_id,
-    ).delete(synchronize_session=False)
+    )
+    if categoria is not None:
+        q = q.filter(MovimientoCaja.categoria == categoria)
+    q.delete(synchronize_session=False)

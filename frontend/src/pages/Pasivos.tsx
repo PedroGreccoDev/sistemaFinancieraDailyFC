@@ -45,6 +45,9 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
   const [moneda, setMoneda] = useState<Moneda>('ARS')
   const [fechaVenc, setFechaVenc] = useState('')
   const [observaciones, setObservaciones] = useState('')
+  // Le prestaron plata al negocio: además de la deuda, el efectivo entró al cajón.
+  const [entroPlata, setEntroPlata] = useState(false)
+  const [fechaIngreso, setFechaIngreso] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
@@ -54,8 +57,18 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
     setError(null)
     setLoading(true)
     try {
-      await createPasivo({ acreedor: acreedor.trim(), concepto: concepto.trim(), monto: parseFloat(monto), moneda, fecha_vencimiento: fechaVenc || null, observaciones: observaciones.trim() || null })
-      toast('success', 'Deuda registrada')
+      await createPasivo({
+        acreedor: acreedor.trim(),
+        concepto: concepto.trim(),
+        monto: parseFloat(monto),
+        moneda,
+        fecha_vencimiento: fechaVenc || null,
+        observaciones: observaciones.trim() || null,
+        // Sin la marca no viaja el campo: el backend lo lee como deuda que no
+        // movió la caja, que es el caso normal.
+        ...(entroPlata ? { ingreso_caja: true, fecha_ingreso: fechaIngreso || null } : {}),
+      })
+      toast('success', entroPlata ? 'Deuda registrada y plata ingresada a caja' : 'Deuda registrada')
       onSuccess()
     } catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
@@ -66,7 +79,7 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
       <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Nueva deuda</h2>
-          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Registrar una deuda del negocio</p>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{entroPlata ? 'Anota la deuda y suma la plata que entró a la caja' : 'Registrar una deuda del negocio (no mueve la caja)'}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
           <div><label style={LABEL_STYLE}>A quién le debo</label><input type="text" value={acreedor} onChange={(e) => setAcreedor(e.target.value)} required style={INPUT_STYLE} /></div>
@@ -75,6 +88,17 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
             <div><label style={LABEL_STYLE}>Monto</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required style={INPUT_STYLE} /></div>
             <div><label style={LABEL_STYLE}>Moneda</label><select value={moneda} onChange={(e) => setMoneda(e.target.value as Moneda)} style={{ ...INPUT_STYLE, cursor: 'pointer' }}><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
           </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', fontFamily: FM, fontSize: '0.76rem', color: 'var(--text-2)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={entroPlata} onChange={(e) => { setEntroPlata(e.target.checked); if (!e.target.checked) setFechaIngreso('') }} style={{ cursor: 'pointer' }} />
+            Me prestaron la plata (entró a la caja)
+          </label>
+          {entroPlata && (
+            <div>
+              <label style={LABEL_STYLE}>Día que entró <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(vacío = hoy)</span></label>
+              <input type="date" value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} style={INPUT_STYLE} />
+              <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.3rem' }}>Suma {monto ? fmtMoneda(monto, moneda) : 'el monto'} a la caja {moneda} de ese día. Marcala solo si el efectivo entró de verdad.</p>
+            </div>
+          )}
           <div><label style={LABEL_STYLE}>Vencimiento <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><input type="date" value={fechaVenc} onChange={(e) => setFechaVenc(e.target.value)} style={INPUT_STYLE} /></div>
           <div><label style={LABEL_STYLE}>Observaciones <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
@@ -97,6 +121,8 @@ function ModalEditarDeuda({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onCl
   const [moneda, setMoneda] = useState<Moneda>(pasivo.moneda)
   const [fechaVenc, setFechaVenc] = useState(pasivo.fecha_vencimiento ?? '')
   const [observaciones, setObservaciones] = useState(pasivo.observaciones ?? '')
+  const [entroPlata, setEntroPlata] = useState(pasivo.ingreso_caja)
+  const [fechaIngreso, setFechaIngreso] = useState(pasivo.fecha_ingreso ?? '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
@@ -117,6 +143,10 @@ function ModalEditarDeuda({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onCl
         fecha_vencimiento: fechaVenc || null,
         observaciones: observaciones.trim() || null,
         ...(dineroBloqueado ? {} : { monto: parseFloat(monto), moneda }),
+        // La línea de caja del alta se rehace sola en el backend; los pagos ya
+        // hechos no se tocan, así que esto se puede corregir aunque haya pagos.
+        ingreso_caja: entroPlata,
+        ...(entroPlata ? { fecha_ingreso: fechaIngreso || null } : {}),
       })
       toast('success', 'Deuda actualizada')
       onSuccess()
@@ -139,6 +169,23 @@ function ModalEditarDeuda({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onCl
             <div><label style={LABEL_STYLE}>Moneda</label><select value={moneda} onChange={(e) => setMoneda(e.target.value as Moneda)} disabled={dineroBloqueado} style={{ ...INPUT_STYLE, cursor: dineroBloqueado ? 'not-allowed' : 'pointer', opacity: dineroBloqueado ? 0.5 : 1 }}><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
           </div>
           {dineroBloqueado && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(251,191,36,0.85)', marginTop: '-0.4rem' }}>Monto y moneda no se pueden cambiar: la deuda está cancelada o ya tiene pagos.</p>}
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', fontFamily: FM, fontSize: '0.76rem', color: 'var(--text-2)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={entroPlata} onChange={(e) => { setEntroPlata(e.target.checked); if (!e.target.checked) setFechaIngreso('') }} style={{ cursor: 'pointer' }} />
+            Me prestaron la plata (entró a la caja)
+          </label>
+          {entroPlata && (
+            <div>
+              <label style={LABEL_STYLE}>Día que entró <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(vacío = el día del alta)</span></label>
+              <input type="date" value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} style={INPUT_STYLE} />
+            </div>
+          )}
+          {entroPlata !== pasivo.ingreso_caja && (
+            <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(251,191,36,0.85)', marginTop: '-0.4rem' }}>
+              {entroPlata
+                ? `Al guardar, ${fmtMoneda(pasivo.monto, pasivo.moneda)} se suman a la caja ${pasivo.moneda}.`
+                : `Al guardar, se quita de la caja el ingreso de ${fmtMoneda(pasivo.monto, pasivo.moneda)}.`}
+            </p>
+          )}
           <div><label style={LABEL_STYLE}>Vencimiento <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><input type="date" value={fechaVenc} onChange={(e) => setFechaVenc(e.target.value)} style={INPUT_STYLE} /></div>
           <div><label style={LABEL_STYLE}>Observaciones <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
@@ -489,6 +536,7 @@ export default function Pasivos() {
                   <span style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)' }}>
                     Original {fmtMoneda(pasivo.monto, pasivo.moneda)}
                     {pasivo.fecha_vencimiento && ` · vence ${fmtDate(pasivo.fecha_vencimiento)}`}
+                    {pasivo.ingreso_caja && pasivo.fecha_ingreso && ` · entró a caja ${fmtDate(pasivo.fecha_ingreso)}`}
                   </span>
                   <span style={{ fontFamily: FM, fontSize: '0.9rem', fontWeight: 700, color: '#f87171', whiteSpace: 'nowrap' }}>{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</span>
                 </div>
@@ -526,7 +574,12 @@ export default function Pasivos() {
                     onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                     onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                     <td style={{ ...TD, fontWeight: 600 }}>{pasivo.acreedor}</td>
-                    <td style={{ ...TD, color: 'rgba(148,163,184,0.7)', maxWidth: '220px', whiteSpace: 'normal', wordBreak: 'break-word' }}>{pasivo.concepto}</td>
+                    <td style={{ ...TD, color: 'rgba(148,163,184,0.7)', maxWidth: '220px', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                      {pasivo.concepto}
+                      {pasivo.ingreso_caja && (
+                        <span title={`La plata entró a la caja el ${fmtDate(pasivo.fecha_ingreso ?? '')}`} style={{ fontFamily: FM, fontSize: '0.66rem', color: 'rgba(52,211,153,0.85)', marginLeft: '0.4rem', whiteSpace: 'nowrap' }}>· entró a caja</span>
+                      )}
+                    </td>
                     <td style={{ ...TD, textAlign: 'right', color: 'rgba(100,116,139,0.6)' }}>{fmtMoneda(pasivo.monto, pasivo.moneda)}</td>
                     <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#f87171' }}>{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</td>
                     <td style={{ ...TD, color: 'rgba(100,116,139,0.6)', fontSize: '0.72rem', whiteSpace: 'nowrap' }}>{pasivo.fecha_vencimiento ? fmtDate(pasivo.fecha_vencimiento) : '—'}</td>

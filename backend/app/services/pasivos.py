@@ -20,7 +20,7 @@ from app.db.models import (
     Pasivo,
     PasivoEstado,
 )
-from app.core.fechas import hoy_local
+from app.core.fechas import fecha_local, hoy_local
 from app.services import caja as svc_caja
 from app.services.conversion import calcular_reduccion_saldo
 from app.schemas.pasivos import (
@@ -42,12 +42,33 @@ __all__ = ["calcular_reduccion_saldo"]
 
 _CERO = Decimal("0.00")
 
+# Campos que forman parte de la línea `INGRESO_PASIVO` del alta: si la edición toca
+# alguno, esa línea se rehace (monto, moneda y fecha son la línea misma; acreedor y
+# concepto, su detalle).
+_CAMPOS_INGRESO = frozenset(
+    {"ingreso_caja", "fecha_ingreso", "monto", "moneda", "acreedor", "concepto"}
+)
+
 
 def create_pasivo(
     db: Session,
     payload: PasivoCreate,
     created_at: datetime | None = None,
 ) -> Pasivo:
+    """Anota una deuda del negocio.
+
+    Por defecto **no mueve la caja**: la deuda típica es comercial —le debo al
+    proveedor por la mercadería— y ahí no entró un peso, solo quedó la obligación.
+    La caja se toca recién al pagarla (`PAGO_PASIVO`).
+
+    Con `ingreso_caja` es el otro caso: **alguien le prestó plata al negocio**. La
+    deuda nace igual, pero además el efectivo entró al cajón, así que el alta
+    asienta el INGRESO `INGRESO_PASIVO` de `fecha_ingreso`. Sin eso el reporte del
+    día quedaría corto contra la plata real."""
+    fecha_ingreso = payload.fecha_ingreso
+    if payload.ingreso_caja and fecha_ingreso is None:
+        fecha_ingreso = fecha_local(created_at)
+
     pasivo = Pasivo(
         acreedor=payload.acreedor.strip(),
         concepto=payload.concepto.strip(),
@@ -57,13 +78,50 @@ def create_pasivo(
         estado=PasivoEstado.PENDIENTE,
         fecha_vencimiento=payload.fecha_vencimiento,
         observaciones=payload.observaciones,
+        ingreso_caja=payload.ingreso_caja,
+        # Se guarda solo si entró plata: una fecha suelta sin ingreso confunde.
+        fecha_ingreso=fecha_ingreso if payload.ingreso_caja else None,
     )
     if created_at is not None:
         pasivo.created_at = created_at
     db.add(pasivo)
+    # El ingreso necesita el id del pasivo para referenciarlo, y sin flush todavía
+    # no lo tiene. El commit de abajo persiste deuda y línea de caja juntas.
+    db.flush()
+    _registrar_ingreso(db, pasivo)
     db.commit()
     db.refresh(pasivo)
     return pasivo
+
+
+def _registrar_ingreso(db: Session, pasivo: Pasivo) -> None:
+    """Asienta (sin commit) el ingreso de la plata que se tomó prestada.
+
+    No hace nada si la deuda no trajo plata, que es el caso normal."""
+    if not pasivo.ingreso_caja:
+        return
+    svc_caja.registrar(
+        db,
+        fecha=pasivo.fecha_ingreso or hoy_local(),
+        moneda=pasivo.moneda,
+        tipo=CajaTipo.INGRESO,
+        categoria=CajaCategoria.INGRESO_PASIVO,
+        monto=pasivo.monto,
+        referencia_tipo="pasivo",
+        referencia_id=pasivo.id,
+        detalle=f"Préstamo recibido de {pasivo.acreedor} — {pasivo.concepto}",
+    )
+
+
+def _resync_caja_ingreso(db: Session, pasivo: Pasivo) -> None:
+    """Rehace la línea de caja del alta tras editar la deuda (sin commit).
+
+    Barre **solo** la línea `INGRESO_PASIVO`: los `PAGO_PASIVO` de la misma
+    referencia son plata que salió de verdad y no se tocan."""
+    svc_caja.borrar_por_referencia(
+        db, "pasivo", pasivo.id, categoria=CajaCategoria.INGRESO_PASIVO
+    )
+    _registrar_ingreso(db, pasivo)
 
 
 def get_pasivo(db: Session, pasivo_id: uuid.UUID) -> Pasivo:
@@ -168,7 +226,11 @@ def editar_pasivo(
     `acreedor`, `concepto`, `fecha_vencimiento` y `observaciones` se editan siempre.
     `monto`/`moneda` solo si la deuda está PENDIENTE y sin pagos parciales (cambiarlos
     con pagos hechos desincronizaría la caja); al editar el monto se recalcula el saldo.
-    El alta de un pasivo no genera línea de caja, así que no hay nada que resincronizar."""
+
+    `ingreso_caja`/`fecha_ingreso` corrigen si con la deuda entró plata y qué día:
+    sirve tanto para marcar un préstamo que se cargó como deuda común (el ingreso
+    aparece) como para desmarcarlo (el ingreso desaparece). Como el monto, la moneda
+    y el acreedor son parte de esa línea, cualquiera de ellos la manda a rehacer."""
     pasivo = db.scalar(select(Pasivo).where(Pasivo.id == pasivo_id).with_for_update())
     if pasivo is None:
         raise NotFoundError(f"Pasivo {pasivo_id} no encontrado.")
@@ -196,6 +258,20 @@ def editar_pasivo(
         # Sin pagos parciales (garantizado arriba): el saldo sigue al monto.
         pasivo.monto = data["monto"]
         pasivo.saldo_pendiente = data["monto"]
+    if "fecha_ingreso" in data:
+        pasivo.fecha_ingreso = data["fecha_ingreso"]
+    if "ingreso_caja" in data:
+        pasivo.ingreso_caja = data["ingreso_caja"]
+        if not pasivo.ingreso_caja:
+            pasivo.fecha_ingreso = None
+    # Marcar que entró plata sin decir qué día: se imputa al día del alta, que es
+    # cuando se cargó la deuda. Mejor eso que dejar la línea sin fecha.
+    if pasivo.ingreso_caja and pasivo.fecha_ingreso is None:
+        pasivo.fecha_ingreso = fecha_local(pasivo.created_at)
+
+    # Cualquiera de estos campos forma parte de la línea de caja del alta.
+    if not _CAMPOS_INGRESO.isdisjoint(data):
+        _resync_caja_ingreso(db, pasivo)
 
     db.commit()
     db.refresh(pasivo)

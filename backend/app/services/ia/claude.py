@@ -259,6 +259,30 @@ OPERACIONES DISPONIBLES
      - monto: number
      - moneda: "ARS" o "USD" (default ARS)
      - fecha_vencimiento: "YYYY-MM-DD" o null (si se menciona una fecha límite)
+     - ingreso_caja: true SOLO si con esa deuda ENTRÓ plata al negocio (se la prestaron);
+       false (default) si es una deuda que no trajo efectivo
+     - fecha_ingreso: "YYYY-MM-DD" o null (null = el día del mensaje; solo con ingreso_caja)
+
+   ⚠️ DOS DEUDAS DEL NEGOCIO QUE MUEVEN LA CAJA DISTINTO:
+     a) LE PRESTARON PLATA → ingreso_caja: true. Entró efectivo al cajón Y quedó la deuda.
+        "Fernando me prestó 500 lucas", "me pasó 200 mil y se los tengo que devolver",
+        "pedí prestados 300 mil a mi hermano", "me hizo una transferencia y le quedé debiendo"
+     b) DEUDA SIN PLATA DE POR MEDIO → ingreso_caja: false. Solo quedó la obligación.
+        "le debo 50 mil a Fernando por los insumos", "quedé debiendo el alquiler",
+        "le compré mercadería y no se la pagué"
+   La diferencia es si LA PLATA LLEGÓ A TUS MANOS. En (a) el cajón tiene 500 lucas más
+   que antes; en (b) no entró un peso. Marcar (b) como (a) inventa un ingreso que nunca
+   ocurrió; dejar (a) sin marcar deja la caja del día corta contra el efectivo real.
+   Si el mensaje no deja claro si entró la plata → ingreso_caja: false (el caso normal),
+   NO preguntes: la respuesta del bot dice si entró a caja y el operador lo corrige ahí.
+
+   ⚠️ "ME PRESTÓ" vs "LE PRESTÉ" — se dicen igual y son opuestos:
+     "Fernando me prestó 500 lucas"  → REGISTRAR_DEUDA con ingreso_caja: true (ENTRA plata,
+                                        el negocio DEBE)
+     "Le presté 500 lucas a Fernando" → el negocio DA la plata (SALE): NUEVO_PRESTAMO si
+                                        hay cuotas, REGISTRAR_DEUDA_CLIENTE si no
+   Confundirlas se equivoca en las dos cosas a la vez: el sentido de la caja y quién le
+   debe a quién. Si no distinguís quién le dio la plata a quién → ACLARACION_REQUERIDA.
 
 10b. REGISTRAR_DEUDA_CLIENTE  ←— dirección: EL CLIENTE ME DEBE
    Cuándo: El operador le entregó plata a un cliente y ese cliente se la debe,
@@ -280,7 +304,8 @@ OPERACIONES DISPONIBLES
      "le presté a X en 6 cuotas de $Y"             → NUEVO_PRESTAMO (deuda CON cuadro de cuotas)
    Equivocarse anota la plata al revés, y el error NO es simétrico ni visible: una deuda
    de cliente DESCUENTA la caja del día (salió la plata), mientras que registrar un pasivo
-   no la mueve. Si la dirección no está clara en el mensaje → ACLARACION_REQUERIDA.
+   no la mueve —salvo que le hayan prestado plata al negocio, donde SUMA (ver 10)—. Si la
+   dirección no está clara en el mensaje → ACLARACION_REQUERIDA.
    SIN CUOTAS NO ES PRÉSTAMO: si dice "le presté" pero no menciona cuotas ni total a
    cobrar, preguntá si va con cuotas en vez de elegir por tu cuenta.
    OJO CON "FIAR": en este negocio fiar es entregar un CHEQUE a crédito (FIAR_CHEQUE).
@@ -382,6 +407,9 @@ OPERACIONES DISPONIBLES
             si se equivocó, cargá una operación nueva que lo compense.
           * GASTO: "concepto" | "monto" | "moneda"
           * PASIVO: "acreedor" | "concepto" | "monto" | "moneda" | "fecha_vencimiento"
+                    | "ingreso_caja" (nuevo_valor "si"/"no": si con esa deuda entró
+                      plata al cajón. "esa plata me la prestaron, entró a caja" → "si";
+                      "no, no entró plata" → "no")
       - nuevo_valor: string | number (el valor correcto)
     Reglas:
       - Los cheques se pueden editar en cualquier estado (es una corrección de datos, no un cambio de estado).

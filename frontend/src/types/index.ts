@@ -176,6 +176,10 @@ export interface Pasivo {
   fecha_cancelacion: string | null
   observaciones: string | null
   cotizacion_pago: string | null
+  /** True = con esta deuda entró plata al cajón (se la prestaron al negocio). */
+  ingreso_caja: boolean
+  /** Día en que entró esa plata; solo con `ingreso_caja`. */
+  fecha_ingreso: string | null
   created_at: string
   updated_at: string
 }

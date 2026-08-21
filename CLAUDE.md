@@ -39,7 +39,8 @@ de modo que el asiento de caja y la operación de negocio son **atómicos** (o a
   el signo lo da el `tipo`.
 - `categoria` — el origen del movimiento: `COBRO_CUOTA`, `COBRO_FIADO`, `VENTA_CHEQUE`,
   `COBRO_CHEQUE`, `COMPRA_CHEQUE`, `COMPRA_USD`, `VENTA_USD`, `OTORGAMIENTO_PRESTAMO`, `GASTO`,
-  `PAGO_PASIVO`, `VUELTO_PASIVO`, `OTORGAMIENTO_DEUDA`, `COBRO_DEUDA`, `AJUSTE_CAJA`.
+  `PAGO_PASIVO`, `VUELTO_PASIVO`, `INGRESO_PASIVO`, `OTORGAMIENTO_DEUDA`, `COBRO_DEUDA`,
+  `AJUSTE_CAJA`.
 - `referencia_tipo` / `referencia_id` — enlace flojo a la entidad que lo originó
   (cheque/préstamo/cuota/fiado/pasivo/gasto/movimiento/deuda_simple/deuda_simple_cobro).
   `COBRO_CUOTA` referencia la `cuota`
@@ -55,6 +56,14 @@ asentada, **borra los renglones de esa entidad** (`caja.borrar_por_referencia(re
 referencia_id)`) y los vuelve a registrar con los valores corregidos. Eso es exactamente lo que
 hacen los `resync_caja_*` / `_resync_caja_*` que aparecen en cada módulo: mantener el cuaderno
 en sync con la operación de negocio.
+
+**Cuando una entidad asienta líneas de significados distintos, el barrido se acota por
+categoría** (`borrar_por_referencia(..., categoria=...)`). Un pasivo lleva el
+`INGRESO_PASIVO` de su alta y un `PAGO_PASIVO` por cada pago, todos con
+`referencia_tipo='pasivo'`: rehacer el primero sin acotar borraría los pagos, que son plata
+que salió de verdad. La alternativa —un `referencia_tipo` distinto por línea, como hace
+`deuda_simple`/`deuda_simple_cobro`— no sirve acá: el motor de anulación necesita encontrar
+**todas** las líneas del pasivo por una sola referencia.
 
 ---
 
@@ -617,6 +626,37 @@ que marcan `COBRADA` fijan `monto_pagado = monto`.
 - **Tres orígenes:** carga a mano (panel o bot), **una compra que quedó a deber**
   —dólares o cheques, §Comprar sin abonar, con `origen_tipo`/`origen_id`— o el
   **excedente a favor de un cliente** (vuelto de cheque, §2.b, y compensación).
+
+**La deuda con plata en mano — `ingreso_caja`** _(régimen definido 2026-08-21)_.
+Anotar una deuda **no mueve la caja**, y con razón: la deuda típica es comercial
+—le debo al proveedor por la mercadería— y ahí no entró un peso, solo quedó la
+obligación. Pero **cuando alguien le presta plata al negocio** la deuda nace *y
+además* el efectivo entra al cajón, y eso antes no se podía anotar: el reporte del
+día quedaba corto contra la plata real y solo se cuadraba con un ajuste a mano.
+
+- `ingreso_caja` (migración `0023`) marca ese caso en el alta y asienta un INGRESO
+  `INGRESO_PASIVO` con la fecha en que entró la plata (`fecha_ingreso`, ARS o USD
+  según la deuda). El resto del ciclo no cambia: el pago sigue siendo su
+  `PAGO_PASIVO`, y devolver el préstamo saca la plata como cualquier otra deuda.
+- **Cuenta como ingreso del período**, con el mismo criterio que un aporte del dueño
+  (§Ajustes de caja): el neto del reporte es el flujo real de caja y esa plata
+  entró de verdad. No es un P&L —el negocio no ganó nada tomando prestado—, pero el
+  reporte nunca fue eso (§7).
+- **El default es `false`, y es a propósito.** Marcar de más mete en la caja un
+  ingreso que nunca ocurrió; el prompt del bot manda al caso normal ante la duda en
+  vez de preguntar, porque la respuesta dice para qué lado fue la caja y el
+  operador lo corrige en el acto.
+- **Editar rehace la línea sin tocar los pagos.** `_resync_caja_ingreso` barre
+  **solo** la categoría `INGRESO_PASIVO` de ese pasivo (ver §El libro de caja);
+  monto, moneda y fecha *son* esa línea, y acreedor y concepto su detalle, así que
+  cualquiera de los seis la manda a rehacer. Se puede marcar y desmarcar aunque la
+  deuda ya tenga pagos: son líneas independientes.
+- **Anular arrastra las dos líneas** sin cambios en el motor: ya barría todas las
+  del `referencia_tipo='pasivo'`.
+- **Panel:** casilla "Me prestaron la plata (entró a la caja)" en el alta y en la
+  edición de Deudas, con el día en que entró (vacío = hoy) y el aviso de cuánto se
+  suma o se quita al guardar. **Bot:** `REGISTRAR_DEUDA` con `ingreso_caja`, y se
+  corrige por chat con `EDITAR_OPERACION` campo `ingreso_caja` ("sí"/"no").
 - **Se puede saldar compensándolo** contra lo que un cliente le debe al negocio,
   sin que la caja se mueva (§Compensación).
 - **Alta** via bot de WhatsApp (intent `REGISTRAR_DEUDA`) o desde el panel web (botón "Nueva deuda").
@@ -639,7 +679,8 @@ que marcan `COBRADA` fijan `monto_pagado = monto`.
   lados del negocio— resuelve `SALDAR_EFECTIVO` (egreso `VUELTO_PASIVO` en ARS)
   o `QUEDA_DEBIENDO` (crea el pasivo a favor, sin movimiento de caja).
 - Campos: `acreedor`, `concepto`, `monto`, `moneda`, `fecha_vencimiento` (opcional).
-- **Editar carga:** `PATCH /pasivos/{id}` (`svc_pasivos.editar_pasivo`). `acreedor`/`concepto`/`fecha_vencimiento`/`observaciones` siempre; `monto`/`moneda` solo si está `PENDIENTE` y sin pagos parciales (`saldo == monto`), y al cambiar el monto se recalcula el saldo. El alta no genera línea de caja, así que no hay nada que resincronizar. En el panel, botón "Editar" por fila en Deudas.
+- **Editar carga:** `PATCH /pasivos/{id}` (`svc_pasivos.editar_pasivo`). `acreedor`/`concepto`/`fecha_vencimiento`/`observaciones` siempre; `monto`/`moneda` solo si está `PENDIENTE` y sin pagos parciales (`saldo == monto`), y al cambiar el monto se recalcula el saldo. Si la deuda trajo plata (`ingreso_caja`), la edición rehace esa línea de caja. En el panel, botón "Editar" por fila en Deudas.
+  - **La corrección del bot va por el servicio, no escribiendo los campos a mano.** Hasta 2026-08-21 `_editar_pasivo` del dispatcher seteaba `monto` directo sobre el modelo: el `saldo_pendiente` se quedaba con el valor viejo y la deuda mostraba un número y debía otro.
 - El cierre de caja incluye un snapshot de pasivos pendientes por moneda, **sin filtro de periodo**.
 - No existe facturación ni concepto fiscal asociado.
 
@@ -664,7 +705,8 @@ cliente, operación, fecha).
 
 - **Ingresos (entra plata):** cuotas de préstamo cobradas (al cobrar, incluidos cobros parciales),
   cobros de fiado en efectivo (incluidos parciales), cobros de deudas simples (§2.b, incluidos
-  parciales), ventas de cheques, ventas de USD (pesos recibidos) y su ganancia FIFO.
+  parciales), ventas de cheques, ventas de USD (pesos recibidos) y su ganancia FIFO, y la plata
+  que le prestan al negocio (§5, `INGRESO_PASIVO`).
 - **Egresos (sale plata):** gastos diarios, compra de cheques, compra de USD (pesos que salen),
   compra de cualquier activo, otorgamiento de préstamos (crédito entregado) y otorgamiento de
   deudas simples (§2.b).
@@ -916,7 +958,7 @@ avisa **por Telegram** diciendo **qué** se rompió.
   no "cerrado por defecto"; el chequeo `configuracion` de §Monitoreo lo marca DEGRADADO.
 - Flujo: mensaje → parser → (audio: Whisper) → Claude → dispatcher → BD → respuesta WA.
 - La sesión de Claude **se limpia tras cada transacción exitosa** (Regla de Limpieza).
-- Los **pasivos** se pueden registrar desde el bot via `REGISTRAR_DEUDA`; la cancelación es solo desde el panel web.
+- Los **pasivos** se pueden registrar desde el bot via `REGISTRAR_DEUDA` —incluida la plata que le prestan al negocio, con `ingreso_caja` (§5)—; la cancelación es solo desde el panel web.
 - Los **gastos operativos** sí son registrables desde el bot via intent `REGISTRAR_GASTO` (editables por concepto/hora/monto desde el chat).
 - Los **fiados** son operables desde el bot: `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
 - **El cobro por defecto es el consolidado (`COBRAR_DEUDA_CLIENTE`, §2.c), no el puntual.**
@@ -948,7 +990,9 @@ avisa **por Telegram** diciendo **qué** se rompió.
     por una operación que nunca ocurrió y nadie lo nota hasta leer el reporte. Por eso el
     prompt contrasta las tres en un mismo bloque, la respuesta del bot dice **cuánto salió
     de caja** (control inmediato del operador) y `test_bot_deuda_cliente.py` custodia la
-    separación. Dos trampas del vocabulario que resuelve el prompt: **sin cuotas no es
+    separación. **Cuarta frase, agregada 2026-08-21: "me prestó plata"** → `REGISTRAR_DEUDA`
+    con `ingreso_caja: true` (§5), la única deuda del negocio que hace **entrar** plata. Se
+    dice casi igual que "le presté a X", que la hace salir. Dos trampas del vocabulario que resuelve el prompt: **sin cuotas no es
     préstamo** (pregunta en vez de inventar un cuadro de cuotas) y **"fiar" acá es entregar
     un cheque** (`FIAR_CHEQUE`), así que "le fié plata" es una deuda de cliente.
   - **"Me pagó" vs. "le pagué a" vs. "le transfirió a"** _(régimen definido
@@ -1049,6 +1093,10 @@ avisa **por Telegram** diciendo **qué** se rompió.
     `configuracion` (la severidad de cada env var faltante), que un `DEGRADADO` no
     interrumpa a nadie sin dejar de mirar la caída que venga después, y que el aviso de
     "volvió" salga **aunque el sistema siga degradado**.
+  - **`test_pasivo_ingreso_caja.py`** — la deuda que **sí** hace entrar plata (§5): que la
+    deuda común siga sin mover la caja, que el préstamo recibido asiente su INGRESO en la
+    moneda y el día correctos, que el resync acote por categoría —para no borrar los pagos
+    del mismo pasivo— y que el prompt separe "me prestó" de "le presté".
   - **`test_bot_deuda_cliente.py`** — la **dirección** de la deuda en el bot (§Bot): que el
     prompt siga contrastando "le debo a X" / "X me debe" / "le presté en N cuotas", que
     diga por qué importa (una descuenta la caja y la otra no) y que los dos handlers no se
@@ -1072,8 +1120,9 @@ avisa **por Telegram** diciendo **qué** se rompió.
   `create_type=False` para que SQLAlchemy no intente recrearlos (ver también §Reglas de código).
 - Aplicar con `alembic upgrade head`.
 - Últimas: `0021` (compras a deber — `monto_abonado` en cheques y divisas,
-  `origen_tipo`/`origen_id` en pasivos) y `0022` (`compensaciones` +
-  `compensacion_imputaciones`).
+  `origen_tipo`/`origen_id` en pasivos), `0022` (`compensaciones` +
+  `compensacion_imputaciones`) y `0023` (`ingreso_caja`/`fecha_ingreso` en pasivos, para
+  la deuda que sí hace entrar plata).
 
 ---
 

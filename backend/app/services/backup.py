@@ -85,6 +85,10 @@ _PA = [
     # De qué compra salió el pasivo (§Comprar sin abonar). Sin el vínculo, anular
     # esa compra deja de encontrar su deuda y queda viva plata que ya no se debe.
     "origen_tipo", "origen_id",
+    # Si con la deuda entró plata al cajón y qué día (§5). Sin esto, un ciclo
+    # export→import convierte un préstamo recibido en deuda común y le borra el
+    # ingreso al reconstruir la caja.
+    "ingreso_caja", "fecha_ingreso",
     "estado", "fecha_vencimiento", "fecha_cancelacion", "observaciones",
     "created_at", "updated_at", *_ANUL,
 ]
