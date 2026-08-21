@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # manda el parámetro, para poder probar un modelo que no lo soporte.
     openai_effort_ocr: str = Field(default="medium")
     openai_effort_texto: str = Field(default="low")
+    # El clasificador de confirmaciones: "minimal" porque decidir si "dale" es
+    # un sí no necesita pensarse, y lo que se razone sale del mismo tope que la
+    # respuesta (ver `_TOPE_CONFIRMACION` en services/ia/openai_engine.py).
+    openai_effort_confirmacion: str = Field(default="minimal")
 
     # WAHA (WhatsApp HTTP API — gateway no oficial, engine NOWEB)
     waha_api_url: str = Field(default="http://localhost:3000")

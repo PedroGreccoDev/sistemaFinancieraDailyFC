@@ -45,6 +45,12 @@ from app.services.ia.contrato import (
 
 logger = logging.getLogger(__name__)
 
+# Tope del clasificador de confirmaciones. Cubre razonamiento + respuesta: el
+# veredicto es una palabra, pero lo que se paga acá es el margen para que el
+# modelo llegue a escribirla. Un cap ajustado al veredicto vuelve vacío y eso
+# le cancela la operación al operador (ver `clasificar_confirmacion`).
+_TOPE_CONFIRMACION = 512
+
 # Cliente singleton — se inicializa una sola vez para reutilizar el connection pool
 _openai_client: AsyncOpenAI | None = None
 
@@ -203,6 +209,16 @@ async def clasificar_confirmacion(text: str) -> str:
     Fallback para cuando la lista rápida local no reconoce el modismo. Va con el
     modelo más barato: decidir si "dale" es un sí es una tarea trivial.
 
+    **El tope tiene que darle lugar al razonamiento, no al veredicto.** La
+    respuesta es una palabra, pero `max_completion_tokens` cubre razonamiento +
+    respuesta juntos: un modelo que razona se come un cap chico pensando y
+    devuelve `content` vacío, sin error. Acá eso no es una falla visible — sale
+    por `unclear`, y `unclear` le **cancela la operación** al operador
+    (`webhook.py`). Con el cap en 16 el clasificador contestaba "no entendí" a
+    todo lo que no estuviera en la lista rápida, y cada confirmación con
+    palabras propias ("confirmá esos 3") mandaba a redictar la operación
+    entera.
+
     Returns:
         'confirm', 'reject' o 'unclear' (este último también ante cualquier error).
     """
@@ -213,15 +229,33 @@ async def clasificar_confirmacion(text: str) -> str:
     _, _, modelo = _modelos()
     try:
         client = _get_client()
-        response = await client.chat.completions.create(
-            model=modelo,
-            max_completion_tokens=16,
-            messages=[
+        kwargs: dict[str, Any] = {
+            "model": modelo,
+            "max_completion_tokens": _TOPE_CONFIRMACION,
+            "messages": [
                 {"role": "system", "content": _CONFIRM_CLASSIFIER_PROMPT},
                 {"role": "user", "content": text},
             ],
-        )
+        }
+        # Vacío = no mandar el parámetro, igual que en la extracción: un modelo
+        # sin razonamiento rechaza `reasoning_effort`.
+        effort = get_settings().openai_effort_confirmacion
+        if effort:
+            kwargs["reasoning_effort"] = effort
+
+        response = await client.chat.completions.create(**kwargs)
+
         veredicto = _texto_de(response).lower()
+        if not veredicto:
+            # Sin este log la falla es invisible: el operador ve "no entendí tu
+            # respuesta, la operación fue cancelada" y en los logs no queda
+            # nada que lo explique.
+            logger.warning(
+                "El clasificador (%s) no devolvió veredicto — se cancela la operación pendiente. Uso: %s",
+                modelo,
+                getattr(response, "usage", None),
+            )
+            return "unclear"
         if "confirm" in veredicto:
             return "confirm"
         if "reject" in veredicto:
@@ -274,6 +308,20 @@ async def extraer_intencion(
     # realmente no dijo es la respuesta correcta, no una falla del modelo.
     if resultado is not None and resultado.intent != "DESCONOCIDO":
         return resultado
+
+    # Escalar al mismo modelo con el mismo esfuerzo es pagar otra espera para
+    # volver a preguntarle lo mismo a quien ya se rindió, con el operador
+    # mirando el "escribiendo...". No es hipotético: `OPENAI_MODEL_TEXTO` sin
+    # definir cae en el mismo default que el de OCR, y ahí la escalada duplica
+    # la latencia de todos los DESCONOCIDO sin una sola chance de acertar.
+    if modelo_ocr == modelo_texto and settings.openai_effort_ocr == settings.openai_effort_texto:
+        logger.warning(
+            "No se escala: texto y OCR son el mismo modelo (%s, esfuerzo %r). "
+            "Configurá OPENAI_MODEL_TEXTO con uno más barato para que la escalada sirva.",
+            modelo_texto,
+            settings.openai_effort_texto,
+        )
+        return resultado or _NO_INTERPRETADO
 
     logger.info(
         "Escalando a %s (el camino de texto devolvió %s)",

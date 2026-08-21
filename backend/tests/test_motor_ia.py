@@ -162,3 +162,115 @@ def test_una_respuesta_sin_texto_no_revienta() -> None:
     vacio = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=None))])
     assert openai_engine._texto_de(vacio) == ""
     assert openai_engine._texto_de(SimpleNamespace(choices=[])) == ""
+
+
+# ── El clasificador de confirmaciones ──────────────────────────────────
+
+class _RespuestaFalsa:
+    """Lo mínimo que `clasificar_confirmacion` le pide a una respuesta."""
+
+    def __init__(self, contenido: str | None) -> None:
+        self.choices = [SimpleNamespace(message=SimpleNamespace(content=contenido))]
+        self.usage = SimpleNamespace(completion_tokens=0)
+
+
+def _cliente_falso(monkeypatch, contenido: str | None):
+    """Instala un cliente que no llama a nadie y guarda los kwargs recibidos."""
+    visto: dict = {}
+
+    async def _create(**kwargs):
+        visto.update(kwargs)
+        return _RespuestaFalsa(contenido)
+
+    monkeypatch.setattr(
+        openai_engine,
+        "_get_client",
+        lambda: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create))),
+    )
+    monkeypatch.setattr(
+        openai_engine,
+        "get_settings",
+        lambda: SimpleNamespace(openai_effort_confirmacion="minimal"),
+    )
+    monkeypatch.setattr(openai_engine, "_modelos", lambda: ("m-ocr", "m-texto", "m-confirm"))
+    return visto
+
+
+def test_el_tope_del_clasificador_deja_lugar_al_razonamiento(monkeypatch) -> None:
+    """El veredicto es una palabra, pero el tope cubre razonamiento + respuesta.
+
+    Con un cap ajustado al veredicto, un modelo que razona se lo come pensando y
+    devuelve `content` vacío: eso sale por `unclear`, y `unclear` le **cancela la
+    operación** al operador. Pasó en producción con el cap en 16."""
+    visto = _cliente_falso(monkeypatch, "confirm")
+    assert asyncio.run(openai_engine.clasificar_confirmacion("confirmá esos 3")) == "confirm"
+    assert visto["max_completion_tokens"] >= 256
+
+
+def test_el_clasificador_manda_el_esfuerzo_configurado(monkeypatch) -> None:
+    visto = _cliente_falso(monkeypatch, "confirm")
+    asyncio.run(openai_engine.clasificar_confirmacion("dale"))
+    assert visto["reasoning_effort"] == "minimal"
+
+
+def test_un_esfuerzo_vacio_no_manda_el_parametro(monkeypatch) -> None:
+    """Igual que en la extracción: un modelo sin razonamiento lo rechaza."""
+    visto = _cliente_falso(monkeypatch, "confirm")
+    monkeypatch.setattr(
+        openai_engine, "get_settings", lambda: SimpleNamespace(openai_effort_confirmacion="")
+    )
+    asyncio.run(openai_engine.clasificar_confirmacion("dale"))
+    assert "reasoning_effort" not in visto
+
+
+def test_un_veredicto_vacio_queda_en_unclear_y_se_loguea(monkeypatch, caplog) -> None:
+    """Si el modelo no contesta, el operador ve su operación cancelada: que al
+    menos quede en los logs por qué."""
+    _cliente_falso(monkeypatch, "")
+    with caplog.at_level("WARNING"):
+        assert asyncio.run(openai_engine.clasificar_confirmacion("confirmá esos 3")) == "unclear"
+    assert "no devolvió veredicto" in caplog.text
+
+
+# ── La escalada del camino de texto ────────────────────────────────────
+
+def _sin_red(monkeypatch, modelos: tuple[str, str, str], efforts: tuple[str, str]) -> list[str]:
+    """Reemplaza la llamada al modelo por un registro de a quién se le preguntó."""
+    llamados: list[str] = []
+
+    async def _extraer(model, effort, messages):
+        llamados.append(model)
+        return contrato.IntentResult(intent="DESCONOCIDO")
+
+    monkeypatch.setattr(openai_engine, "_extraer_con_modelo", _extraer)
+    monkeypatch.setattr(openai_engine, "_modelos", lambda: modelos)
+    monkeypatch.setattr(
+        openai_engine,
+        "get_settings",
+        lambda: SimpleNamespace(openai_effort_ocr=efforts[0], openai_effort_texto=efforts[1]),
+    )
+    return llamados
+
+
+def test_no_escala_al_mismo_modelo(monkeypatch, caplog) -> None:
+    """`OPENAI_MODEL_TEXTO` sin definir cae en el mismo default que el de OCR:
+    escalar ahí es hacer esperar al operador una segunda vez para preguntarle lo
+    mismo al mismo modelo."""
+    llamados = _sin_red(monkeypatch, ("gpt-5", "gpt-5", "gpt-5-mini"), ("low", "low"))
+    with caplog.at_level("WARNING"):
+        asyncio.run(openai_engine.extraer_intencion("cobré 100 lucas", None, []))
+    assert llamados == ["gpt-5"]
+    assert "No se escala" in caplog.text
+
+
+def test_escala_cuando_el_de_OCR_es_otro_modelo(monkeypatch) -> None:
+    llamados = _sin_red(monkeypatch, ("gpt-5", "gpt-5-mini", "gpt-5-mini"), ("medium", "low"))
+    asyncio.run(openai_engine.extraer_intencion("cobré 100 lucas", None, []))
+    assert llamados == ["gpt-5-mini", "gpt-5"]
+
+
+def test_escala_si_cambia_el_esfuerzo_aunque_sea_el_mismo_modelo(monkeypatch) -> None:
+    """Mismo modelo con más razonamiento sí es un segundo intento distinto."""
+    llamados = _sin_red(monkeypatch, ("gpt-5", "gpt-5", "gpt-5-mini"), ("high", "low"))
+    asyncio.run(openai_engine.extraer_intencion("cobré 100 lucas", None, []))
+    assert llamados == ["gpt-5", "gpt-5"]

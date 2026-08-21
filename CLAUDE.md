@@ -1037,6 +1037,20 @@ avisa **por Telegram** diciendo **qué** se rompió.
     juntos; el JSON se pide con `response_format={"type": "json_object"}`. Un modelo que
     agota el tope razonando devuelve `content` vacío y `finish_reason="length"`: eso es
     **falla dura**, no un resultado a medias que haya que parsear.
+  - **El tope del clasificador de confirmaciones es la trampa que ya costó caro**
+    (`_TOPE_CONFIRMACION`, corregido 2026-08-21). El veredicto es una palabra, así que en
+    Claude alcanzaban 8 tokens —Haiku no razona—; en OpenAI el modelo de confirmación
+    **sí razona** y se comió el cap de 16 pensando, devolviendo `content` vacío. Acá eso no
+    se ve como falla: sale por `unclear`, y `unclear` **le cancela la operación pendiente**
+    al operador (`webhook.py`). O sea que toda confirmación fuera de la lista rápida
+    `_CONFIRM_WORDS` ("confirmá esos 3") mandaba a redictar la operación entera, sin un solo
+    error en los logs. Ahora el tope es 512, el esfuerzo va por `OPENAI_EFFORT_CONFIRMACION`
+    (default `minimal`) y un veredicto vacío se loguea.
+  - **La escalada del camino de texto exige que el modelo de OCR sea otro.** Si
+    `OPENAI_MODEL_TEXTO` y `OPENAI_MODEL_OCR` quedan iguales —el caso por defecto: los dos
+    caen en `gpt-5`—, escalar es hacer esperar al operador una segunda vez para preguntarle
+    lo mismo al mismo modelo. Se detecta y se saltea con un `WARNING` que dice qué
+    configurar.
   - **El chequeo de salud sabe qué key hace falta.** `chequear_configuracion` (§10) marca
     `CAIDO` por la key del proveedor **que está atendiendo**: con el bot en OpenAI, la que lo
     deja mudo es `OPENAI_API_KEY` y no la de Claude. Exigir siempre la de Anthropic pondría
@@ -1290,6 +1304,10 @@ avisa **por Telegram** diciendo **qué** se rompió.
     misma firma —si divergen, cambiar de proveedor rompe recién en producción—. Cubre además
     el armado del mensaje de OpenAI (la foto como data URI, el mime raro que cae en JPEG) y
     que una respuesta sin texto no reviente.
+    Custodia además las dos trampas del tope de OpenAI: que el clasificador de
+    confirmaciones deje lugar al razonamiento —un cap ajustado al veredicto vuelve vacío y
+    eso le **cancela la operación** al operador— y que no se escale a un modelo idéntico al
+    que ya se rindió.
   - **`test_bot_consultas.py`** — el intent genérico `CONSULTA` (§Bot): que el catálogo de
     tipos del prompt y el de la tabla `_CONSULTAS` sean **el mismo en las dos direcciones**
     (un tipo enseñado sin handler no falla en ningún lado, solo no anda), que los tres
