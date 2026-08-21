@@ -13,7 +13,9 @@ from fastapi.responses import JSONResponse
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.services import monitor
-from app.services.ia import claude as ia_claude
+# El motor concreto (Claude / OpenAI) lo elige `motor` por env var; acá no
+# se sabe ni hace falta cuál está atendiendo (ver services/ia/motor.py).
+from app.services.ia import motor as ia_motor
 from app.services.ia import whisper as ia_whisper
 from app.services.whatsapp import client as wa_client
 from app.services.whatsapp import dispatcher as wa_dispatcher
@@ -203,10 +205,10 @@ async def _procesar_mensaje(
     pending = wa_session.get_pending_intent(phone)
     if pending is not None and msg.message_type == "text":
         clasificacion = _clasificar_respuesta(text_content)
-        # La lista rápida no reconoció el modismo: que Claude lo interprete antes de cancelar
+        # La lista rápida no reconoció el modismo: que el modelo lo interprete antes de cancelar
         if clasificacion is None:
-            logger.info("Confirmación ambigua de %s — consultando a Claude: %r", phone, text_content)
-            veredicto = await ia_claude.clasificar_confirmacion(text_content)
+            logger.info("Confirmación ambigua de %s — consultando al modelo: %r", phone, text_content)
+            veredicto = await ia_motor.clasificar_confirmacion(text_content)
             clasificacion = veredicto if veredicto in ("confirm", "reject") else None
         if clasificacion == "confirm":
             logger.info("Operación confirmada por %s (intent=%s)", phone, pending.intent)
@@ -244,7 +246,7 @@ async def _procesar_mensaje(
         if image_bytes is not None
         else None
     )
-    intent_result = await ia_claude.extraer_intencion(
+    intent_result = await ia_motor.extraer_intencion(
         text=text_content,
         image_bytes=image_bytes,
         history=history,
@@ -267,7 +269,7 @@ async def _procesar_mensaje(
 
 async def _ejecutar_y_responder(
     phone: str,
-    intent_result: ia_claude.IntentResult,
+    intent_result: ia_motor.IntentResult,
     msg_at: datetime | None = None,
     foto: tuple[bytes, str] | None = None,
 ) -> None:

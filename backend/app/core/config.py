@@ -36,6 +36,28 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="")
     openai_api_key: str = Field(default="")
 
+    # ── Motor de IA del bot (ver services/ia/motor.py) ─────────────────────
+    # Qué proveedor interpreta cada camino: "anthropic" | "openai". Se eligen
+    # por SEPARADO porque son dos trabajos con riesgos distintos: leer una foto
+    # de cheque mal es plata mal cargada y no da ninguna señal, mientras que un
+    # error interpretando texto se ve en el acto (el bot muestra la operación y
+    # el operador la corrige) y además tiene escalada automática.
+    # Los dos arrancan en "anthropic" a propósito: un deploy sin tocar env vars
+    # no cambia de motor solo, y volver atrás es cambiar una variable.
+    ia_provider_texto: str = Field(default="anthropic")
+    ia_provider_ocr: str = Field(default="anthropic")
+
+    # Modelos de OpenAI, por env var y no hardcodeados como los de Claude: esto
+    # es un motor en evaluación y probar otro modelo tiene que ser cambiar una
+    # variable en Railway, no un deploy.
+    openai_model_ocr: str = Field(default="gpt-5")
+    openai_model_texto: str = Field(default="gpt-5")
+    openai_model_confirmacion: str = Field(default="gpt-5-mini")
+    # Esfuerzo de razonamiento ("minimal"|"low"|"medium"|"high"). Vacío = no se
+    # manda el parámetro, para poder probar un modelo que no lo soporte.
+    openai_effort_ocr: str = Field(default="medium")
+    openai_effort_texto: str = Field(default="low")
+
     # WAHA (WhatsApp HTTP API — gateway no oficial, engine NOWEB)
     waha_api_url: str = Field(default="http://localhost:3000")
     waha_api_key: str = Field(default="")

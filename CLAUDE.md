@@ -1005,6 +1005,43 @@ avisa **por Telegram** diciendo **qué** se rompió.
 
 ## Bot WhatsApp
 
+- **El motor de IA es conmutable por camino _(régimen definido 2026-08-21)_.** El bot puede
+  interpretar los mensajes con **Claude** (`services/ia/claude.py`) o con **OpenAI**
+  (`services/ia/openai_engine.py`), y **cuál atiende se elige por separado para el texto y
+  para el OCR** (`IA_PROVIDER_TEXTO` / `IA_PROVIDER_OCR`). El webhook no sabe cuál está
+  atendiendo: le pide todo a `services/ia/motor.py`, la única puerta.
+  - **Se eligen por separado porque son dos trabajos con riesgos opuestos.** Un dígito mal
+    leído en una foto es plata mal cargada y **no da ninguna señal** —el modelo devuelve un
+    JSON impecable con el número equivocado—, así que no hay excepción que atrapar ni
+    escalada que lo rescate: el error se descubre el día que no cierra la caja. En el texto,
+    en cambio, el bot muestra la operación antes de confirmar y el operador la corrige. Una
+    sola variable para los dos obligaría a cambiarlos juntos, y si algo empeorara no habría
+    forma de saber cuál fue.
+  - **El prompt es uno solo, en `services/ia/contrato.py`** (con `INTENTS`, `IntentResult` y
+    el parseo tolerante del JSON). Los dos motores lo importan de ahí; `claude.py` lo
+    re-exporta porque medio sistema y los tests lo importaban desde ese módulo. Si cada motor
+    llevara su copia, una corrección de reglas de negocio aplicada en uno dejaría al otro con
+    la regla vieja y la diferencia recién se notaría en una operación mal cargada:
+    `test_motor_ia.py` custodia que ningún motor defina su propio `_SYSTEM_PROMPT`.
+  - **Los dos arrancan en `anthropic`.** Un deploy sin tocar env vars no cambia de motor solo,
+    y volver atrás es cambiar una variable — no un rollback. Un nombre de proveedor con typo
+    **no tumba el bot**: se loguea y se cae al default.
+  - **Los modelos de OpenAI van por env var** (`OPENAI_MODEL_*`, `OPENAI_EFFORT_*`) y no
+    hardcodeados como los de Claude: es un motor en evaluación y probar otro modelo tiene que
+    ser cambiar una variable en Railway. Un `OPENAI_EFFORT_*` vacío no manda el parámetro,
+    para poder probar un modelo sin razonamiento.
+  - **Diferencias de la API de OpenAI que hay que respetar:** el caché del prompt es
+    **automático** por prefijo (sin `cache_control`) y se rompe igual de silencioso si se
+    interpola algo variable en el system —por eso la fecha sigue viajando en el mensaje—;
+    el tope es `max_completion_tokens` (no `max_tokens`) y cubre razonamiento + respuesta
+    juntos; el JSON se pide con `response_format={"type": "json_object"}`. Un modelo que
+    agota el tope razonando devuelve `content` vacío y `finish_reason="length"`: eso es
+    **falla dura**, no un resultado a medias que haya que parsear.
+  - **El chequeo de salud sabe qué key hace falta.** `chequear_configuracion` (§10) marca
+    `CAIDO` por la key del proveedor **que está atendiendo**: con el bot en OpenAI, la que lo
+    deja mudo es `OPENAI_API_KEY` y no la de Claude. Exigir siempre la de Anthropic pondría
+    `/health/deep` en 503 por un bot que anda perfecto — el mismo falso positivo que ya costó
+    una vez.
 - **Ruteo de modelos por tarea (`services/ia/claude.py`, definido 2026-08-10).** El bot tiene
   dos cargas de trabajo con perfiles de riesgo opuestos y se rutean según **si el mensaje trae
   foto** — señal disponible antes de llamar (`image_bytes`):
@@ -1247,6 +1284,12 @@ avisa **por Telegram** diciendo **qué** se rompió.
     fecha pasada) y que no se pueda deshacer un lote ya vendido. Custodia además el catálogo
     `_ORIGENES_STOCK`: una entidad que mueva dólares y no esté ahí deja sus movimientos vivos
     al anularse, sin que nada falle.
+  - **`test_motor_ia.py`** — el motor conmutable (§Bot): que el default no cambie solo, que
+    texto y OCR se ruteen por separado, que un typo en la env var caiga al default en vez de
+    dejar al bot sin motor, y que los dos motores compartan **el mismo** system prompt y la
+    misma firma —si divergen, cambiar de proveedor rompe recién en producción—. Cubre además
+    el armado del mensaje de OpenAI (la foto como data URI, el mime raro que cae en JPEG) y
+    que una respuesta sin texto no reviente.
   - **`test_bot_consultas.py`** — el intent genérico `CONSULTA` (§Bot): que el catálogo de
     tipos del prompt y el de la tabla `_CONSULTAS` sean **el mismo en las dos direcciones**
     (un tipo enseñado sin handler no falla en ningún lado, solo no anda), que los tres

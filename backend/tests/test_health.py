@@ -114,12 +114,19 @@ def test_url_esperada_vacia_no_compara() -> None:
 
 # ── Configuración: la severidad va por consecuencia, no por variable ───
 
-def _config(monkeypatch, **faltantes: bool) -> Chequeo:
+def _config(
+    monkeypatch,
+    proveedor_texto: str = "anthropic",
+    proveedor_ocr: str = "anthropic",
+    **faltantes: bool,
+) -> Chequeo:
     """Corre `chequear_configuracion` con las env vars que se indiquen vacías."""
     settings = SimpleNamespace(
         anthropic_api_key="" if faltantes.get("anthropic") else "sk-ant-x",
         whatsapp_operator_phone="" if faltantes.get("operador") else "5491100000000",
         openai_api_key="" if faltantes.get("openai") else "sk-oai-x",
+        ia_provider_texto=proveedor_texto,
+        ia_provider_ocr=proveedor_ocr,
     )
     monkeypatch.setattr(health_mod, "get_settings", lambda: settings)
     chequeos = chequear_configuracion()
@@ -164,10 +171,44 @@ def test_reporta_todas_las_carencias_no_solo_la_peor(monkeypatch) -> None:
 
 def test_numero_de_operador_en_blanco_cuenta_como_faltante(monkeypatch) -> None:
     settings = SimpleNamespace(
-        anthropic_api_key="sk-ant-x", whatsapp_operator_phone="   ", openai_api_key="sk-oai-x"
+        anthropic_api_key="sk-ant-x",
+        whatsapp_operator_phone="   ",
+        openai_api_key="sk-oai-x",
+        ia_provider_texto="anthropic",
+        ia_provider_ocr="anthropic",
     )
     monkeypatch.setattr(health_mod, "get_settings", lambda: settings)
     assert chequear_configuracion()[0].estado is Estado.DEGRADADO
+
+
+# ── La key que importa es la del motor que está atendiendo ─────────────
+# Con el bot corriendo en OpenAI, la variable que lo deja mudo es la de OpenAI
+# y NO la de Claude: exigir siempre la de Anthropic pondría `/health/deep` en
+# 503 —y al watchdog gritando "bot caído" cada 5 minutos— por un bot que anda
+# perfecto, que es exactamente el falso positivo que ya costó una vez.
+
+def test_sin_openai_con_el_motor_en_openai_es_caida(monkeypatch) -> None:
+    chequeo = _config(monkeypatch, proveedor_texto="openai", openai=True)
+    assert chequeo.estado is Estado.CAIDO
+    assert "no puede interpretar mensajes" in chequeo.detalle
+
+
+def test_sin_anthropic_con_todo_en_openai_no_es_caida(monkeypatch) -> None:
+    chequeo = _config(
+        monkeypatch, proveedor_texto="openai", proveedor_ocr="openai", anthropic=True
+    )
+    assert chequeo.estado is Estado.OK
+    assert "ANTHROPIC" not in chequeo.detalle
+
+
+def test_con_el_ocr_en_claude_la_key_de_anthropic_sigue_haciendo_falta(monkeypatch) -> None:
+    """El caso real del switch: texto en OpenAI y las fotos en Claude.
+
+    Ahí hacen falta las dos keys, y que falte cualquiera deja al bot sin poder
+    atender uno de los dos caminos."""
+    chequeo = _config(monkeypatch, proveedor_texto="openai", anthropic=True)
+    assert chequeo.estado is Estado.CAIDO
+    assert "ANTHROPIC_API_KEY" in chequeo.detalle
 
 
 # ── Estado global ──────────────────────────────────────────────────────

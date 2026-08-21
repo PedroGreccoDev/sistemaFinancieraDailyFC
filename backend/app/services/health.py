@@ -241,14 +241,18 @@ def chequear_configuracion() -> list[Chequeo]:
 
     La severidad es por **consecuencia real**, no por "falta una variable":
 
-    - Sin `ANTHROPIC_API_KEY` el bot no entiende un solo mensaje → `CAIDO`.
+    - Sin la API key del motor que está atendiendo (`IA_PROVIDER_TEXTO` /
+      `IA_PROVIDER_OCR`, ver services/ia/motor.py) el bot no entiende un solo
+      mensaje → `CAIDO`. Cuál falta depende de la configuración: con el motor
+      en OpenAI, la que deja al bot mudo es `OPENAI_API_KEY`, no la de Claude.
     - Sin `WHATSAPP_OPERATOR_PHONE` el filtro de operador **no se aplica**
       (`api/routes/webhook.py`: `if operator_phone and ...`) → el bot responde
       y opera, pero **le obedece a cualquier número**. Es un agujero de acceso
       grave, no una caída: marcarlo `CAIDO` hacía que `/health/deep` devolviera
       503 y el watchdog externo gritara "bot caído" cada 5 minutos por un bot
       que funciona perfecto.
-    - Sin `OPENAI_API_KEY` sigue trabajando por texto y solo pierde los audios.
+    - Sin `OPENAI_API_KEY`, si ningún camino usa OpenAI, sigue trabajando por
+      texto y solo pierde los audios (Whisper) → `DEGRADADO`.
 
     Se reportan **todas** las carencias juntas, no solo la más grave: si faltan
     dos variables, enterarse de la segunda recién después de arreglar la
@@ -257,8 +261,17 @@ def chequear_configuracion() -> list[Chequeo]:
     settings = get_settings()
 
     problemas: list[tuple[Estado, str]] = []
-    if not settings.anthropic_api_key:
+
+    # Qué key es imprescindible depende de qué motor esté atendiendo cada
+    # camino: la de un proveedor que no se usa no puede tumbar nada.
+    proveedores = {
+        settings.ia_provider_texto.strip().lower(),
+        settings.ia_provider_ocr.strip().lower(),
+    }
+    if "anthropic" in proveedores and not settings.anthropic_api_key:
         problemas.append((Estado.CAIDO, "falta ANTHROPIC_API_KEY: no puede interpretar mensajes"))
+    if "openai" in proveedores and not settings.openai_api_key:
+        problemas.append((Estado.CAIDO, "falta OPENAI_API_KEY: no puede interpretar mensajes"))
     if not settings.whatsapp_operator_phone.strip():
         problemas.append(
             (
@@ -266,7 +279,7 @@ def chequear_configuracion() -> list[Chequeo]:
                 "falta WHATSAPP_OPERATOR_PHONE: el bot le obedece a CUALQUIER número que le escriba",
             )
         )
-    if not settings.openai_api_key:
+    if not settings.openai_api_key and "openai" not in proveedores:
         problemas.append((Estado.DEGRADADO, "falta OPENAI_API_KEY: no transcribe audios"))
 
     if not problemas:

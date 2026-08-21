@@ -59,7 +59,7 @@ from app.services import prestamos as svc_prestamos
 from app.services import reportes as svc_reportes
 from app.core.fechas import fecha_local, hora_local, hoy_local
 from app.services.exceptions import ServiceError, ValidationError
-from app.services.ia.claude import IntentResult
+from app.services.ia.contrato import IntentResult
 
 logger = logging.getLogger(__name__)
 

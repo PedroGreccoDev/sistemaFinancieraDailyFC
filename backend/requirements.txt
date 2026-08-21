@@ -19,7 +19,7 @@ bcrypt==4.0.1            # pin: passlib 1.7.4 no es compatible con bcrypt>=4.1
 
 # ── IA ───────────────────────────────────────────────────────────────
 anthropic==0.120.2       # Claude API (OCR, razonamiento, bot WhatsApp)
-openai==1.82.0           # Whisper API (transcripción de audio)
+openai==1.82.0           # Whisper (audio) + motor de IA alternativo del bot
 
 # ── HTTP client (requests salientes) ─────────────────────────────────
 httpx==0.28.1
