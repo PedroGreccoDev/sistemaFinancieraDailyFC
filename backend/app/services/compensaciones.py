@@ -23,11 +23,18 @@ acordarse de completar.
 duplica acá ninguna regla de negocio — duplicarlas es exactamente lo que haría
 divergir la compensación del cobro normal.
 
-**Los dos lados no se topean igual.** Contra el acreedor, transferir de más
-está mal: si X le manda a Y más de lo que el negocio le debe, Y le pasa a deber
-al negocio, y eso es otra operación —se rechaza—. Contra el cliente sí puede
-sobrar: X paga lo que tiene, y el excedente le queda a favor como pasivo del
-negocio con él, igual que el vuelto de un cheque (§5).
+**FIFO de los dos lados.** Ni el cliente ni el acreedor son "una deuda": al
+cliente se le imputa cruzando fiados, deudas libres y préstamos, y al acreedor
+se le imputa entre **todas** las deudas que el negocio le tiene, de la más vieja
+a la más nueva. Le comprás tres veces a Pedro sin pagarle y son tres pasivos;
+cuando alguien le transfiere, esa plata no va contra uno elegido a dedo — llena
+el más viejo primero, como todo lo demás en el sistema.
+
+**Los dos lados no se topean igual.** Contra el acreedor, transferir de más está
+mal: si X le manda a Y más de lo que el negocio le debe **en total**, Y le pasa a
+deber al negocio, y eso es otra operación —se rechaza—. Contra el cliente sí
+puede sobrar: X paga lo que tiene, y el excedente le queda a favor como pasivo
+del negocio con él, igual que el vuelto de un cheque (§5).
 """
 
 from __future__ import annotations
@@ -37,7 +44,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -51,6 +58,7 @@ from app.db.models import (
     DeudaSimpleEstado,
     Fiado,
     FiadoEstado,
+    Moneda,
     Pasivo,
     PasivoEstado,
     Prestamo,
@@ -64,6 +72,7 @@ from app.services.conversion import (
     convertir_a_moneda_deuda,
 )
 from app.services.deudas_simples import repartir_cobro_fifo
+from app.services.prestamos import repartir_pago_en_cuotas
 from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
@@ -138,15 +147,34 @@ def _imputaciones_reales(
 #  Registrar la compensación
 # ══════════════════════════════════════════════════════════════════════
 
-def _pasivo_para_compensar(db: Session, pasivo_id: uuid.UUID) -> Pasivo:
-    pasivo = db.scalar(select(Pasivo).where(Pasivo.id == pasivo_id).with_for_update())
-    if pasivo is None or pasivo.anulado_at is not None:
-        raise NotFoundError("La deuda del negocio no existe o fue eliminada.")
-    if pasivo.estado == PasivoEstado.CANCELADA or pasivo.saldo_pendiente <= _CERO:
-        raise ConflictError(
-            f"Ya no le debés nada a {pasivo.acreedor}: no hay contra qué compensar."
+def cargar_pasivos_acreedor(
+    db: Session, acreedor: str, moneda: Moneda, *, bloquear: bool = False
+) -> list[Pasivo]:
+    """Las deudas vivas del negocio con un acreedor, de la más vieja a la más nueva.
+
+    El orden es por `created_at`: un pasivo no tiene fecha de origen propia más
+    allá de cuándo se cargó, y el vencimiento no sirve para esto —una deuda que
+    vence antes no es más vieja—. Es el mismo criterio de "primero lo más viejo"
+    que usa la imputación del lado del cliente (§2.c).
+
+    El match del nombre es **exacto** (case-insensitive): quién resuelve un
+    nombre parcial es quien llama —el bot, con su desambiguación— y acá elegir
+    de más significaría saldarle la deuda a otro.
+    """
+    stmt = (
+        select(Pasivo)
+        .where(
+            func.lower(Pasivo.acreedor) == acreedor.strip().lower(),
+            Pasivo.moneda == moneda,
+            Pasivo.estado == PasivoEstado.PENDIENTE,
+            Pasivo.saldo_pendiente > _CERO,
+            Pasivo.anulado_at.is_(None),
         )
-    return pasivo
+        .order_by(Pasivo.created_at.asc())
+    )
+    if bloquear:
+        stmt = stmt.with_for_update()
+    return list(db.scalars(stmt))
 
 
 def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
@@ -159,7 +187,17 @@ def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
     cliente = svc_deudores.cliente_o_error(db, payload.cliente_id)
     cliente_id, cliente_nombre = cliente.id, cliente.nombre
 
-    pasivo = _pasivo_para_compensar(db, payload.pasivo_id)
+    acreedor = payload.acreedor.strip()
+    pasivos = cargar_pasivos_acreedor(
+        db, acreedor, payload.moneda_pasivo, bloquear=True
+    )
+    if not pasivos:
+        raise ConflictError(
+            f"No le debés nada a {acreedor} en {payload.moneda_pasivo.value}: "
+            "no hay contra qué compensar."
+        )
+    saldo_acreedor = sum((p.saldo_pendiente for p in pasivos), _CERO).quantize(_CENTAVO)
+
     renglones = svc_deudores.cargar_renglones(
         db, cliente_id, payload.moneda_deuda, bloquear=True
     )
@@ -176,8 +214,8 @@ def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
     # suyo habla de "el pago" y acá el que pagó no fue el negocio.
     try:
         imputado_pasivo = calcular_reduccion_saldo(
-            pasivo.moneda,
-            pasivo.saldo_pendiente,
+            payload.moneda_pasivo,
+            saldo_acreedor,
             payload.moneda,
             payload.monto,
             payload.cotizacion,
@@ -185,11 +223,12 @@ def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
     except ValidationError as exc:
         if "supera el saldo" not in str(exc):
             raise
+        cuantas = f" (sumando sus {len(pasivos)} deudas)" if len(pasivos) > 1 else ""
         raise ValidationError(
             f"{cliente_nombre} le habría transferido más de lo que le debés a "
-            f"{pasivo.acreedor} ({pasivo.saldo_pendiente} {pasivo.moneda.value} de "
-            f"saldo). Si le transfirió de más, esa diferencia es otra operación: "
-            "cargala aparte."
+            f"{acreedor}: {saldo_acreedor} {payload.moneda_pasivo.value} de "
+            f"saldo{cuantas}. Si le transfirió de más, esa diferencia es otra "
+            "operación: cargala aparte."
         ) from exc
 
     # Lado del cliente: acá sí puede sobrar —paga lo que tiene—, así que se
@@ -217,7 +256,8 @@ def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
     compensacion = Compensacion(
         fecha=fecha,
         cliente_id=cliente_id,
-        pasivo_id=pasivo.id,
+        acreedor=acreedor,
+        moneda_pasivo=payload.moneda_pasivo,
         moneda=payload.moneda,
         monto=payload.monto,
         moneda_deuda=payload.moneda_deuda,
@@ -264,17 +304,37 @@ def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
                 )
             )
 
-    # Lado del acreedor: baja su saldo, sin línea de caja (no salió plata de acá).
-    pasivo.saldo_pendiente = (pasivo.saldo_pendiente - imputado_pasivo).quantize(_CENTAVO)
-    pasivo_cancelado = pasivo.saldo_pendiente <= _CERO
-    if pasivo_cancelado:
-        pasivo.saldo_pendiente = _CERO
-        pasivo.estado = PasivoEstado.CANCELADA
-        pasivo.fecha_cancelacion = fecha
-    # La primera cotización cross-moneda queda de default editable, igual que en
-    # un pago normal del pasivo (§5).
-    if payload.moneda != pasivo.moneda and pasivo.cotizacion_pago is None:
-        pasivo.cotizacion_pago = payload.cotizacion
+    # Lado del acreedor: se reparte entre sus deudas de la más vieja a la más
+    # nueva, llenando cada una, y sin línea de caja (no salió plata de acá).
+    # Es el mismo criterio que del lado del cliente: la plata no va contra una
+    # deuda elegida a dedo.
+    reparto_pasivos = repartir_pago_en_cuotas(
+        [p.saldo_pendiente for p in pasivos], imputado_pasivo
+    )
+    pasivos_cancelados = 0
+    for pas, aplica in zip(pasivos, reparto_pasivos):
+        if aplica <= _CERO:
+            continue
+        pas.saldo_pendiente = (pas.saldo_pendiente - aplica).quantize(_CENTAVO)
+        cancelo = pas.saldo_pendiente <= _CERO
+        if cancelo:
+            pas.saldo_pendiente = _CERO
+            pas.estado = PasivoEstado.CANCELADA
+            pas.fecha_cancelacion = fecha
+            pasivos_cancelados += 1
+        # La primera cotización cross-moneda queda de default editable, igual que
+        # en un pago normal del pasivo (§5).
+        if payload.moneda != pas.moneda and pas.cotizacion_pago is None:
+            pas.cotizacion_pago = payload.cotizacion
+        db.add(
+            CompensacionImputacion(
+                compensacion_id=compensacion.id,
+                entidad_tipo="pasivo",
+                entidad_id=pas.id,
+                monto=aplica,
+                cancelo=cancelo,
+            )
+        )
 
     if excedente > _CERO:
         # Transfirió de más: le queda a favor. Mismo mecanismo que el vuelto de un
@@ -282,7 +342,7 @@ def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
         # nada todavía, se lo debe.
         a_favor = Pasivo(
             acreedor=cliente_nombre,
-            concepto=f"A favor por transferencia a {pasivo.acreedor}",
+            concepto=f"A favor por transferencia a {acreedor}",
             monto=excedente,
             saldo_pendiente=excedente,
             moneda=payload.moneda,
@@ -301,25 +361,24 @@ def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
         raise DatabaseWriteError("No se pudo registrar la compensación.") from exc
 
     db.refresh(compensacion)
-    db.refresh(pasivo)
 
     return CompensacionResponse(
         id=compensacion.id,
         fecha=fecha,
         cliente_id=cliente_id,
         cliente_nombre=cliente_nombre,
-        pasivo_id=pasivo.id,
-        acreedor=pasivo.acreedor,
+        acreedor=acreedor,
         moneda=payload.moneda,
         monto=payload.monto,
         moneda_deuda=payload.moneda_deuda,
+        moneda_pasivo=payload.moneda_pasivo,
         renglones=afectados,
         imputado_cliente=imputado_cliente,
         canceladas=sum(1 for r in afectados if r.cancelado),
         saldo_restante_cliente=(saldo_total - imputado_cliente).quantize(_CENTAVO),
         imputado_pasivo=imputado_pasivo,
-        saldo_restante_pasivo=pasivo.saldo_pendiente,
-        pasivo_cancelado=pasivo_cancelado,
+        saldo_restante_pasivo=(saldo_acreedor - imputado_pasivo).quantize(_CENTAVO),
+        pasivos_cancelados=pasivos_cancelados,
         excedente=excedente,
         pasivo_excedente_id=compensacion.pasivo_excedente_id,
     )
@@ -337,13 +396,13 @@ def get_compensacion(db: Session, compensacion_id: uuid.UUID) -> Compensacion:
 
 
 def list_compensaciones(
-    db: Session, cliente_id: uuid.UUID | None = None, pasivo_id: uuid.UUID | None = None
+    db: Session, cliente_id: uuid.UUID | None = None, acreedor: str | None = None
 ) -> list[Compensacion]:
     stmt = select(Compensacion).where(Compensacion.anulado_at.is_(None))
     if cliente_id is not None:
         stmt = stmt.where(Compensacion.cliente_id == cliente_id)
-    if pasivo_id is not None:
-        stmt = stmt.where(Compensacion.pasivo_id == pasivo_id)
+    if acreedor is not None:
+        stmt = stmt.where(func.lower(Compensacion.acreedor) == acreedor.strip().lower())
     return list(db.scalars(stmt.order_by(Compensacion.created_at.desc())))
 
 
@@ -377,6 +436,16 @@ def _devolver_a_renglon(db: Session, imp: CompensacionImputacion) -> str:
             prestamo.estado = PrestamoEstado.ACTIVO
         return f"cuota {cuota.numero_cuota}"
 
+    if imp.entidad_tipo == "pasivo":
+        pas = db.get(Pasivo, imp.entidad_id)
+        if pas is None:
+            raise ConflictError("Falta una deuda del negocio que la compensación saldó.")
+        pas.saldo_pendiente = (pas.saldo_pendiente + imp.monto).quantize(_CENTAVO)
+        if imp.cancelo:
+            pas.estado = PasivoEstado.PENDIENTE
+            pas.fecha_cancelacion = None
+        return f"deuda con {pas.acreedor} ({pas.concepto})"
+
     if imp.entidad_tipo == "fiado":
         fiado = db.get(Fiado, imp.entidad_id)
         if fiado is None:
@@ -408,8 +477,10 @@ def revertir(
     Devuelve la descripción de lo que se restituyó, para mostrárselo al operador.
 
     No hay líneas de caja que revertir —la operación nunca movió la caja—, pero
-    sí saldos en los dos lados: al cliente se le devuelve exactamente lo que se
-    le imputó a cada renglón, y al acreedor lo que se le descontó.
+    sí saldos en los dos lados. A cada uno se le devuelve **exactamente lo que se
+    le imputó**, renglón por renglón: las deudas del cliente y las del acreedor
+    quedan guardadas igual en `compensacion_imputaciones`, así que restituirlas
+    es el mismo recorrido para las dos patas.
     """
     if not (operador_id and operador_id.strip()):
         raise ValidationError("Se requiere identificar al operador que revierte.")
@@ -425,12 +496,6 @@ def revertir(
         raise NotFoundError("Compensación no encontrada.")
     if comp.anulado_at is not None:
         raise ConflictError("Esta compensación ya fue revertida.")
-
-    pasivo = db.scalar(
-        select(Pasivo).where(Pasivo.id == comp.pasivo_id).with_for_update()
-    )
-    if pasivo is None:
-        raise ConflictError("Falta la deuda del negocio que esta compensación saldó.")
 
     # El excedente que le quedó a favor al cliente: si ya se lo pagaron (o lo usó
     # para otra cosa), revertir dejaría un pago sin nada que lo explique.
@@ -452,11 +517,6 @@ def revertir(
     try:
         for imp in comp.imputaciones:
             restituido.append(_devolver_a_renglon(db, imp))
-
-        pasivo.saldo_pendiente = (pasivo.saldo_pendiente + comp.imputado_pasivo).quantize(_CENTAVO)
-        if pasivo.estado == PasivoEstado.CANCELADA:
-            pasivo.estado = PasivoEstado.PENDIENTE
-            pasivo.fecha_cancelacion = None
 
         if a_favor is not None and a_favor.anulado_at is None:
             a_favor.anulado_at = datetime.now(tz=UTC)

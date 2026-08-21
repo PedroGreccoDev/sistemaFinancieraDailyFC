@@ -226,7 +226,7 @@ router `/compensaciones`.
 
 **Ejemplo.** Le comprás a Pedro 1.000 USD a $1.000 sin pagarle → le debés
 $1.000.000. Juan te debe $600.000. Juan le transfiere $600.000 a Pedro: Juan
-queda en cero, el pasivo con Pedro baja a $400.000, y la caja no se movió.
+queda en cero, lo que le debés a Pedro baja a $400.000, y la caja no se movió.
 
 - **No asienta ninguna línea en el libro de caja, y esa es toda la gracia.** Esa
   plata nunca pasó por acá. Mismo criterio que el cobro con cheque (§2.b): lo que
@@ -243,38 +243,53 @@ queda en cero, el pasivo con Pedro baja a $400.000, y la caja no se movió.
   cajón y el pasivo sigue vivo — ese descuadre no se compensa solo. La operación
   de acá hace en un paso lo que allá son dos que hay que acordarse de completar.
   **No hay traba ni advertencia**: queda a criterio del operador.
+- **FIFO de los dos lados** _(decisión del dueño, 2026-08-21)_. Ni el cliente ni
+  el acreedor son "una deuda": al cliente se le imputa cruzando fiados, deudas
+  libres y préstamos (§2.c), y al acreedor entre **todas** las deudas que el
+  negocio le tiene, de la más vieja a la más nueva. Le comprás tres veces a Pedro
+  sin pagarle y son tres pasivos; cuando alguien le transfiere, esa plata llena
+  el más viejo primero. Por eso la operación se dirige a un **acreedor**
+  (`compensaciones.acreedor`, texto como en `pasivos.acreedor`) y no al id de una
+  deuda puntual — y `moneda_pasivo` declara contra cuál de sus monedas imputa.
 - **Quién imputa.** Del lado del cliente, los mismos helpers del cobro
   consolidado (§2.c): `svc_deudores.cargar_renglones` / `imputar_renglon`,
-  expuestos como API compartida. Imputa FIFO por fecha de origen cruzando fiados,
-  deudas libres y préstamos. Duplicar acá esas reglas es exactamente lo que haría
-  divergir la compensación del cobro normal.
+  expuestos como API compartida. Del lado del acreedor, `repartir_pago_en_cuotas`
+  (§3), el mismo repartidor que llena cuotas: la primitiva es idéntica —llenar en
+  orden— y tener dos sería tener dos formas distintas de repartir plata. El orden
+  de los pasivos es por `created_at`: un pasivo no tiene fecha de origen propia, y
+  el vencimiento no sirve —una deuda que vence antes no es más vieja—.
 - **Las dos patas no se topean igual.** Contra el **acreedor** no se puede
-  transferir de más: si X le manda a Y más de lo que el negocio le debe, Y pasa a
-  deberle al negocio, y eso es otra operación — se rechaza. Contra el **cliente**
-  sí puede sobrar (paga lo que tiene): el excedente le queda a favor como pasivo
-  del negocio con él, el mismo mecanismo que el vuelto de un cheque (§5), y **en
-  la moneda en que transfirió**, que es la plata que realmente se movió.
+  transferir más de lo que se le debe **en total, sumando todas sus deudas**: si
+  X le manda a Y de más, Y pasa a deberle al negocio, y eso es otra operación —
+  se rechaza. Contra el **cliente** sí puede sobrar (paga lo que tiene): el
+  excedente le queda a favor como pasivo del negocio con él, el mismo mecanismo
+  que el vuelto de un cheque (§5), y **en la moneda en que transfirió**, que es la
+  plata que realmente se movió.
 - **Cross-moneda:** la cotización la dicta el operador, como siempre, y sirve para
   imputar las dos patas. `moneda_deuda` declara contra qué deuda del cliente va:
   ARS y USD son cajas distintas y no se suman.
 - **Se puede revertir** _(decisión del dueño: toda operación debe poder
   deshacerse)_. Cada renglón alcanzado guarda cuánto se le imputó en
   `compensacion_imputaciones` —**medido** contra su saldo antes y después, no
-  recalculado— y la reversión devuelve exactamente eso. Del préstamo se anota la
-  **cuota**, que es donde cae la plata. Recalcular el reparto al revés daría
-  distinto apenas el cliente reciba otro cobro entre medio, y esa diferencia sería
-  plata que aparece o desaparece. Si el excedente que le quedó a favor al cliente
+  recalculado— y la reversión devuelve exactamente eso. Van ahí las dos patas:
+  las deudas del cliente (del préstamo, la **cuota**, que es donde cae la plata) y
+  cada pasivo del acreedor alcanzado, así restituir es el mismo recorrido para
+  los dos lados. Recalcular el reparto al revés daría distinto apenas alguno
+  reciba otro movimiento entre medio, y esa diferencia sería plata que aparece o
+  desaparece. Si el excedente que le quedó a favor al cliente
   ya se usó o se pagó, la reversión **se bloquea**.
 - **Entra al motor de anulación** (`_ENTIDADES["compensacion"]`) para que el panel
   y el bot la deshagan por la misma puerta que el resto, con operador y motivo.
   Es la **única entidad con `refs` vacío**, a propósito: no tiene líneas de caja
   que revertir. `anular` delega en `svc_compensaciones.revertir`.
 - **Endpoints:** `POST /compensaciones`, `GET /compensaciones` (filtrable por
-  cliente o pasivo), `POST /compensaciones/{id}/revertir`.
+  cliente o acreedor), `POST /compensaciones/{id}/revertir`.
 - **Panel:** el mismo `ModalCompensar` con **dos entradas** —botón "Compensar" en
-  la pestaña General de Deudores (cliente fijo) y por fila en Deudas (pasivo
+  la pestaña General de Deudores (cliente fijo) y por fila en Deudas (acreedor
   fijo)—, porque según el día el operador piensa la operación de un lado o del
-  otro. Muestra en vivo cuánto le baja al acreedor y que de la caja no sale nada.
+  otro. Entrar desde una fila de Deudas fija **el acreedor, no esa deuda**: la
+  imputación es contra todo lo que se le debe. Muestra en vivo cuánto le baja, en
+  cuántas deudas, y que de la caja no sale nada.
 - **Bot:** intent `COMPENSAR_DEUDA`; se deshace con `REVERTIR_OPERACION` tipo
   `COMPENSACION`. Ver §Bot para las tres frases que se confunden.
 

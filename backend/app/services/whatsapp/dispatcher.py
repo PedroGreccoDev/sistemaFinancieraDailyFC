@@ -881,17 +881,18 @@ def _cobrar_deuda_cliente(
     return True, "\n".join(lines)
 
 
-def _buscar_pasivo_acreedor(db: Session, nombre: str) -> Pasivo:
-    """El pasivo vivo del negocio con ese acreedor, para compensar contra él.
+def _resolver_acreedor(db: Session, nombre: str) -> tuple[str, list[Pasivo]]:
+    """Resuelve a qué acreedor le transfirieron y trae TODAS sus deudas vivas.
 
     El acreedor de un pasivo es **texto libre**, no un cliente del sistema (se
     le puede deber a alguien que nunca operó acá), así que se resuelve por
-    nombre como los clientes: substring, y si hay más de un acreedor posible se
-    pregunta en vez de elegir — compensar contra el acreedor equivocado saldaría
-    una deuda que sigue viva.
+    nombre como los clientes: substring, y si coincide más de un acreedor se
+    pregunta en vez de elegir — compensar contra el equivocado saldaría una
+    deuda que sigue viva.
 
-    Si al mismo acreedor se le deben varias, se toma la **más vieja**, igual que
-    la imputación de deudas de cliente (§2.c), y la respuesta dice cuál es.
+    Devuelve el nombre **exacto** tal como está guardado, porque es lo que el
+    servicio usa para juntar sus deudas, y la lista completa: la transferencia
+    se reparte entre todas, de la más vieja a la más nueva.
     """
     nombre = nombre.strip()
     candidatos: list[Pasivo] = list(
@@ -919,7 +920,7 @@ def _buscar_pasivo_acreedor(db: Session, nombre: str) -> Pasivo:
             f"Le debés a varios que coinciden con '{nombre}': {nombres}. "
             "¿A cuál de todos le transfirió?"
         )
-    return candidatos[0]
+    return candidatos[0].acreedor, candidatos
 
 
 def _compensar_deuda(
@@ -942,7 +943,20 @@ def _compensar_deuda(
     cotizacion = _opt_decimal(data, "cotizacion")
 
     cliente = _buscar_cliente_o_error(db, cliente_nombre, estricto=True)
-    pasivo = _buscar_pasivo_acreedor(db, acreedor_nombre)
+    acreedor, pasivos = _resolver_acreedor(db, acreedor_nombre)
+    # Si le debés en las dos monedas, elegir por su cuenta movería la caja
+    # equivocada. Mismo criterio que con la deuda del cliente, abajo.
+    monedas_pasivo = {p.moneda for p in pasivos}
+    if data.get("moneda_pasivo"):
+        moneda_pasivo = _req_enum(data, "moneda_pasivo", Moneda)
+    elif len(monedas_pasivo) == 1:
+        moneda_pasivo = next(iter(monedas_pasivo))
+    else:
+        return False, (
+            f"❓ Le debés a {acreedor} en pesos y en dólares. "
+            "¿Contra cuál de las dos imputo la transferencia?"
+        )
+    del pasivos  # el servicio las vuelve a cargar con bloqueo
 
     ars = svc_deudores.resumen_cliente(db, cliente.id, Moneda.ARS)
     usd = svc_deudores.resumen_cliente(db, cliente.id, Moneda.USD)
@@ -962,7 +976,8 @@ def _compensar_deuda(
 
     payload = CompensacionCreate(
         cliente_id=cliente.id,
-        pasivo_id=pasivo.id,
+        acreedor=acreedor,
+        moneda_pasivo=moneda_pasivo,
         moneda_deuda=moneda_deuda,
         monto=monto,
         moneda=moneda,
@@ -973,7 +988,7 @@ def _compensar_deuda(
 
     simbolo = "U$D" if moneda == Moneda.USD else "$"
     simbolo_deuda = "U$D" if moneda_deuda == Moneda.USD else "$"
-    simbolo_pasivo = "U$D" if pasivo.moneda == Moneda.USD else "$"
+    simbolo_pasivo = "U$D" if moneda_pasivo == Moneda.USD else "$"
     lines = [
         f"✅ *Compensación registrada*",
         f"{r.cliente_nombre} le transfirió {simbolo}{_fmt_num(monto)} a {r.acreedor}",
@@ -992,10 +1007,13 @@ def _compensar_deuda(
         lines.append(f"  Sigue debiendo: {simbolo_deuda}{_fmt_num(r.saldo_restante_cliente)}")
 
     lines.append("")
-    lines.append(f"*Le debías a {r.acreedor}* — {pasivo.concepto}:")
+    lines.append(f"*Le debías a {r.acreedor}*:")
     lines.append(f"  • Se descontó: {simbolo_pasivo}{_fmt_num(r.imputado_pasivo)}")
-    if r.pasivo_cancelado:
-        lines.append(f"  ✔️ Saldada: ya no le debés nada de esta deuda.")
+    if r.pasivos_cancelados:
+        plural = "s" if r.pasivos_cancelados > 1 else ""
+        lines.append(f"  ✔️ {r.pasivos_cancelados} deuda{plural} saldada{plural}")
+    if r.saldo_restante_pasivo <= Decimal("0.00"):
+        lines.append("  🎉 No le debés más nada.")
     else:
         lines.append(f"  Le seguís debiendo: {simbolo_pasivo}{_fmt_num(r.saldo_restante_pasivo)}")
 

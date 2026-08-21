@@ -41,8 +41,9 @@ def compensar(payload: CompensacionCreate, db: DbSession) -> CompensacionRespons
 
     No mueve la caja —esa plata nunca pasó por acá—. Del lado del cliente imputa
     de la deuda más vieja a la más nueva cruzando fiados, deudas libres y
-    préstamos; del lado del acreedor baja el saldo del pasivo. Si el cliente
-    transfirió más de lo que debía, el excedente le queda a favor."""
+    préstamos; del lado del acreedor, entre todas las deudas que el negocio le
+    tiene, también de la más vieja a la más nueva. Si el cliente transfirió más
+    de lo que debía, el excedente le queda a favor."""
     return service.compensar(db, payload)
 
 
@@ -50,10 +51,10 @@ def compensar(payload: CompensacionCreate, db: DbSession) -> CompensacionRespons
 def list_compensaciones(
     db: DbSession,
     cliente_id: UUID | None = None,
-    pasivo_id: UUID | None = None,
+    acreedor: str | None = None,
 ) -> list[CompensacionRead]:
     """Compensaciones registradas, filtrables por cliente o por acreedor."""
-    return service.list_compensaciones(db, cliente_id=cliente_id, pasivo_id=pasivo_id)
+    return service.list_compensaciones(db, cliente_id=cliente_id, acreedor=acreedor)
 
 
 @router.post("/{compensacion_id}/revertir", response_model=RevertirResponse)

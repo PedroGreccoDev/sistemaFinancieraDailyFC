@@ -134,6 +134,11 @@ te trajeron la plata a vos, avisale.
 **Decile los dos nombres y el monto**: quién transfirió, a quién, y cuánto. Si le debés a
 varios que se llaman parecido, te pregunta a cuál.
 
+**Si le debés varias veces a la misma persona, no elijas.** Le compraste tres lotes a Pedro
+sin pagarle y son tres deudas: la transferencia se reparte sola, saldando la más vieja
+primero, y el bot te dice cuánto le bajó en total y cuántas quedaron saldadas. Es lo mismo
+que hace cuando un cliente te paga sin decir contra qué.
+
 **También lo podés hacer a mano** —cobrarle a Juan por un lado y pagarle a Pedro por el
 otro— y funciona igual. Pero ahí quedan anotados un ingreso y un egreso que no existieron,
 y si te olvidás de hacer la segunda mitad, la caja te queda con plata de más que no está

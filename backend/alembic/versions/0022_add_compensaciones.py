@@ -14,12 +14,14 @@ Esa vía sigue estando: esta es una operación más, no un reemplazo.
 **Por qué una tabla y no solo los saldos.** Sin registro, dos saldos bajan sin
 nada que lo explique: no hay qué mostrar en el detalle, ni cómo revertirlo.
 
-**Por qué el detalle por renglón.** La compensación imputa FIFO sobre todo lo que
-el cliente debe (fiados, deudas libres y cuotas de préstamo, §2.c). Revertirla es
-devolver exactamente lo que se sacó de cada uno: recalcular el reparto al revés
-daría distinto apenas ese cliente reciba otro cobro. Por eso cada renglón
-alcanzado deja su fila con lo que se le imputó — la cuota de un préstamo
-incluida, que es donde el reparto se vuelve fino.
+**Por qué el detalle por renglón.** La compensación imputa FIFO de los dos lados:
+sobre todo lo que el cliente debe (fiados, deudas libres y cuotas de préstamo,
+§2.c) y sobre todo lo que el negocio le debe a ese acreedor —que pueden ser
+varias deudas, de la más vieja a la más nueva—. Revertirla es devolver
+exactamente lo que se sacó de cada uno: recalcular el reparto al revés daría
+distinto apenas alguno de los dos reciba otro movimiento. Por eso cada renglón
+alcanzado deja su fila con lo que se le imputó — la cuota de un préstamo y cada
+pasivo del acreedor incluidos, que es donde el reparto se vuelve fino.
 
 Revision ID: 0022
 Revises: 0021
@@ -48,8 +50,14 @@ def upgrade() -> None:
         sa.Column("fecha", sa.Date(), nullable=False),
         # El que debía al negocio y transfirió.
         sa.Column("cliente_id", postgresql.UUID(as_uuid=True), nullable=False),
-        # El acreedor del negocio que recibió la transferencia.
-        sa.Column("pasivo_id", postgresql.UUID(as_uuid=True), nullable=False),
+        # El acreedor del negocio que recibió la transferencia. Es texto, igual
+        # que `pasivos.acreedor`: se le puede deber a alguien que no es cliente
+        # del sistema. No apunta a UNA deuda porque la transferencia se reparte
+        # entre todas las que se le deben, de la más vieja a la más nueva.
+        sa.Column("acreedor", sa.String(200), nullable=False),
+        # Contra qué moneda de las deudas con ese acreedor imputa. Misma razón
+        # que `moneda_deuda` del otro lado: ARS y USD no se suman.
+        sa.Column("moneda_pasivo", postgresql.ENUM(name="moneda", create_type=False), nullable=False),
         # Lo que se transfirió, en la moneda en que se transfirió. Es el hecho
         # real de la operación; de acá salen las dos imputaciones.
         sa.Column("moneda", postgresql.ENUM(name="moneda", create_type=False), nullable=False),
@@ -82,25 +90,26 @@ def upgrade() -> None:
             "cotizacion IS NULL OR cotizacion > 0",
             name="ck_compensaciones_cotizacion_positive",
         ),
-        # RESTRICT y no CASCADE: si alguien intenta borrar el cliente o el pasivo,
-        # que falle en vez de llevarse en silencio el registro de una operación
-        # que movió dos deudas.
+        # RESTRICT y no CASCADE: si alguien intenta borrar el cliente, que falle
+        # en vez de llevarse en silencio el registro de una operación que movió
+        # deudas de los dos lados.
         sa.ForeignKeyConstraint(["cliente_id"], ["clientes.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["pasivo_id"], ["pasivos.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["pasivo_excedente_id"], ["pasivos.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_compensaciones_fecha", "compensaciones", ["fecha"])
     op.create_index("ix_compensaciones_cliente", "compensaciones", ["cliente_id"])
-    op.create_index("ix_compensaciones_pasivo", "compensaciones", ["pasivo_id"])
+    op.create_index("ix_compensaciones_acreedor", "compensaciones", ["acreedor"])
 
     op.create_table(
         "compensacion_imputaciones",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("compensacion_id", postgresql.UUID(as_uuid=True), nullable=False),
-        # 'fiado' | 'deuda_simple' | 'cuota'. Del préstamo se guarda la CUOTA, que
-        # es donde cae la plata: devolverle el total al préstamo sin saber de qué
-        # cuota salió lo repartiría distinto al revertir.
+        # 'fiado' | 'deuda_simple' | 'cuota' | 'pasivo'. Del préstamo se guarda la
+        # CUOTA, que es donde cae la plata: devolverle el total al préstamo sin
+        # saber de qué cuota salió lo repartiría distinto al revertir. Del lado
+        # del acreedor va una fila por cada deuda suya que la transferencia
+        # alcanzó.
         sa.Column("entidad_tipo", sa.String(30), nullable=False),
         sa.Column("entidad_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("monto", sa.Numeric(18, 2), nullable=False),
@@ -138,7 +147,7 @@ def downgrade() -> None:
         table_name="compensacion_imputaciones",
     )
     op.drop_table("compensacion_imputaciones")
-    op.drop_index("ix_compensaciones_pasivo", table_name="compensaciones")
+    op.drop_index("ix_compensaciones_acreedor", table_name="compensaciones")
     op.drop_index("ix_compensaciones_cliente", table_name="compensaciones")
     op.drop_index("ix_compensaciones_fecha", table_name="compensaciones")
     op.drop_table("compensaciones")

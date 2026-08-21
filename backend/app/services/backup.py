@@ -110,8 +110,8 @@ _AJ = [
     "lote_id", "descripcion", "operador_id", "created_at", "updated_at", *_ANUL,
 ]
 _CO = [
-    "id", "fecha", "cliente_id", "pasivo_id", "moneda", "monto", "moneda_deuda",
-    "cotizacion", "imputado_cliente", "imputado_pasivo",
+    "id", "fecha", "cliente_id", "acreedor", "moneda", "monto", "moneda_deuda",
+    "moneda_pasivo", "cotizacion", "imputado_cliente", "imputado_pasivo",
     # El excedente y el pasivo que se le creó al cliente por él: sin el vínculo,
     # revertir la compensación no encuentra qué anular y esa plata le queda a
     # favor para siempre.
@@ -139,7 +139,7 @@ _REQUIRED: dict[str, frozenset[str]] = {
     "movimientos_caja":     frozenset({"id", "fecha", "moneda", "tipo", "categoria", "monto"}),
     "deudas_simples":       frozenset({"id", "cliente_id", "concepto", "monto", "saldo_pendiente", "moneda", "estado", "fecha"}),
     "ajustes_caja":         frozenset({"id", "fecha", "moneda", "tipo", "motivo", "monto"}),
-    "compensaciones":       frozenset({"id", "fecha", "cliente_id", "pasivo_id", "moneda", "monto", "moneda_deuda"}),
+    "compensaciones":       frozenset({"id", "fecha", "cliente_id", "acreedor", "moneda", "monto", "moneda_deuda"}),
     "compensacion_imputaciones": frozenset({"id", "compensacion_id", "entidad_tipo", "entidad_id", "monto"}),
 }
 

@@ -49,10 +49,15 @@ export default function ModalCompensar({
   onSuccess: () => void
 }) {
   const [clienteId, setClienteId] = useState(cliente?.id ?? '')
-  const [pasivoId, setPasivoId] = useState(pasivo?.id ?? '')
+  // El acreedor, no una deuda suya: la transferencia se reparte entre todas las
+  // que se le deben, de la más vieja a la más nueva.
+  const [acreedor, setAcreedor] = useState(pasivo?.acreedor ?? '')
+  const [monedaPasivo, setMonedaPasivo] = useState<Moneda>(pasivo?.moneda ?? 'ARS')
   const [monedaDeuda, setMonedaDeuda] = useState<Moneda>(cliente?.moneda ?? 'ARS')
   const [monto, setMonto] = useState('')
   const [moneda, setMoneda] = useState<Moneda>(pasivo?.moneda ?? cliente?.moneda ?? 'ARS')
+  // `pasivo` solo fija el acreedor y la moneda: la operación no es contra esa
+  // deuda puntual sino contra todo lo que se le debe.
   const [cotizacion, setCotizacion] = useState('')
   const [observaciones, setObservaciones] = useState('')
   const [loading, setLoading] = useState(false)
@@ -60,11 +65,12 @@ export default function ModalCompensar({
   const toast = useToast()
 
   // Solo deudas vivas: no tiene sentido compensar contra algo ya saldado.
+  // Siempre se cargan: aunque el acreedor venga fijo, hace falta saber cuánto se
+  // le debe en total (puede tener varias deudas) para mostrar el efecto real.
   const { data: pasivos = [] } = useQuery({
     queryKey: ['pasivos', 'PENDIENTE'],
     queryFn: () => getPasivos('PENDIENTE'),
     staleTime: 30_000,
-    enabled: !pasivo,
   })
   const { data: clientes = [] } = useQuery({
     queryKey: ['clientes'],
@@ -73,35 +79,43 @@ export default function ModalCompensar({
     enabled: !cliente,
   })
 
-  const pasivoElegido = pasivo ?? pasivos.find((p) => p.id === pasivoId)
-  const saldoPasivo = pasivoElegido ? parseFloat(pasivoElegido.saldo_pendiente) : 0
+  // Todas las deudas vivas con ese acreedor en la moneda elegida: es contra ese
+  // total que se imputa, no contra una sola.
+  const deudasAcreedor = pasivos.filter(
+    (p) => p.acreedor.trim().toLowerCase() === acreedor.trim().toLowerCase()
+      && p.moneda === monedaPasivo,
+  )
+  const saldoPasivo = deudasAcreedor.reduce((t, p) => t + parseFloat(p.saldo_pendiente), 0)
+  // Nombres únicos, para el selector: el operador elige a quién, no qué deuda.
+  const acreedores = Array.from(new Set(pasivos.map((p) => p.acreedor))).sort()
   const montoNum = parseFloat(monto) || 0
   const cotizNum = parseFloat(cotizacion) || 0
 
   // Hace falta cotización si lo transferido no está en la moneda de alguna de
   // las dos deudas. La dicta siempre el operador: el sistema no la asume.
-  const cruzaPasivo = pasivoElegido ? moneda !== pasivoElegido.moneda : false
+  const cruzaPasivo = moneda !== monedaPasivo
   const cruzaDeuda = moneda !== monedaDeuda
   const necesitaCotiz = cruzaPasivo || cruzaDeuda
 
   // Cuánto baja el pasivo, en su moneda. Transferirle más de lo que se le debe
   // lo dejaría a él debiendo: el backend lo rechaza, y acá se avisa antes.
   const equivalentePasivo =
-    pasivoElegido && montoNum > 0
+    montoNum > 0
       ? cruzaPasivo
         ? cotizNum > 0
-          ? pasivoElegido.moneda === 'USD'
+          ? monedaPasivo === 'USD'
             ? montoNum / cotizNum
             : montoNum * cotizNum
           : 0
         : montoNum
       : 0
-  const excedePasivo = Boolean(pasivoElegido) && equivalentePasivo - saldoPasivo > 0.01
+  const excedePasivo = deudasAcreedor.length > 0 && equivalentePasivo - saldoPasivo > 0.01
 
   const invalido =
     loading ||
     !clienteId ||
-    !pasivoId ||
+    !acreedor ||
+    deudasAcreedor.length === 0 ||
     montoNum <= 0 ||
     (necesitaCotiz && cotizNum <= 0) ||
     excedePasivo
@@ -113,7 +127,8 @@ export default function ModalCompensar({
     try {
       const r = await compensar({
         cliente_id: clienteId,
-        pasivo_id: pasivoId,
+        acreedor,
+        moneda_pasivo: monedaPasivo,
         moneda_deuda: monedaDeuda,
         monto: montoNum,
         moneda,
@@ -162,19 +177,33 @@ export default function ModalCompensar({
               <label style={LABEL_STYLE}>A quién le transfirió (vos le debés)</label>
               <p style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-1)' }}>{pasivo.acreedor}</p>
               <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.7)' }}>
-                {pasivo.concepto} · le debés {fmt(saldoPasivo, pasivo.moneda)}
+                Le debés {fmt(saldoPasivo, monedaPasivo)}
+                {deudasAcreedor.length > 1 && ` en ${deudasAcreedor.length} deudas — se imputa de la más vieja a la más nueva`}
               </p>
             </div>
           ) : (
             <div>
               <label style={LABEL_STYLE}>A quién le transfirió (vos le debés)</label>
-              <select value={pasivoId} onChange={(e) => setPasivoId(e.target.value)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
-                <option value="">— Elegí la deuda —</option>
-                {pasivos.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.acreedor} — {p.concepto} ({fmt(parseFloat(p.saldo_pendiente), p.moneda)})
-                  </option>
-                ))}
+              <select value={acreedor} onChange={(e) => setAcreedor(e.target.value)} required style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+                <option value="">— Elegí el acreedor —</option>
+                {acreedores.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+              {acreedor && (
+                <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.7)', marginTop: '0.25rem' }}>
+                  Le debés {fmt(saldoPasivo, monedaPasivo)}
+                  {deudasAcreedor.length > 1 && ` en ${deudasAcreedor.length} deudas — se imputa de la más vieja a la más nueva`}
+                </p>
+              )}
+            </div>
+          )}
+          {/* Si le debés en las dos monedas hay que declarar contra cuál va: no
+              se suman entre sí. */}
+          {acreedor && new Set(pasivos.filter((p) => p.acreedor === acreedor).map((p) => p.moneda)).size > 1 && (
+            <div>
+              <label style={LABEL_STYLE}>Contra qué deuda con {acreedor}</label>
+              <select value={monedaPasivo} onChange={(e) => setMonedaPasivo(e.target.value as Moneda)} style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
+                <option value="ARS">Lo que le debés en pesos</option>
+                <option value="USD">Lo que le debés en dólares</option>
               </select>
             </div>
           )}
@@ -214,15 +243,15 @@ export default function ModalCompensar({
             </div>
           )}
 
-          {pasivoElegido && montoNum > 0 && (
+          {deudasAcreedor.length > 0 && montoNum > 0 && (
             <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.6rem 0.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontFamily: FM, fontSize: '0.78rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'rgba(100,116,139,0.7)' }}>Le baja a {pasivoElegido.acreedor}</span>
-                <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmt(equivalentePasivo, pasivoElegido.moneda)}</span>
+                <span style={{ color: 'rgba(100,116,139,0.7)' }}>Le baja a {acreedor}</span>
+                <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmt(equivalentePasivo, monedaPasivo)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'rgba(100,116,139,0.7)' }}>Le seguís debiendo</span>
-                <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmt(Math.max(saldoPasivo - equivalentePasivo, 0), pasivoElegido.moneda)}</span>
+                <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmt(Math.max(saldoPasivo - equivalentePasivo, 0), monedaPasivo)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--bd-006)', paddingTop: '0.35rem' }}>
                 <span style={{ color: 'rgba(100,116,139,0.7)' }}>Sale de tu caja</span>
@@ -233,9 +262,10 @@ export default function ModalCompensar({
 
           {excedePasivo && (
             <p style={{ fontFamily: FM, fontSize: '0.72rem', color: '#f87171' }}>
-              Le transferiría {fmt(equivalentePasivo, pasivoElegido!.moneda)} y solo le debés{' '}
-              {fmt(saldoPasivo, pasivoElegido!.moneda)}. Si le mandó de más, esa diferencia
-              es otra operación: cargala aparte.
+              Le transferiría {fmt(equivalentePasivo, monedaPasivo)} y solo le debés{' '}
+              {fmt(saldoPasivo, monedaPasivo)}
+              {deudasAcreedor.length > 1 && ' sumando todas sus deudas'}. Si le mandó de
+              más, esa diferencia es otra operación: cargala aparte.
             </p>
           )}
 

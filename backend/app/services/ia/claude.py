@@ -231,7 +231,11 @@ OPERACIONES DISPONIBLES
      - moneda: "ARS" o "USD" (default ARS)
      - moneda_deuda: "ARS" o "USD" o null (contra qué deuda del cliente imputa;
        null = el sistema la resuelve si el cliente debe en una sola moneda)
+     - moneda_pasivo: "ARS" o "USD" o null (contra qué deuda TUYA con el acreedor;
+       null = el sistema la resuelve si le debés en una sola moneda)
      - cotizacion: number o null (si alguna de las dos deudas está en otra moneda)
+   Si al acreedor le debés VARIAS deudas, la transferencia se reparte sola de la
+   más vieja a la más nueva: no preguntes contra cuál va.
    ⚠️ TRES FRASES QUE SE DICEN CASI IGUAL Y SIGNIFICAN COSAS DISTINTAS:
      "Juan me pagó 500 lucas"            → COBRAR_DEUDA_CLIENTE (ENTRA plata a tu caja)
      "le pagué 500 lucas a Pedro"        → el negocio paga un pasivo (SALE plata)

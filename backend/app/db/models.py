@@ -973,9 +973,14 @@ class Compensacion(AnulableMixin, Base):
     cliente_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), sa.ForeignKey("clientes.id", ondelete="RESTRICT"), index=True
     )
-    pasivo_id:  Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), sa.ForeignKey("pasivos.id", ondelete="RESTRICT"), index=True
-    )
+    # Texto, igual que `pasivos.acreedor`: se le puede deber a alguien que no es
+    # cliente del sistema. No apunta a UNA deuda porque la transferencia se
+    # reparte entre todas las que se le deben, de la más vieja a la más nueva
+    # —el mismo criterio que del lado del cliente—.
+    acreedor:      Mapped[str] = mapped_column(sa.String(200), index=True)
+    # Contra qué moneda de las deudas con ese acreedor imputa (ARS y USD no se
+    # suman, igual que del otro lado).
+    moneda_pasivo: Mapped[Moneda] = mapped_column(sa.Enum(Moneda, name="moneda", create_type=False))
     # Lo que se transfirió, en la moneda en que se transfirió: el hecho real de
     # la operación. De acá salen las dos imputaciones.
     moneda: Mapped[Moneda] = mapped_column(sa.Enum(Moneda, name="moneda", create_type=False))
@@ -1001,7 +1006,6 @@ class Compensacion(AnulableMixin, Base):
     )
 
     cliente: Mapped["Cliente"] = relationship("Cliente", foreign_keys=[cliente_id], lazy="selectin")
-    pasivo:  Mapped["Pasivo"]  = relationship("Pasivo", foreign_keys=[pasivo_id], lazy="selectin")
     imputaciones: Mapped[list["CompensacionImputacion"]] = relationship(
         "CompensacionImputacion",
         back_populates="compensacion",
@@ -1020,7 +1024,8 @@ class CompensacionImputacion(Base):
 
     Del préstamo se anota la **cuota**, no el préstamo: ahí es donde cae la plata
     (`repartir_pago_en_cuotas`, §3), y devolverle el total al préstamo sin saber
-    de qué cuota salió lo repartiría distinto.
+    de qué cuota salió lo repartiría distinto. Del lado del acreedor va una fila
+    por cada deuda suya que la transferencia alcanzó, por la misma razón.
     """
 
     __tablename__ = "compensacion_imputaciones"
@@ -1033,7 +1038,7 @@ class CompensacionImputacion(Base):
     compensacion_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), sa.ForeignKey("compensaciones.id", ondelete="CASCADE"), index=True
     )
-    # 'fiado' | 'deuda_simple' | 'cuota'
+    # 'fiado' | 'deuda_simple' | 'cuota' | 'pasivo'
     entidad_tipo: Mapped[str] = mapped_column(sa.String(30))
     entidad_id:   Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True))
     monto:        Mapped[Decimal] = mapped_column(sa.Numeric(18, 2))

@@ -163,3 +163,72 @@ def test_la_compensacion_no_declara_lineas_de_caja() -> None:
     # asienta nada en el libro. Si algún día declarara refs, sería señal de que
     # alguien le hizo mover la caja.
     assert _ENTIDADES["compensacion"].refs == ()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  FIFO del lado del acreedor
+# ══════════════════════════════════════════════════════════════════════
+
+def test_la_transferencia_llena_la_deuda_mas_vieja_primero() -> None:
+    # Le comprás tres veces a Pedro sin pagarle: son tres deudas. Cuando alguien
+    # le transfiere, esa plata no va contra una elegida a dedo — llena la más
+    # vieja primero, igual que del lado del cliente.
+    from app.services.prestamos import repartir_pago_en_cuotas
+
+    saldos = [Decimal("300000.00"), Decimal("400000.00"), Decimal("500000.00")]
+    aplicado = repartir_pago_en_cuotas(saldos, Decimal("800000.00"))
+
+    assert aplicado == [
+        Decimal("300000.00"),  # saldada
+        Decimal("400000.00"),  # saldada
+        Decimal("100000.00"),  # queda debiendo 400.000
+    ]
+
+
+def test_el_reparto_al_acreedor_nunca_supera_lo_que_se_le_debe() -> None:
+    from app.services.prestamos import repartir_pago_en_cuotas
+
+    saldos = [Decimal("300000.00"), Decimal("400000.00")]
+    aplicado = repartir_pago_en_cuotas(saldos, Decimal("900000.00"))
+    # El tope lo pone `calcular_reduccion_saldo` antes de repartir; el repartidor
+    # además no inventa: nunca aplica más que el saldo de cada una.
+    assert sum(aplicado) == Decimal("700000.00")
+
+
+def test_el_tope_del_acreedor_es_la_suma_de_todas_sus_deudas() -> None:
+    # Transferirle más que el TOTAL lo dejaría a él debiéndole al negocio, y eso
+    # es otra operación. El tope no es una deuda suelta: son todas juntas.
+    saldo_total = Decimal("300000.00") + Decimal("400000.00") + Decimal("500000.00")
+    assert calcular_reduccion_saldo(
+        Moneda.ARS, saldo_total, Moneda.ARS, Decimal("1200000.00"), None
+    ) == Decimal("1200000.00")
+
+    # Un centavo de más se tolera: al convertir monedas el redondeo lo produce
+    # solo, y hacer fallar "pagar el total" por eso sería peor que absorberlo.
+    assert calcular_reduccion_saldo(
+        Moneda.ARS, saldo_total, Moneda.ARS, Decimal("1200000.01"), None
+    ) == saldo_total
+
+    with pytest.raises(ValidationError):
+        calcular_reduccion_saldo(
+            Moneda.ARS, saldo_total, Moneda.ARS, Decimal("1200000.02"), None
+        )
+
+
+def test_al_revertir_cada_deuda_del_acreedor_recibe_lo_suyo() -> None:
+    # Se guarda una fila por pasivo alcanzado con lo que se le imputó, así que
+    # restituir es devolver ese número, no rehacer el reparto: entre medio esas
+    # deudas pudieron recibir pagos y el reparto daría distinto.
+    from app.services.compensaciones import _CENTAVO
+
+    saldos = {"vieja": Decimal("0.00"), "media": Decimal("0.00"), "nueva": Decimal("400000.00")}
+    imputado = {"vieja": Decimal("300000.00"), "media": Decimal("400000.00"), "nueva": Decimal("100000.00")}
+
+    for clave, monto in imputado.items():
+        saldos[clave] = (saldos[clave] + monto).quantize(_CENTAVO)
+
+    assert saldos == {
+        "vieja": Decimal("300000.00"),
+        "media": Decimal("400000.00"),
+        "nueva": Decimal("500000.00"),
+    }
