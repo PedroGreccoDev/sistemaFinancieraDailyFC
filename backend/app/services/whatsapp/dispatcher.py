@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    Compensacion,
     CajaCategoria,
     CajaTipo,
     Cheque,
@@ -40,7 +41,9 @@ from app.schemas.cheques import ChequeFiarRequest, ChequeCreate, ChequeManualTra
 from app.schemas.clientes import ClienteCreate
 from app.schemas.deudas_simples import DeudaSimpleCreate
 from app.services import deudas_simples as svc_deudas_simples
+from app.schemas.compensaciones import CompensacionCreate
 from app.schemas.deudores import CobroClienteCreate
+from app.services import compensaciones as svc_compensaciones
 from app.services import deudores as svc_deudores
 from app.schemas.fiados import FiadoCobrarConChequeRequest, FiadoCobrarEfectivoRequest
 from app.schemas.movimientos import MovimientoEfectivoCreate
@@ -125,6 +128,8 @@ def dispatch(
             return _cobrar_fiado_con_cheque(db, phone, data, msg_at)
         if intent == "COBRAR_DEUDA_CLIENTE":
             return _cobrar_deuda_cliente(db, data, msg_at)
+        if intent == "COMPENSAR_DEUDA":
+            return _compensar_deuda(db, data, msg_at)
         if intent == "REGISTRAR_DEUDA":
             return _registrar_deuda(db, data, msg_at)
         if intent == "REGISTRAR_DEUDA_CLIENTE":
@@ -876,6 +881,133 @@ def _cobrar_deuda_cliente(
     return True, "\n".join(lines)
 
 
+def _buscar_pasivo_acreedor(db: Session, nombre: str) -> Pasivo:
+    """El pasivo vivo del negocio con ese acreedor, para compensar contra él.
+
+    El acreedor de un pasivo es **texto libre**, no un cliente del sistema (se
+    le puede deber a alguien que nunca operó acá), así que se resuelve por
+    nombre como los clientes: substring, y si hay más de un acreedor posible se
+    pregunta en vez de elegir — compensar contra el acreedor equivocado saldaría
+    una deuda que sigue viva.
+
+    Si al mismo acreedor se le deben varias, se toma la **más vieja**, igual que
+    la imputación de deudas de cliente (§2.c), y la respuesta dice cuál es.
+    """
+    nombre = nombre.strip()
+    candidatos: list[Pasivo] = list(
+        db.scalars(
+            select(Pasivo)
+            .where(
+                Pasivo.acreedor.ilike(f"%{nombre}%"),
+                Pasivo.estado == PasivoEstado.PENDIENTE,
+                Pasivo.saldo_pendiente > Decimal("0.00"),
+                Pasivo.anulado_at.is_(None),
+            )
+            .order_by(Pasivo.created_at.asc())
+        ).all()
+    )
+    if not candidatos:
+        raise ValueError(
+            f"No encontré ninguna deuda tuya con '{nombre}'. ¿A quién le "
+            "transfirió exactamente?"
+        )
+
+    acreedores = {p.acreedor.strip().lower() for p in candidatos}
+    if len(acreedores) > 1:
+        nombres = ", ".join(sorted({p.acreedor for p in candidatos})[:5])
+        raise ValueError(
+            f"Le debés a varios que coinciden con '{nombre}': {nombres}. "
+            "¿A cuál de todos le transfirió?"
+        )
+    return candidatos[0]
+
+
+def _compensar_deuda(
+    db: Session, data: dict[str, Any], msg_at: datetime | None = None
+) -> DispatchResult:
+    """El cliente le transfirió a un acreedor del negocio: bajan las dos deudas.
+
+    No es un cobro: la plata nunca entró a la caja. La respuesta lo dice
+    explícitamente, porque es el control inmediato del operador de que el bot no
+    confundió esto con "me pagó" —que sí haría entrar plata que no entró—.
+
+    Igual que en el cobro consolidado, si el cliente debe en las dos monedas se
+    pregunta en vez de elegir: imputar pesos contra la deuda en dólares mueve
+    dos cajas distintas.
+    """
+    cliente_nombre = _req_str(data, "cliente_nombre")
+    acreedor_nombre = _req_str(data, "acreedor_nombre")
+    monto = _req_decimal(data, "monto")
+    moneda = _req_enum(data, "moneda", Moneda) if data.get("moneda") else Moneda.ARS
+    cotizacion = _opt_decimal(data, "cotizacion")
+
+    cliente = _buscar_cliente_o_error(db, cliente_nombre, estricto=True)
+    pasivo = _buscar_pasivo_acreedor(db, acreedor_nombre)
+
+    ars = svc_deudores.resumen_cliente(db, cliente.id, Moneda.ARS)
+    usd = svc_deudores.resumen_cliente(db, cliente.id, Moneda.USD)
+    con_deuda = [r for r in (ars, usd) if r.total > Decimal("0.00")]
+    if not con_deuda:
+        return False, f"❓ {cliente.nombre} no tiene deuda abierta."
+
+    if data.get("moneda_deuda"):
+        moneda_deuda = _req_enum(data, "moneda_deuda", Moneda)
+    elif len(con_deuda) == 1:
+        moneda_deuda = con_deuda[0].moneda
+    else:
+        return False, (
+            f"❓ {cliente.nombre} debe {_ars(ars.total)} y U$D{_fmt_num(usd.total)}. "
+            "¿Contra cuál imputo la transferencia, la deuda en pesos o la de dólares?"
+        )
+
+    payload = CompensacionCreate(
+        cliente_id=cliente.id,
+        pasivo_id=pasivo.id,
+        moneda_deuda=moneda_deuda,
+        monto=monto,
+        moneda=moneda,
+        cotizacion=cotizacion,
+        fecha=fecha_local(msg_at),
+    )
+    r = svc_compensaciones.compensar(db, payload)
+
+    simbolo = "U$D" if moneda == Moneda.USD else "$"
+    simbolo_deuda = "U$D" if moneda_deuda == Moneda.USD else "$"
+    simbolo_pasivo = "U$D" if pasivo.moneda == Moneda.USD else "$"
+    lines = [
+        f"✅ *Compensación registrada*",
+        f"{r.cliente_nombre} le transfirió {simbolo}{_fmt_num(monto)} a {r.acreedor}",
+        "⚠️ No movió la caja: esa plata no pasó por acá.",
+        "",
+        f"*{r.cliente_nombre} te debía* — se imputó a:",
+    ]
+    for renglon in r.renglones:
+        saldado = " ✔️ saldado" if renglon.cancelado else ""
+        lines.append(
+            f"  • {renglon.detalle} — {simbolo_deuda}{_fmt_num(renglon.imputado)}{saldado}"
+        )
+    if r.saldo_restante_cliente <= Decimal("0.00"):
+        lines.append(f"  🎉 No te debe más nada en {moneda_deuda.value}.")
+    else:
+        lines.append(f"  Sigue debiendo: {simbolo_deuda}{_fmt_num(r.saldo_restante_cliente)}")
+
+    lines.append("")
+    lines.append(f"*Le debías a {r.acreedor}* — {pasivo.concepto}:")
+    lines.append(f"  • Se descontó: {simbolo_pasivo}{_fmt_num(r.imputado_pasivo)}")
+    if r.pasivo_cancelado:
+        lines.append(f"  ✔️ Saldada: ya no le debés nada de esta deuda.")
+    else:
+        lines.append(f"  Le seguís debiendo: {simbolo_pasivo}{_fmt_num(r.saldo_restante_pasivo)}")
+
+    if r.excedente > Decimal("0.00"):
+        lines.append("")
+        lines.append(
+            f"↩️ Transfirió {simbolo}{_fmt_num(r.excedente)} de más: "
+            f"le quedan a favor (ahora se los debés vos)."
+        )
+    return True, "\n".join(lines)
+
+
 def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     cliente_nombre = _req_str(data, "cliente_nombre")
     nro_cheque_pago = _req_str(data, "nro_cheque_pago")
@@ -1080,6 +1212,18 @@ def _resolver_para_anular(db: Session, tipo: str, identificador: str):
                 "Eliminá el que corresponda desde el panel para no equivocarnos."
             )
         return "prestamo", prestamos[0]
+
+    if tipo == "COMPENSACION":
+        # Por cliente, o "ultimo". Una compensación no tiene número propio que el
+        # operador recuerde: la identifica por quién transfirió.
+        stmt = select(Compensacion).where(Compensacion.anulado_at.is_(None))
+        if ident not in ("ultimo", "último", ""):
+            cliente = _buscar_cliente_o_error(db, identificador, estricto=True)
+            stmt = stmt.where(Compensacion.cliente_id == cliente.id)
+        comp = db.scalars(stmt.order_by(Compensacion.created_at.desc()).limit(1)).first()
+        if comp is None:
+            raise ValueError("No encontré ninguna compensación para deshacer.")
+        return "compensacion", comp
 
     raise ValueError(f"No sé deshacer operaciones de tipo '{tipo}'.")
 

@@ -37,6 +37,7 @@ INTENTS = {
     "COBRAR_FIADO_EFECTIVO",
     "COBRAR_FIADO_CON_CHEQUE",
     "COBRAR_DEUDA_CLIENTE",
+    "COMPENSAR_DEUDA",
     "REGISTRAR_DEUDA",
     "REGISTRAR_DEUDA_CLIENTE",
     "MOVIMIENTO_EFECTIVO",
@@ -217,6 +218,33 @@ OPERACIONES DISPONIBLES
    el monto. NO asumas que pagó la cuota entera: el cliente entrega lo que tiene,
    y dar por cobrada una cuota que se pagó a medias descuadra la caja del día.
 
+9b. COMPENSAR_DEUDA  ←— el cliente le paga a un acreedor TUYO
+   Cuándo: Alguien que te debe le transfiere plata directamente a alguien a
+     quien VOS le debés. Bajan las dos deudas y por tu caja NO pasa nada.
+   Ej: "Juan le transfirió 500 lucas a Pedro",
+       "El kiosco le pagó 300 mil a Martín de lo que me debe",
+       "Que Olivero le mande 200 mil a Cuello y me lo descuenta"
+   data:
+     - cliente_nombre: string (el que TE debe y transfirió)
+     - acreedor_nombre: string (a quien VOS le debés y recibió la plata)
+     - monto: number (lo que transfirió)
+     - moneda: "ARS" o "USD" (default ARS)
+     - moneda_deuda: "ARS" o "USD" o null (contra qué deuda del cliente imputa;
+       null = el sistema la resuelve si el cliente debe en una sola moneda)
+     - cotizacion: number o null (si alguna de las dos deudas está en otra moneda)
+   ⚠️ TRES FRASES QUE SE DICEN CASI IGUAL Y SIGNIFICAN COSAS DISTINTAS:
+     "Juan me pagó 500 lucas"            → COBRAR_DEUDA_CLIENTE (ENTRA plata a tu caja)
+     "le pagué 500 lucas a Pedro"        → el negocio paga un pasivo (SALE plata)
+     "Juan le transfirió 500 a Pedro"    → COMPENSAR_DEUDA (NO se mueve la caja)
+   La diferencia entre la primera y la tercera es un simple "a Pedro". Y el error
+   NO es simétrico: leer la tercera como la primera mete un ingreso que nunca
+   entró Y ADEMÁS deja viva la deuda con Pedro — descuadra dos cosas de una, y no
+   se nota hasta leer el reporte. Si no queda claro si la plata te la trajeron a
+   vos o se la mandaron a un tercero → ACLARACION_REQUERIDA.
+   SIN IMPORTE NO SE COMPENSA: si no dice cuánto transfirió → ACLARACION_REQUERIDA.
+   HACEN FALTA LOS DOS NOMBRES: quién transfirió y a quién. Si falta alguno →
+   ACLARACION_REQUERIDA; no inventes contra qué deuda tuya va.
+
 10. REGISTRAR_DEUDA  ←— dirección: EL NEGOCIO DEBE
    Cuándo: El operador informa que el negocio le debe dinero a alguien.
    Ej: "Le debo 5000 a Fernando Cuello", "Anotá que le debo 200 dólares a María por los insumos"
@@ -369,7 +397,8 @@ OPERACIONES DISPONIBLES
         "Ese cheque volvió, no se cobró",
         "Borrá el gasto de nafta que cargué recién",
         "Anulá la compra de dólares de recién",
-        "El préstamo a Juan no va, eliminalo"
+        "El préstamo a Juan no va, eliminalo",
+        "Deshacé la transferencia que Juan le hizo a Pedro"
     data:
       - accion: "REVERTIR" | "ELIMINAR"
           * REVERTIR → solo para CHEQUE: deshace la venta/cobro/fiado y lo devuelve
@@ -377,13 +406,17 @@ OPERACIONES DISPONIBLES
             Usalo cuando dicen "volvelo a cartera", "no se vendió", "deshacé la venta".
           * ELIMINAR → da de baja la operación entera y revierte su efecto en la caja.
             Usalo cuando dicen "borrá", "eliminá", "anulá", "sacá eso".
-      - tipo_operacion: "CHEQUE" | "GASTO" | "PRESTAMO" | "PASIVO" | "MOVIMIENTO"
+      - tipo_operacion: "CHEQUE" | "GASTO" | "PRESTAMO" | "PASIVO" | "MOVIMIENTO" | "COMPENSACION"
       - identificador: string
           * CHEQUE → el nro_cheque (puede ser parcial; el sistema lo resuelve)
           * GASTO → "ultimo" o el concepto del gasto (solo gastos de HOY)
           * PRESTAMO → el nombre del cliente
           * PASIVO → "ultimo" o el nombre del acreedor
           * MOVIMIENTO → "ultimo" (la última operación de divisas)
+          * COMPENSACION → "ultimo" o el nombre del cliente que transfirió
+            ("deshacé lo de Juan con Pedro" → identificador "Juan"). Al deshacerla
+            las dos deudas vuelven a como estaban y la caja no cambia, porque
+            nunca se movió.
       - motivo: string (por qué se deshace; si no lo dice, usá "Revertido desde el chat")
     Reglas:
       - SIEMPRE poné confirmacion_requerida: true y describí en respuesta_usuario qué
