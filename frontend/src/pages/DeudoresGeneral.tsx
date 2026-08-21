@@ -9,6 +9,7 @@ import { chip, btnSolid, btnBordered } from '../lib/ui'
 import { IconPlus, IconRefresh } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
 import ModalPagarDeuda, { type DeudaItem } from '../components/ModalPagarDeuda'
+import ModalCompensar, { type CompensarCliente } from '../components/ModalCompensar'
 import ModalNuevaDeudaSimple from '../components/ModalNuevaDeudaSimple'
 import type { Moneda, Prestamo, Fiado, DeudaSimple, Cliente } from '../types'
 
@@ -121,16 +122,18 @@ function TotalMoneda({
   moneda,
   total,
   onPagar,
+  onCompensar,
 }: {
   deudor: DeudorResumen
   moneda: Moneda
   total: number
   onPagar: (d: DeudaItem) => void
+  onCompensar: (c: CompensarCliente) => void
 }) {
   const operaciones = deudor.deudas.filter((d) => d.moneda === moneda).length
   const color = moneda === 'USD' ? '#38bdf8' : '#fbbf24'
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
       <div>
         <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)' }}>
           Total {moneda} · {operaciones} operación{operaciones > 1 ? 'es' : ''}
@@ -152,11 +155,20 @@ function TotalMoneda({
       >
         Pagar
       </button>
+      <button
+        onClick={() =>
+          onCompensar({ id: deudor.clienteId, nombre: deudor.nombre, saldo: total, moneda })
+        }
+        title="Lo pagó transfiriéndole a alguien a quien vos le debés"
+        style={{ ...btnBordered('neutral'), fontSize: '0.78rem', padding: '0.5rem 1rem' }}
+      >
+        Compensar
+      </button>
     </div>
   )
 }
 
-function DeudorCard({ deudor, onPagar }: { deudor: DeudorResumen; onPagar: (d: DeudaItem) => void }) {
+function DeudorCard({ deudor, onPagar, onCompensar }: { deudor: DeudorResumen; onPagar: (d: DeudaItem) => void; onCompensar: (c: CompensarCliente) => void }) {
   return (
     <div className="lift" style={{ ...CARD, padding: '1rem 1.15rem' }}>
       <h3 style={{ fontFamily: FM, fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word' }}>{deudor.nombre}</h3>
@@ -179,10 +191,10 @@ function DeudorCard({ deudor, onPagar }: { deudor: DeudorResumen; onPagar: (d: D
           distintas y no se suman entre sí. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid var(--bd-006)' }}>
         {deudor.totalArs > 0.009 && (
-          <TotalMoneda deudor={deudor} moneda="ARS" total={deudor.totalArs} onPagar={onPagar} />
+          <TotalMoneda deudor={deudor} moneda="ARS" total={deudor.totalArs} onPagar={onPagar} onCompensar={onCompensar} />
         )}
         {deudor.totalUsd > 0.009 && (
-          <TotalMoneda deudor={deudor} moneda="USD" total={deudor.totalUsd} onPagar={onPagar} />
+          <TotalMoneda deudor={deudor} moneda="USD" total={deudor.totalUsd} onPagar={onPagar} onCompensar={onCompensar} />
         )}
       </div>
     </div>
@@ -193,6 +205,7 @@ function DeudorCard({ deudor, onPagar }: { deudor: DeudorResumen; onPagar: (d: D
 
 export default function DeudoresGeneral() {
   const [pagando, setPagando] = useState<DeudaItem | null>(null)
+  const [compensando, setCompensando] = useState<CompensarCliente | null>(null)
   const [creando, setCreando] = useState(false)
   const queryClient = useQueryClient()
 
@@ -276,11 +289,18 @@ export default function DeudoresGeneral() {
       )}
       {!isLoading && !error && resumen.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {resumen.map((d) => <DeudorCard key={d.clienteId} deudor={d} onPagar={setPagando} />)}
+          {resumen.map((d) => <DeudorCard key={d.clienteId} deudor={d} onPagar={setPagando} onCompensar={setCompensando} />)}
         </div>
       )}
 
       {pagando && <ModalPagarDeuda deuda={pagando} onClose={() => setPagando(null)} onSuccess={handleSuccess} />}
+      {compensando && (
+        <ModalCompensar
+          cliente={compensando}
+          onClose={() => setCompensando(null)}
+          onSuccess={() => { setCompensando(null); handleSuccess() }}
+        />
+      )}
       {creando && <ModalNuevaDeudaSimple onClose={() => setCreando(false)} onSuccess={handleCreada} />}
     </div>
   )

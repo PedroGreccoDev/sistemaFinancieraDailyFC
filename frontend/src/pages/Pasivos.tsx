@@ -10,6 +10,7 @@ import { SkeletonRows } from '../components/Skeleton'
 import type { Cheque, MedioPago, Moneda, Pasivo, PasivoEstado } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
 import ModalEliminar from '../components/ModalEliminar'
+import ModalCompensar from '../components/ModalCompensar'
 
 type Filtro = 'todos' | PasivoEstado
 
@@ -391,6 +392,7 @@ export default function Pasivos() {
   const [pasivoCheque, setPasivoCheque] = useState<Pasivo | null>(null)
   const [pasivoEditar, setPasivoEditar] = useState<Pasivo | null>(null)
   const [pasivoEliminar, setPasivoEliminar] = useState<Pasivo | null>(null)
+  const [pasivoCompensar, setPasivoCompensar] = useState<Pasivo | null>(null)
   const [mostrarNueva, setMostrarNueva] = useState(false)
   const queryClient = useQueryClient()
 
@@ -495,6 +497,7 @@ export default function Pasivos() {
                     <>
                       <button onClick={() => setPasivoEfectivo(pasivo)} style={{ ...btnFlat('success'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Pagar</button>
                       <button onClick={() => setPasivoCheque(pasivo)} style={{ ...btnFlat('primary'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Con cheque</button>
+                      <button onClick={() => setPasivoCompensar(pasivo)} title="Se la cubrió un cliente que te debe" style={{ ...btnFlat('warning'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Compensar</button>
                     </>
                   )}
                   <button onClick={() => setPasivoEditar(pasivo)} style={{ ...btnBordered('neutral'), flex: pasivo.estado === 'PENDIENTE' ? '0 0 auto' : 1, fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}>Editar</button>
@@ -534,6 +537,7 @@ export default function Pasivos() {
                           <>
                             <button onClick={() => setPasivoEfectivo(pasivo)} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Pagar</button>
                             <button onClick={() => setPasivoCheque(pasivo)} style={{ ...btnFlat('primary'), fontSize: '0.68rem', padding: '2px 8px' }}>Con cheque</button>
+                            <button onClick={() => setPasivoCompensar(pasivo)} title="Se la cubrió un cliente que te debe" style={{ ...btnFlat('warning'), fontSize: '0.68rem', padding: '2px 8px' }}>Compensar</button>
                           </>
                         )}
                         <button onClick={() => setPasivoEditar(pasivo)} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>Editar</button>
@@ -554,6 +558,13 @@ export default function Pasivos() {
       {pasivoCheque && <ModalCancelarCheque pasivo={pasivoCheque} onClose={() => setPasivoCheque(null)} onSuccess={handleSuccess} />}
       {pasivoEditar && <ModalEditarDeuda pasivo={pasivoEditar} onClose={() => setPasivoEditar(null)} onSuccess={handleSuccess} />}
       {pasivoEliminar && <ModalEliminar entidad="pasivo" id={pasivoEliminar.id} onClose={() => setPasivoEliminar(null)} onSuccess={handleSuccess} />}
+      {pasivoCompensar && (
+        <ModalCompensar
+          pasivo={pasivoCompensar}
+          onClose={() => setPasivoCompensar(null)}
+          onSuccess={() => { setPasivoCompensar(null); handleSuccess() }}
+        />
+      )}
     </div>
   )
 }
