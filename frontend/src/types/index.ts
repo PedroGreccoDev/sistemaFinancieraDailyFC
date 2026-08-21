@@ -15,6 +15,9 @@ export interface Cheque {
   fecha_emision: string | null
   fecha_pago: string | null
   porcentaje_compra: string
+  // Cuánto se abonó al comprarlo. null = se pagó todo; menos que el valor neto
+  // significa que hay una deuda abierta con el vendedor (§Comprar sin abonar).
+  monto_abonado: string | null
   porcentaje_venta: string | null
   ganancia: string
   estado: ChequeEstado
@@ -148,6 +151,9 @@ export interface MovimientoEfectivo {
   moneda: Moneda
   monto: string
   cotizacion_aplicada: string
+  // Pesos abonados. null = se pagó todo; menos que monto × cotización significa
+  // que hay una deuda abierta con el vendedor (§Comprar sin abonar).
+  monto_abonado: string | null
   ganancia: string
   usd_restante: string
   fecha_operacion: string

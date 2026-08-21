@@ -264,6 +264,12 @@ class Cheque(AnulableMixin, Base):
     fecha_emision:     Mapped[date | None]    = mapped_column(sa.Date(),        nullable=True)
     fecha_pago:        Mapped[date | None]    = mapped_column(sa.Date(),        nullable=True)
     porcentaje_compra: Mapped[Decimal]        = mapped_column(sa.Numeric(7, 4))
+    # Pesos realmente abonados al comprarlo. NULL = se pagó todo (el caso normal).
+    # Lo que falte para el valor neto quedó a deber y vive como pasivo con el
+    # vendedor (§Comprar sin abonar). Se guarda porque el egreso de caja se
+    # reconstruye desde acá al editar: derivarlo del saldo del pasivo daría mal
+    # apenas ese pasivo reciba un pago.
+    monto_abonado:     Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
     porcentaje_venta:  Mapped[Decimal | None] = mapped_column(sa.Numeric(7, 4), nullable=True)
     ganancia:          Mapped[Decimal]        = mapped_column(sa.Numeric(18, 2), default=Decimal("0.00"))
     estado:            Mapped[ChequeEstado]   = mapped_column(
@@ -486,6 +492,11 @@ class MovimientoEfectivo(AnulableMixin, Base):
     )
     monto:               Mapped[Decimal]  = mapped_column(sa.Numeric(18, 2))
     cotizacion_aplicada: Mapped[Decimal]  = mapped_column(sa.Numeric(18, 6))
+    # Pesos realmente abonados en una COMPRA. NULL = se pagó todo (el caso normal).
+    # Lo que falte para `monto × cotizacion` quedó a deber y vive como pasivo con
+    # el vendedor (§Comprar sin abonar). Se guarda porque el egreso de caja se
+    # reconstruye desde acá al editar.
+    monto_abonado:       Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
     ganancia:            Mapped[Decimal]  = mapped_column(sa.Numeric(18, 2), default=Decimal("0.00"))
     # Stock de USD aún no consumido de esta operación. Solo aplica a las COMPRA:
     # arranca = monto y se decrementa al imputar ventas FIFO (las VENTA quedan en 0).
@@ -655,6 +666,13 @@ class Pasivo(AnulableMixin, Base):
     # Cotización ($/USD) de la PRIMERA cancelación en moneda distinta a la deuda.
     # Se setea una sola vez y sirve de default editable para los pagos siguientes.
     cotizacion_pago:   Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 4), nullable=True)
+
+    # De qué compra salió este pasivo: 'movimiento_efectivo' (dólares comprados a
+    # deber) o 'cheque' (cheque comprado a deber). NULL = cargado a mano.
+    # Sin este vínculo, anular la compra dejaría vivo un pasivo por plata que ya
+    # no se debe (§Comprar sin abonar).
+    origen_tipo:       Mapped[str | None]     = mapped_column(sa.String(40), nullable=True)
+    origen_id:         Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(

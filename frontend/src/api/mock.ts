@@ -31,7 +31,7 @@ function enCartera(id: string, nro: string, banco: string | null, monto: string,
   return {
     id, nro_cheque: nro, banco, monto,
     fecha_emision: d(createdOff - 30), fecha_pago: pagoOff === null ? null : d(pagoOff),
-    porcentaje_compra: compra, porcentaje_venta: null, ganancia: '0.00',
+    porcentaje_compra: compra, monto_abonado: null, porcentaje_venta: null, ganancia: '0.00',
     estado: 'EN_CARTERA', ultimo_evento_manual_at: null, ultimo_operador_id: null,
     ultimo_motivo_manual: null, cliente_origen_id: origen, cliente_destino_id: null,
     tiene_foto: false, created_at: ts(createdOff), updated_at: ts(createdOff),
@@ -42,7 +42,7 @@ function vendido(id: string, nro: string, banco: string, monto: string, compra: 
   return {
     id, nro_cheque: nro, banco, monto,
     fecha_emision: d(ventaOff - 40), fecha_pago: d(ventaOff + 30),
-    porcentaje_compra: compra, porcentaje_venta: venta, ganancia,
+    porcentaje_compra: compra, monto_abonado: null, porcentaje_venta: venta, ganancia,
     estado: 'VENDIDO', ultimo_evento_manual_at: ts(ventaOff), ultimo_operador_id: 'panel-web',
     ultimo_motivo_manual: 'Venta a financiera', cliente_origen_id: origen, cliente_destino_id: destino,
     tiene_foto: false, created_at: ts(ventaOff - 20), updated_at: ts(ventaOff),
@@ -161,9 +161,9 @@ const gastos: GastoOperativo[] = [
 
 // ── Movimientos de efectivo (divisas) ─────────────────────────────────
 const movimientos: MovimientoEfectivo[] = [
-  { id: 'mo-1', cliente_id: 'cli-1', tipo: 'VENTA',  moneda: 'USD', monto: '500', cotizacion_aplicada: '1450.00', ganancia: '25000', usd_restante: '0',   fecha_operacion: ts(-2), observaciones: null,           created_at: ts(-2), updated_at: ts(-2) },
-  { id: 'mo-2', cliente_id: 'cli-3', tipo: 'COMPRA', moneda: 'USD', monto: '300', cotizacion_aplicada: '1400.00', ganancia: '0',     usd_restante: '300', fecha_operacion: ts(-4), observaciones: 'Compra mostrador', created_at: ts(-4), updated_at: ts(-4) },
-  { id: 'mo-3', cliente_id: null,    tipo: 'VENTA',  moneda: 'USD', monto: '800', cotizacion_aplicada: '1460.00', ganancia: '40000', usd_restante: '0',   fecha_operacion: ts(-6), observaciones: null,           created_at: ts(-6), updated_at: ts(-6) },
+  { id: 'mo-1', cliente_id: 'cli-1', tipo: 'VENTA',  moneda: 'USD', monto: '500', cotizacion_aplicada: '1450.00', monto_abonado: null, ganancia: '25000', usd_restante: '0',   fecha_operacion: ts(-2), observaciones: null,           created_at: ts(-2), updated_at: ts(-2) },
+  { id: 'mo-2', cliente_id: 'cli-3', tipo: 'COMPRA', moneda: 'USD', monto: '300', cotizacion_aplicada: '1400.00', monto_abonado: null, ganancia: '0',     usd_restante: '300', fecha_operacion: ts(-4), observaciones: 'Compra mostrador', created_at: ts(-4), updated_at: ts(-4) },
+  { id: 'mo-3', cliente_id: null,    tipo: 'VENTA',  moneda: 'USD', monto: '800', cotizacion_aplicada: '1460.00', monto_abonado: null, ganancia: '40000', usd_restante: '0',   fecha_operacion: ts(-6), observaciones: null,           created_at: ts(-6), updated_at: ts(-6) },
 ]
 
 // ── Reporte de caja (mismo snapshot para cualquier período) ────────────

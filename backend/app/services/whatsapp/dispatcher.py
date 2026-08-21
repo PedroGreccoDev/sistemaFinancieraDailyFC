@@ -239,6 +239,10 @@ def _registrar_un_cheque(
         cliente = _find_or_create_cliente(db, str(cliente_nombre))
         cliente_id = cliente.id
 
+    # Comprado a deber: `monto_abonado` es lo que se pagó en el acto (0 si nada).
+    # El schema lo valida contra el valor neto y exige el vendedor.
+    monto_abonado = _opt_decimal(data, "monto_abonado")
+
     payload = ChequeCreate(
         nro_cheque=nro,
         banco=banco,
@@ -247,6 +251,7 @@ def _registrar_un_cheque(
         fecha_pago=fecha_pago,
         porcentaje_compra=pct_compra,
         cliente_origen_id=cliente_id,
+        monto_abonado=monto_abonado,
     )
     foto_bytes, foto_mime = foto if foto else (None, None)
     cheque = svc_cheques.create_cheque(
@@ -261,6 +266,14 @@ def _registrar_un_cheque(
     ]
     if cheque.fecha_pago:
         lines.append(f"Pago: {_fmt_date(cheque.fecha_pago)}")
+
+    # Cuánto salió de la caja: el control inmediato del operador sobre si el bot
+    # entendió que el cheque se pagó o quedó a deber.
+    neto = (cheque.monto * (Decimal("100") - cheque.porcentaje_compra) / Decimal("100")).quantize(Decimal("0.01"))
+    abonado, a_deber = svc_pasivos.repartir_compra(neto, cheque.monto_abonado)
+    lines.append(f"Salió de caja: {_ars(abonado)}")
+    if a_deber > 0:
+        lines.append(f"⚠️ Queda a deber: {_ars(a_deber)}")
 
     # Se registra igual (human in the loop); solo avisamos para que el operador revise.
     advertencias = _advertencias_cheque(fecha_emision, fecha_pago)
@@ -614,12 +627,17 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any], msg_at: datetime | N
         cliente_id = cliente.id
 
     # La ganancia NO se pasa: en la venta el servicio la calcula por lotes FIFO.
+    # Comprada a deber: `monto_abonado` es lo que se pagó en el acto (0 si nada).
+    # El schema exige el vendedor y rechaza que una venta quede a deber.
+    monto_abonado = _opt_decimal(data, "monto_abonado")
+
     payload = MovimientoEfectivoCreate(
         cliente_id=cliente_id,
         tipo=tipo,
         moneda=moneda,
         monto=monto,
         cotizacion_aplicada=cotizacion,
+        monto_abonado=monto_abonado,
         fecha_operacion=msg_at,
         observaciones=observaciones,
     )
@@ -634,6 +652,14 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any], msg_at: datetime | N
     if tipo == MovimientoEfectivoTipo.VENTA and mov.ganancia is not None:
         signo = "Ganancia" if mov.ganancia >= 0 else "Pérdida"
         lines.append(f"{signo} (FIFO): {_ars(abs(mov.ganancia))}")
+    # Cuánto salió de la caja es el control inmediato del operador: si el bot
+    # entendió mal que la compra era a deber, el número lo delata en el acto.
+    if tipo == MovimientoEfectivoTipo.COMPRA:
+        pesos = (monto * cotizacion).quantize(Decimal("0.01"))
+        abonado, a_deber = svc_pasivos.repartir_compra(pesos, monto_abonado)
+        lines.append(f"Salió de caja: {_ars(abonado)}")
+        if a_deber > 0:
+            lines.append(f"⚠️ Queda a deber: {_ars(a_deber)}")
     return True, "\n".join(lines)
 
 

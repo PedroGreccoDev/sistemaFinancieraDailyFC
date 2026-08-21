@@ -40,6 +40,8 @@ from app.services.exceptions import (
 # fiados y préstamos). Se re-exporta acá por compatibilidad con imports existentes.
 __all__ = ["calcular_reduccion_saldo"]
 
+_CERO = Decimal("0.00")
+
 
 def create_pasivo(
     db: Session,
@@ -69,6 +71,85 @@ def get_pasivo(db: Session, pasivo_id: uuid.UUID) -> Pasivo:
     if pasivo is None:
         raise NotFoundError(f"Pasivo {pasivo_id} no encontrado.")
     return pasivo
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Compras a deber: el pasivo que genera la propia compra
+# ══════════════════════════════════════════════════════════════════════
+
+def repartir_compra(
+    total: Decimal, monto_abonado: Decimal | None
+) -> tuple[Decimal, Decimal]:
+    """Parte el precio de una compra en (lo que salió de la caja, lo que se debe).
+
+    `monto_abonado` en `None` significa **se pagó todo**: es la compra normal y el
+    comportamiento que el sistema tuvo siempre, así que un default distinto
+    cambiaría en silencio la caja de todas las compras existentes.
+
+    Pura (sin BD): la comparten la compra de dólares y la de cheques, que solo
+    difieren en cómo calculan el total —`monto × cotización` contra el valor neto
+    del cheque— y tienen que repartirlo igual."""
+    total = total.quantize(Decimal("0.01"))
+    if monto_abonado is None:
+        return total, _CERO
+    abonado = monto_abonado.quantize(Decimal("0.01"))
+    if abonado < _CERO:
+        raise ValidationError("El monto abonado no puede ser negativo.")
+    if abonado > total:
+        raise ValidationError(
+            f"Abonaste ${abonado} y la compra es de ${total}: el monto abonado no "
+            "puede superar el total."
+        )
+    return abonado, (total - abonado).quantize(Decimal("0.01"))
+
+
+def crear_por_compra(
+    db: Session,
+    *,
+    acreedor: str,
+    concepto: str,
+    monto: Decimal,
+    moneda: Moneda,
+    origen_tipo: str,
+    origen_id: uuid.UUID,
+    fecha_vencimiento: date | None = None,
+) -> Pasivo:
+    """Asienta lo que quedó a deber de una compra (dólares o cheque).
+
+    **No commitea**: la persiste el commit de la propia compra, para que la
+    compra y su deuda entren o no entren juntas. Es el mismo criterio con el que
+    `caja.registrar` asienta el libro.
+
+    No mueve la caja —esa es toda la gracia de comprar a deber: la plata no
+    salió—. El egreso lo asienta la compra por lo que sí se abonó, y el resto
+    aparecerá el día que se pague este pasivo (o nunca, si se salda compensándolo
+    contra un cliente que debe)."""
+    pasivo = Pasivo(
+        acreedor=acreedor.strip(),
+        concepto=concepto.strip(),
+        monto=monto,
+        saldo_pendiente=monto,
+        moneda=moneda,
+        estado=PasivoEstado.PENDIENTE,
+        fecha_vencimiento=fecha_vencimiento,
+        origen_tipo=origen_tipo,
+        origen_id=origen_id,
+    )
+    db.add(pasivo)
+    return pasivo
+
+
+def pasivo_de_origen(
+    db: Session, origen_tipo: str, origen_id: uuid.UUID
+) -> Pasivo | None:
+    """El pasivo vivo que generó una compra, si quedó algo a deber."""
+    return db.scalar(
+        select(Pasivo).where(
+            Pasivo.origen_tipo == origen_tipo,
+            Pasivo.origen_id == origen_id,
+            Pasivo.anulado_at.is_(None),
+        )
+    )
 
 
 def list_pasivos(db: Session, estado: PasivoEstado | None = None) -> list[Pasivo]:

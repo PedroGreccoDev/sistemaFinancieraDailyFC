@@ -29,6 +29,7 @@ from app.schemas.cheques import (
 )
 from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
+from app.services import pasivos as svc_pasivos
 from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
@@ -37,6 +38,21 @@ from app.services.exceptions import (
 )
 
 _CIEN = Decimal("100")
+
+
+def _nombre_vendedor(db: Session, cliente_id: uuid.UUID | None) -> str:
+    """A nombre de quién queda el pasivo de un cheque comprado a deber.
+
+    El schema ya exige el vendedor cuando el cheque queda debido; esto solo
+    resuelve su nombre, que es lo que guarda el pasivo (`acreedor` es texto: se
+    le puede deber a alguien que no es cliente del sistema)."""
+    cliente = db.get(Cliente, cliente_id) if cliente_id is not None else None
+    if cliente is None:
+        raise ValidationError(
+            "Un cheque comprado a deber necesita el vendedor: indicá a quién le "
+            "quedás debiendo."
+        )
+    return cliente.nombre
 
 
 def create_cheque(
@@ -67,13 +83,29 @@ def create_cheque(
         db.flush()
         # Comprar el cheque saca plata de la caja ARS: lo pagado = monto·(1−%compra).
         pagado = (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(Decimal("0.01"))
-        if pagado > 0 and not cheque.es_carga_inicial:
-            banco_txt = f" — {cheque.banco}" if cheque.banco else ""
+        banco_txt = f" — {cheque.banco}" if cheque.banco else ""
+        detalle = f"Compra cheque Nº {cheque.nro_cheque}{banco_txt}"
+        abonado, a_deber = svc_pasivos.repartir_compra(pagado, cheque.monto_abonado)
+
+        if abonado > 0 and not cheque.es_carga_inicial:
             svc_caja.registrar(
                 db, fecha=fecha_local(created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
-                categoria=CajaCategoria.COMPRA_CHEQUE, monto=pagado,
+                categoria=CajaCategoria.COMPRA_CHEQUE, monto=abonado,
                 referencia_tipo="cheque", referencia_id=cheque.id,
-                detalle=f"Compra cheque Nº {cheque.nro_cheque}{banco_txt}",
+                detalle=detalle if a_deber <= 0 else f"{detalle} (pago parcial)",
+            )
+        if a_deber > 0:
+            # El pasivo se crea aunque sea carga inicial. La fecha de corte decide
+            # si sale plata de la caja —la cartera vieja ya está descontada del
+            # saldo de apertura—, no si la deuda existe: si no se pagó, se debe.
+            svc_pasivos.crear_por_compra(
+                db,
+                acreedor=_nombre_vendedor(db, cheque.cliente_origen_id),
+                concepto=f"{detalle} al {cheque.porcentaje_compra}%",
+                monto=a_deber,
+                moneda=Moneda.ARS,
+                origen_tipo="cheque",
+                origen_id=cheque.id,
             )
         db.commit()
         db.refresh(cheque)
@@ -247,16 +279,21 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
     monto/%compra/%venta. No hace commit (lo hace el caller)."""
     svc_caja.borrar_por_referencia(db, "cheque", cheque.id)
     pagado = (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(Decimal("0.01"))
+    # El egreso es por lo que se abonó, no por el valor neto: un cheque comprado a
+    # deber solo sacó de la caja lo que se pagó en el acto. Sin esto, cualquier
+    # edición posterior (hasta cambiar el banco) le inventaría el egreso entero.
+    abonado, _a_deber = svc_pasivos.repartir_compra(pagado, cheque.monto_abonado)
     # La cartera preexistente nunca asentó el egreso de compra: al resincronizar
     # no hay que inventarlo. Sin esto, editar un cheque de carga inicial le haría
     # aparecer un egreso que no existió.
-    if pagado > 0 and not cheque.es_carga_inicial:
+    if abonado > 0 and not cheque.es_carga_inicial:
         banco_txt = f" — {cheque.banco}" if cheque.banco else ""
+        parcial = " (pago parcial)" if abonado < pagado else ""
         svc_caja.registrar(
             db, fecha=fecha_local(cheque.created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
-            categoria=CajaCategoria.COMPRA_CHEQUE, monto=pagado,
+            categoria=CajaCategoria.COMPRA_CHEQUE, monto=abonado,
             referencia_tipo="cheque", referencia_id=cheque.id,
-            detalle=f"Compra cheque Nº {cheque.nro_cheque}{banco_txt}",
+            detalle=f"Compra cheque Nº {cheque.nro_cheque}{banco_txt}{parcial}",
         )
     if cheque.estado == ChequeEstado.VENDIDO and cheque.porcentaje_venta is not None:
         ingreso = (cheque.monto * (_CIEN - cheque.porcentaje_venta) / _CIEN).quantize(Decimal("0.01"))
@@ -294,6 +331,18 @@ def editar_cheque(db: Session, cheque_id: uuid.UUID, payload: ChequeUpdate) -> C
 
     data = payload.model_dump(exclude_unset=True)
     tiene_venta = cheque.estado in (ChequeEstado.VENDIDO, ChequeEstado.FIADO)
+
+    # El monto y el %compra definen cuánto se pagó por el cheque; si quedó a deber,
+    # también cuánto se debe. El pasivo puede tener pagos encima o estar compensado
+    # contra un cliente, así que se corrige eliminando el cheque y volviéndolo a
+    # cargar —que revisa esas dos cosas— en vez de reescribir la deuda por atrás.
+    if ("monto" in data or "porcentaje_compra" in data) and svc_pasivos.pasivo_de_origen(
+        db, "cheque", cheque.id
+    ) is not None:
+        raise ConflictError(
+            "Este cheque se compró a deber y su deuda ya está cargada: para "
+            "corregir el monto o el porcentaje, eliminalo y volvé a cargarlo."
+        )
 
     # Campos solo disponibles tras la venta/fiado.
     for campo in ("porcentaje_venta", "cliente_destino_id"):

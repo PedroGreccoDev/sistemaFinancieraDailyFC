@@ -39,6 +39,10 @@ _CL = ["id", "nombre", "cuit", "telefono", "created_at", "updated_at"]
 _CH = [
     "id", "nro_cheque", "banco", "monto", "fecha_emision", "fecha_pago",
     "porcentaje_compra", "porcentaje_venta", "ganancia", "estado",
+    # Cuánto se abonó al comprarlo (§Comprar sin abonar). Sin este dato el import
+    # devuelve un cheque comprado a deber como pagado, y al editarlo el resync le
+    # asienta el egreso entero que nunca salió de la caja.
+    "monto_abonado",
     "ultimo_evento_manual_at", "ultimo_operador_id", "ultimo_motivo_manual",
     "foto", "foto_mime", "cliente_origen_id", "cliente_destino_id",
     # Marca de cartera preexistente (§Apertura). Sin ella el import devuelve esos
@@ -59,6 +63,9 @@ _CU = [
 _MO = [
     "id", "cliente_id", "tipo", "moneda", "monto", "cotizacion_aplicada",
     "ganancia", "usd_restante", "fecha_operacion", "observaciones", "created_at", "updated_at",
+    # Cuánto se abonó de la compra (§Comprar sin abonar): igual que en los cheques,
+    # sin esto una compra a deber vuelve como pagada y se gana un egreso al editarla.
+    "monto_abonado",
     # Las dos marcas tienen que viajar: un lote de apertura o de ajuste que vuelve
     # como compra normal se gana líneas de caja que nunca existieron al editarlo,
     # y `_rehacer_lote_usd` deja de encontrarlo para reemplazarlo.
@@ -73,6 +80,9 @@ _PA = [
     "id", "acreedor", "concepto", "monto", "saldo_pendiente", "moneda",
     # Cotización default de los pagos que cruzan monedas (§5).
     "cotizacion_pago",
+    # De qué compra salió el pasivo (§Comprar sin abonar). Sin el vínculo, anular
+    # esa compra deja de encontrar su deuda y queda viva plata que ya no se debe.
+    "origen_tipo", "origen_id",
     "estado", "fecha_vencimiento", "fecha_cancelacion", "observaciones",
     "created_at", "updated_at", *_ANUL,
 ]

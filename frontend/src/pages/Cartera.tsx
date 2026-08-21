@@ -75,6 +75,8 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
   const [fechaEmision, setFechaEmision] = useState('')
   const [fechaPago, setFechaPago] = useState('')
   const [clienteOrigenId, setClienteOrigenId] = useState('')
+  const [aDeber, setADeber] = useState(false)
+  const [montoAbonado, setMontoAbonado] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
@@ -83,8 +85,14 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
 
   const montoNum = parseFloat(monto) || 0
   const compraNum = parseFloat(pctCompra) || 0
-  // Lo que sale de la caja ARS al comprar el cheque = monto·(1−%compra).
+  // Lo que vale el cheque = monto·(1−%compra). Es el precio de compra, no el nominal.
   const pagado = montoNum > 0 ? montoNum * (100 - compraNum) / 100 : null
+  // Comprado a deber: de la caja sale solo lo abonado y el resto queda como deuda
+  // con el vendedor, que por eso pasa a ser obligatorio (§Comprar sin abonar).
+  const abonadoNum = aDeber ? (parseFloat(montoAbonado) || 0) : (pagado ?? 0)
+  const debe = pagado !== null && aDeber ? Math.max(pagado - abonadoNum, 0) : 0
+  const abonadoExcede = pagado !== null && aDeber && abonadoNum > pagado
+  const faltaVendedor = aDeber && !clienteOrigenId
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -99,8 +107,10 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
         fecha_emision: fechaEmision || null,
         fecha_pago: fechaPago || null,
         cliente_origen_id: clienteOrigenId || null,
+        // Sin la marca no viaja el campo: el backend lo lee como compra pagada.
+        ...(aDeber ? { monto_abonado: abonadoNum } : {}),
       })
-      toast('success', 'Cheque cargado en cartera')
+      toast('success', aDeber ? 'Cheque cargado en cartera (queda a deber)' : 'Cheque cargado en cartera')
       onSuccess()
     } catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
@@ -111,7 +121,7 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
       <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Nuevo cheque</h2>
-          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Ingresa a cartera y descuenta la compra de la caja ARS</p>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{aDeber ? 'Ingresa a cartera; lo que no pagues queda como deuda con el vendedor' : 'Ingresa a cartera y descuenta la compra de la caja ARS'}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -121,9 +131,35 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
           <div><label style={LABEL_STYLE}>Monto nominal</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required placeholder="0.00" style={INPUT_STYLE} /></div>
           <div><label style={LABEL_STYLE}>% compra</label><input type="number" step="0.0001" min="0" max="100" value={pctCompra} onChange={(e) => setPctCompra(e.target.value)} required placeholder="0" style={INPUT_STYLE} /></div>
           {pagado !== null && (
-            <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.6rem 0.9rem', display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
-              <span style={{ color: 'rgba(100,116,139,0.7)' }}>Sale de caja (compra)</span>
-              <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(pagado)}</span>
+            <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.6rem 0.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontFamily: FM, fontSize: '0.78rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'rgba(100,116,139,0.7)' }}>{aDeber ? 'Vale (compra)' : 'Sale de caja (compra)'}</span>
+                <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(pagado)}</span>
+              </div>
+              {aDeber && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'rgba(100,116,139,0.7)' }}>Sale de caja ahora</span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(abonadoNum)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'rgba(100,116,139,0.7)' }}>Queda a deber</span>
+                    <span style={{ fontWeight: 700, color: '#fbbf24' }}>{fmtARS(debe)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', fontFamily: FM, fontSize: '0.76rem', color: 'var(--text-2)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={aDeber} onChange={(e) => { setADeber(e.target.checked); if (!e.target.checked) setMontoAbonado('') }} style={{ cursor: 'pointer' }} />
+            No lo pagué (queda a deber)
+          </label>
+          {aDeber && (
+            <div>
+              <label style={LABEL_STYLE}>Monto abonado <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(vacío = nada)</span></label>
+              <input type="number" step="0.01" min="0" value={montoAbonado} onChange={(e) => setMontoAbonado(e.target.value)} placeholder="0.00" style={INPUT_STYLE} />
+              {abonadoExcede && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171', marginTop: '0.3rem' }}>No podés abonar más de {fmtARS(pagado ?? 0)}, que es lo que vale el cheque.</p>}
+              {faltaVendedor && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171', marginTop: '0.3rem' }}>Indicá el cliente origen: la deuda queda a su nombre.</p>}
             </div>
           )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -134,7 +170,7 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
             <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
-            <button type="submit" disabled={loading} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: loading ? 0.6 : 1 }}>{loading ? 'Cargando…' : 'Cargar cheque'}</button>
+            <button type="submit" disabled={loading || abonadoExcede || faltaVendedor} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: (loading || abonadoExcede || faltaVendedor) ? 0.6 : 1 }}>{loading ? 'Cargando…' : 'Cargar cheque'}</button>
           </div>
         </form>
       </div>

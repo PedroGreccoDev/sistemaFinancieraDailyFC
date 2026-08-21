@@ -240,6 +240,30 @@ def _lineas_cuotas(db: Session, prestamo: Prestamo) -> list[LineaImpacto]:
 #  Reglas de bloqueo por entidad
 # ══════════════════════════════════════════════════════════════════════
 
+def _validar_pasivo_de_origen(
+    db: Session, entidad: str, entidad_id: uuid.UUID
+) -> tuple[str | None, list[str]]:
+    """Qué pasa con el pasivo que generó una compra a deber (§Comprar sin abonar).
+
+    Si la compra se anula, esa deuda deja de existir y el pasivo se va con ella.
+    Pero si ya se pagó —entero o en parte— la plata salió de verdad: anular la
+    compra dejaría un egreso en el libro sin nada que lo explique, así que se
+    bloquea y el operador deshace primero el pago.
+    """
+    from app.services.pasivos import pasivo_de_origen
+
+    pasivo = pasivo_de_origen(db, entidad, entidad_id)
+    if pasivo is None:
+        return None, []
+    if pasivo.saldo_pendiente != pasivo.monto:
+        return (
+            f"Esta compra quedó a deber y ya se le pagó a {pasivo.acreedor}. "
+            "Revertí primero ese pago desde la sección Deudas.",
+            [],
+        )
+    return None, [f"la deuda con {pasivo.acreedor} (${pasivo.saldo_pendiente:,.2f})"]
+
+
 def _validar(db: Session, entidad: str, obj) -> tuple[str | None, list[str]]:
     """Devuelve (motivo_de_bloqueo | None, cosas_que_arrastra).
 
@@ -350,6 +374,11 @@ def _validar_cheque(db: Session, cheque: Cheque) -> tuple[str | None, list[str]]
             [],
         )
 
+    bloqueo, arrastra_pasivo = _validar_pasivo_de_origen(db, "cheque", cheque.id)
+    if bloqueo is not None:
+        return bloqueo, []
+    arrastra.extend(arrastra_pasivo)
+
     return None, arrastra
 
 
@@ -367,7 +396,7 @@ def _validar_movimiento(db: Session, mov: MovimientoEfectivo) -> tuple[str | Non
                 "ya fueron vendidos. Anulá primero esas ventas.",
                 [],
             )
-        return None, []
+        return _validar_pasivo_de_origen(db, "movimiento_efectivo", mov.id)
 
     # El orden FIFO es (fecha_operacion, created_at): se compara como tupla, igual
     # que en `editar_movimiento`. Comparar los campos por separado dejaría pasar una
@@ -444,6 +473,15 @@ def anular(
         if entidad == "prestamo":
             for cuota in obj.cuotas_detalle:
                 svc_caja.borrar_por_referencia(db, "cuota", cuota.id)
+
+        # Una compra a deber arrastra el pasivo que generó (ya validado sin pagos
+        # encima): si la compra no existió, esa plata no se le debe a nadie.
+        if entidad in ("cheque", "movimiento_efectivo"):
+            from app.services.pasivos import pasivo_de_origen
+
+            pasivo = pasivo_de_origen(db, entidad, entidad_id)
+            if pasivo is not None:
+                _marcar(pasivo, operador_id, f"Anulado en cascada: {motivo.strip()}")
 
         # Un cheque fiado arrastra su fiado (ya validado sin cobros encima).
         if entidad == "cheque" and obj.fiado_originado is not None:

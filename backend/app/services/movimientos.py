@@ -13,12 +13,14 @@ from app.db.models import (
     AjusteCaja,
     CajaCategoria,
     CajaTipo,
+    Cliente,
     Moneda,
     MovimientoEfectivo,
     MovimientoEfectivoTipo,
 )
 from app.schemas.movimientos import MovimientoEfectivoCreate, MovimientoEfectivoUpdate
 from app.services import caja as svc_caja
+from app.services import pasivos as svc_pasivos
 from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
@@ -94,6 +96,20 @@ def calcular_ganancia_fifo(
     return ganancia.quantize(Decimal("0.01")), consumos
 
 
+def _nombre_vendedor(db: Session, cliente_id: uuid.UUID | None) -> str:
+    """A nombre de quién queda el pasivo de una compra a deber.
+
+    El schema ya exige el cliente cuando la compra queda debida; esto solo
+    resuelve su nombre, que es lo que guarda el pasivo (`acreedor` es texto, no
+    una FK: se le puede deber a alguien que no es cliente del sistema)."""
+    cliente = db.get(Cliente, cliente_id) if cliente_id is not None else None
+    if cliente is None:
+        raise ValidationError(
+            "Una compra a deber necesita el vendedor: indicá a quién le quedás debiendo."
+        )
+    return cliente.nombre
+
+
 def create_movimiento(
     db: Session,
     payload: MovimientoEfectivoCreate,
@@ -109,6 +125,7 @@ def create_movimiento(
         moneda=payload.moneda,
         monto=monto,
         cotizacion_aplicada=cotiz,
+        monto_abonado=payload.monto_abonado,
         observaciones=payload.observaciones,
     )
     if payload.fecha_operacion is not None:
@@ -123,17 +140,38 @@ def create_movimiento(
             db.flush()
 
             detalle = f"Compra de {monto} USD @ ${cotiz}"
-            # Salen pesos de la caja ARS, entran dólares a la caja USD.
-            svc_caja.registrar(
-                db, fecha=fecha_caja, moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
-                categoria=CajaCategoria.COMPRA_USD, monto=pesos,
-                referencia_tipo=_REF, referencia_id=movimiento.id, detalle=detalle,
+            abonado, a_deber = svc_pasivos.repartir_compra(
+                pesos, movimiento.monto_abonado
             )
+
+            # Salen de la caja ARS solo los pesos que realmente se pagaron: lo que
+            # quedó a deber no salió de ningún lado y no puede restar del día.
+            if abonado > _CERO:
+                svc_caja.registrar(
+                    db, fecha=fecha_caja, moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
+                    categoria=CajaCategoria.COMPRA_USD, monto=abonado,
+                    referencia_tipo=_REF, referencia_id=movimiento.id,
+                    detalle=detalle if a_deber <= _CERO else f"{detalle} (pago parcial)",
+                )
+            # Los dólares entran completos se hayan pagado o no: el stock es físico
+            # y el lote FIFO conserva su costo real, así que la ganancia futura de
+            # venderlos sale igual que si la compra hubiera sido de contado.
             svc_caja.registrar(
                 db, fecha=fecha_caja, moneda=Moneda.USD, tipo=CajaTipo.INGRESO,
                 categoria=CajaCategoria.COMPRA_USD, monto=monto,
                 referencia_tipo=_REF, referencia_id=movimiento.id, detalle=detalle,
             )
+
+            if a_deber > _CERO:
+                svc_pasivos.crear_por_compra(
+                    db,
+                    acreedor=_nombre_vendedor(db, payload.cliente_id),
+                    concepto=detalle,
+                    monto=a_deber,
+                    moneda=Moneda.ARS,
+                    origen_tipo=_REF,
+                    origen_id=movimiento.id,
+                )
         else:
             # Venta: imputa contra los lotes de compra (FIFO) y realiza la ganancia.
             lotes_rows = list(
@@ -320,11 +358,17 @@ def _resync_caja_movimiento(db: Session, mov: MovimientoEfectivo) -> None:
     pesos = (mov.monto * mov.cotizacion_aplicada).quantize(Decimal("0.01"))
     if mov.tipo == MovimientoEfectivoTipo.COMPRA:
         detalle = f"Compra de {mov.monto} USD @ ${mov.cotizacion_aplicada}"
-        svc_caja.registrar(
-            db, fecha=fecha_caja, moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
-            categoria=CajaCategoria.COMPRA_USD, monto=pesos,
-            referencia_tipo=_REF, referencia_id=mov.id, detalle=detalle,
-        )
+        # El egreso es por lo abonado, no por el total: una compra a deber solo
+        # sacó de la caja lo que se pagó en el acto. Los dólares, en cambio,
+        # entraron completos (§Comprar sin abonar).
+        abonado, _a_deber = svc_pasivos.repartir_compra(pesos, mov.monto_abonado)
+        if abonado > _CERO:
+            svc_caja.registrar(
+                db, fecha=fecha_caja, moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
+                categoria=CajaCategoria.COMPRA_USD, monto=abonado,
+                referencia_tipo=_REF, referencia_id=mov.id,
+                detalle=detalle if abonado >= pesos else f"{detalle} (pago parcial)",
+            )
         svc_caja.registrar(
             db, fecha=fecha_caja, moneda=Moneda.USD, tipo=CajaTipo.INGRESO,
             categoria=CajaCategoria.COMPRA_USD, monto=mov.monto,
@@ -370,6 +414,15 @@ def editar_movimiento(
                     "Esta compra ya fue consumida (total o parcialmente) por una o más "
                     "ventas en la cadena FIFO, así que no se puede editar su monto ni "
                     "cotización. Corregila registrando una operación inversa."
+                )
+            # Cambiar el monto o la cotización cambia cuánto se le quedó debiendo,
+            # y el pasivo puede tener pagos encima o estar compensado contra un
+            # cliente. Se corrige anulando la compra y volviéndola a cargar, que
+            # revisa esas dos cosas en vez de reescribir la deuda por atrás.
+            if svc_pasivos.pasivo_de_origen(db, _REF, mov.id) is not None:
+                raise ConflictError(
+                    "Esta compra quedó a deber y su deuda ya está cargada: para "
+                    "corregir el monto o la cotización, eliminala y volvé a cargarla."
                 )
         else:  # VENTA
             posterior = db.scalar(

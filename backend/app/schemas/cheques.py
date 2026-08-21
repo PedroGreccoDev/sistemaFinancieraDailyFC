@@ -18,6 +18,13 @@ class ChequeCreate(BaseModel):
     fecha_pago: date | None = None
     porcentaje_compra: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
     cliente_origen_id: UUID | None = None
+    # Pesos efectivamente abonados por el cheque. None = se pagó todo, la operación
+    # normal. Si es menor al valor neto (`monto × (1 − %compra)`), la diferencia
+    # queda a deber: no sale de la caja y genera el pasivo con quien lo vendió
+    # (§Comprar sin abonar).
+    monto_abonado: Decimal | None = Field(
+        default=None, ge=0, max_digits=18, decimal_places=2
+    )
 
     @model_validator(mode="after")
     def validate_fechas(self) -> "ChequeCreate":
@@ -27,6 +34,27 @@ class ChequeCreate(BaseModel):
             and self.fecha_pago < self.fecha_emision
         ):
             raise ValueError("fecha_pago no puede ser anterior a fecha_emision.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_monto_abonado(self) -> "ChequeCreate":
+        if self.monto_abonado is None:
+            return self
+        # Lo que se paga por un cheque es su valor neto, no el nominal: un cheque
+        # de $1.000.000 al 10% se compra por $900.000, y eso es lo que se debe.
+        neto = (
+            self.monto * (Decimal("100") - self.porcentaje_compra) / Decimal("100")
+        ).quantize(Decimal("0.01"))
+        if self.monto_abonado > neto:
+            raise ValueError(
+                f"Abonaste ${self.monto_abonado} y el cheque se compra por ${neto} "
+                f"(neto al {self.porcentaje_compra}%): no puede superar ese valor."
+            )
+        if self.monto_abonado < neto and self.cliente_origen_id is None:
+            raise ValueError(
+                "Un cheque comprado a deber necesita el vendedor: indicá a quién "
+                "le quedás debiendo."
+            )
         return self
 
 
@@ -82,6 +110,9 @@ class ChequeRead(BaseModel):
     fecha_emision: date | None
     fecha_pago: date | None
     porcentaje_compra: Decimal
+    # Cuánto se abonó al comprarlo. None = se pagó todo; menos que el valor neto
+    # significa que hay un pasivo abierto con el vendedor (§Comprar sin abonar).
+    monto_abonado: Decimal | None
     porcentaje_venta: Decimal | None
     ganancia: Decimal
     estado: ChequeEstado

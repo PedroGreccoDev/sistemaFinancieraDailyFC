@@ -21,6 +21,10 @@ export interface ChequeCreatePayload {
   fecha_pago?: string | null
   porcentaje_compra: number
   cliente_origen_id?: string | null
+  // Cuánto se abonó por el cheque. Omitir = se pagó todo (la compra normal).
+  // Menos que el valor neto deja el resto a deber: no descuenta la caja y genera
+  // la deuda con el vendedor, que pasa a ser obligatorio (§Comprar sin abonar).
+  monto_abonado?: number
 }
 
 export const crearCheque = (payload: ChequeCreatePayload): Promise<Cheque> =>

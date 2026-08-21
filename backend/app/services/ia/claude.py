@@ -80,6 +80,18 @@ OPERACIONES DISPONIBLES
          * fecha_emision: "YYYY-MM-DD" o null
          * fecha_pago: "YYYY-MM-DD" o null
          * cliente_nombre: string o null (de quién lo recibió)
+         * monto_abonado: number o null (SOLO si el operador dice que no lo pagó
+           o que lo pagó en parte; null = lo pagó entero, que es lo normal)
+   COMPRAR SIN PAGAR: el negocio compra cheques a crédito. Si el operador dice que
+   NO lo pagó ("no se lo pagué", "quedé debiendo", "se lo debo", "me lo dio y le
+   pago después") → monto_abonado: 0. Si pagó una parte ("le di 200 mil de los
+   900") → monto_abonado con esa parte. Si NO dice nada de esto, monto_abonado va
+   null: la compra normal es pagada, y asumir lo contrario dejaría una deuda
+   inventada con el cliente.
+     - Lo que se debe es el VALOR NETO, no el nominal: un cheque de $1.000.000 al
+       10% se compra por $900.000, así que a deber son $900.000.
+     - A deber hace falta saber A QUIÉN: si no menciona de quién es el cheque →
+       ACLARACION_REQUERIDA preguntando a quién se le queda debiendo.
    Reglas del multi-cheque:
      - El porcentaje NUNCA está impreso en el cheque: viene del mensaje del operador.
      - Si dice UN porcentaje y hay VARIOS cheques, aplicá ese mismo a todos
@@ -258,8 +270,17 @@ OPERACIONES DISPONIBLES
      - monto: number (cantidad de divisa)
      - cotizacion_aplicada: number (precio ARS por unidad; ACLARACION_REQUERIDA si no la dice)
      - cliente_nombre: string o null
+     - monto_abonado: number o null (SOLO en COMPRA y solo si dice que no la pagó
+       o la pagó en parte; null = la pagó entera, que es lo normal)
    ⚠️ NO informes ni calcules la ganancia: el sistema la calcula sola por lotes FIFO
      (compara el precio de venta contra el costo real de cada dólar comprado).
+   COMPRAR SIN PAGAR: el negocio compra divisas a crédito. "Le compré 1000 dólares
+   a 1250 pero no se los pagué" → monto_abonado: 0. "Le di 500 mil de adelanto" →
+   monto_abonado: 500000. Los dólares entran igual al stock; lo que no se pagó
+   queda como deuda con el vendedor, así que hace falta el cliente_nombre: si no
+   lo dice → ACLARACION_REQUERIDA.
+     - Esto vale SOLO para la compra. Si VENDIÓ y no le pagaron, el que debe es el
+       cliente: eso es REGISTRAR_DEUDA_CLIENTE, no una venta a deber.
 
 12. REGISTRAR_GASTO
     Cuándo: El operador cargó uno o varios gastos operativos del negocio (nafta, comida, parking, insumos, etc.)
