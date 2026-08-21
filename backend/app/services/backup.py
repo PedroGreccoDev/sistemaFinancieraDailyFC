@@ -560,12 +560,19 @@ def exportar_excel(
         add_sheet(
             "Pasivos",
             ["ID", "Acreedor", "Concepto", "Monto", "Saldo Pendiente", "Moneda",
-             "Estado", "Vencimiento", "Cancelación", "Observaciones", "Creado"],
+             "Estado", "Vencimiento", "Cancelación",
+             # Sin esto, en la planilla un préstamo recibido —que sumó plata a la
+             # caja ese día— es indistinguible de la deuda comercial que no la movió.
+             "Entró a caja", "Día que entró", "$/USD del stock",
+             "Observaciones", "Creado"],
             [[
                 _fmt_excel(r.id), r.acreedor, r.concepto,
                 _fmt_excel(r.monto), _fmt_excel(r.saldo_pendiente), _fmt_excel(r.moneda),
                 _fmt_excel(r.estado), _fmt_excel(r.fecha_vencimiento),
-                _fmt_excel(r.fecha_cancelacion), r.observaciones, _fmt_excel(r.created_at),
+                _fmt_excel(r.fecha_cancelacion),
+                "Sí" if r.ingreso_caja else "No", _fmt_excel(r.fecha_ingreso),
+                _fmt_excel(r.cotizacion_ingreso_usd),
+                r.observaciones, _fmt_excel(r.created_at),
             ] for r in pasivos],
         )
 
