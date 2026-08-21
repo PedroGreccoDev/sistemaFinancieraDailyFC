@@ -166,6 +166,120 @@ No hay intent de bot.
 
 ---
 
+## Comprar sin abonar — la compra que queda a deber _(régimen definido 2026-08-21)_
+
+El negocio compra a crédito: un lote de dólares o un cheque que se paga después.
+Esa plata **no salió de la caja**, así que la compra no puede asentar el egreso
+entero. Cualquier compra puede quedar debida —total o parcialmente— con
+`monto_abonado`, y **genera sola el pasivo** por lo que falta pagar.
+
+- **`monto_abonado` en `NULL` = se pagó todo.** Es la compra normal y el
+  comportamiento que el sistema tuvo siempre; todas las filas anteriores a la
+  migración `0021` valen `NULL`. Un default distinto convertiría en deuda cada
+  compra ya cargada.
+- **Sale de caja solo lo abonado; el stock entra completo.** Los dólares van al
+  lote FIFO con su costo real —la ganancia de venderlos sale igual que si la
+  compra hubiera sido de contado— y el cheque entra `EN_CARTERA` normalmente. La
+  mercadería está aunque no se haya pagado.
+- **El cheque se debe por su VALOR NETO**, no por el nominal: uno de $1.000.000
+  al 10% se compra por $900.000, y eso es lo que se debe si no se pagó.
+- **El pasivo se crea aunque el cheque sea carga inicial** (§Apertura). La fecha
+  de corte decide si sale plata de la caja —esa cartera ya está descontada del
+  saldo de apertura—, **no si la deuda existe**: si no se pagó, se debe. Ojo con
+  duplicar: si esa deuda vieja ya se anotó a mano al cargar la apertura, cargarla
+  de nuevo por acá la cuenta dos veces.
+- **`monto_abonado` se guarda en la tabla** (`cheques`, `movimientos_efectivo`).
+  No es derivable: el egreso de caja se **reconstruye desde ahí** cada vez que se
+  edita la compra (`resync_caja_cheque`, `_resync_caja_movimiento`). Sin
+  guardarlo, cualquier edición posterior —hasta cambiar el banco— le inventaría
+  el egreso entero. Deducirlo del saldo del pasivo tampoco sirve: ese saldo baja
+  con cada pago, y lo que se abonó el día de la compra no cambia nunca.
+- **El pasivo recuerda de qué compra salió** (`origen_tipo`/`origen_id`). Sin ese
+  vínculo, anular la compra dejaría vivo un pasivo por plata que ya no se debe.
+  Con él: anular la compra **anula su pasivo**; si ese pasivo ya recibió pagos, la
+  anulación **se bloquea** (esa plata sí salió). Editar monto o cotización de una
+  compra a deber también se bloquea: se corrige eliminando y recargando.
+- **Solo las compras.** Si el negocio **vendió** y le quedaron debiendo, el que
+  debe es el cliente: eso es una deuda de cliente (§2.b), no un pasivo. El schema
+  rechaza una venta con `monto_abonado`.
+- **Reparto:** función pura `svc_pasivos.repartir_compra(total, monto_abonado)`
+  → `(abonado, a_deber)`. La comparten la compra de dólares y la de cheques, que
+  solo difieren en cómo calculan el total.
+- **Panel:** casilla "No lo pagué (queda a deber)" en el alta de cheque (Cartera)
+  y en la de divisas (Movimientos → "+ Operación USD", agregada en el mismo
+  cambio: antes las divisas solo se cargaban por el bot). El vendedor pasa a ser
+  **obligatorio** cuando la compra queda debida: hay que saber a quién se le debe.
+- **Bot:** `REGISTRAR_CHEQUE` y `MOVIMIENTO_EFECTIVO` entienden "no se lo pagué /
+  quedé debiendo / le di 200 mil de los 900", y **la respuesta dice cuánto salió
+  de caja** — el control inmediato del operador sobre si el bot entendió bien.
+
+---
+
+## Compensación — el cliente le paga a un acreedor del negocio _(régimen definido 2026-08-21)_
+
+El negocio le debe a Y (le compró un lote de dólares o un cheque sin pagarlo,
+§Comprar sin abonar) y X le debe al negocio. En vez de que X pague y el negocio
+después le pague a Y, **X le transfiere directo a Y**: bajan las dos deudas y por
+la caja del negocio no pasa un peso. Tabla `compensaciones` + detalle en
+`compensacion_imputaciones` (migración `0022`), servicio `svc_compensaciones`,
+router `/compensaciones`.
+
+**Ejemplo.** Le comprás a Pedro 1.000 USD a $1.000 sin pagarle → le debés
+$1.000.000. Juan te debe $600.000. Juan le transfiere $600.000 a Pedro: Juan
+queda en cero, el pasivo con Pedro baja a $400.000, y la caja no se movió.
+
+- **No asienta ninguna línea en el libro de caja, y esa es toda la gracia.** Esa
+  plata nunca pasó por acá. Mismo criterio que el cobro con cheque (§2.b): lo que
+  no pasó por el cajón no puede sumar ni restar en el reporte del día.
+- **Sigue existiendo la vía de dos operaciones, y no se tocó** _(decisión del
+  dueño, 2026-08-21)_. Cobrarle a X por un lado y pagarle a Y por el otro
+  funciona igual que siempre, y **nada impide cargar así una compensación**: el
+  sistema no tiene cómo saber que ese cobro y ese pago son la misma operación —
+  son dos operaciones legítimas e indistinguibles de las reales—. Cuando pasa,
+  los saldos de X e Y quedan bien y el neto del día también, pero el libro se
+  lleva un INGRESO y un EGRESO que no existieron y el reporte muestra plata
+  moviéndose que nadie tocó. **El riesgo de verdad es cargarlo a medias:** si se
+  cobra a X y se olvida el pago a Y, la caja queda arriba de lo que hay en el
+  cajón y el pasivo sigue vivo — ese descuadre no se compensa solo. La operación
+  de acá hace en un paso lo que allá son dos que hay que acordarse de completar.
+  **No hay traba ni advertencia**: queda a criterio del operador.
+- **Quién imputa.** Del lado del cliente, los mismos helpers del cobro
+  consolidado (§2.c): `svc_deudores.cargar_renglones` / `imputar_renglon`,
+  expuestos como API compartida. Imputa FIFO por fecha de origen cruzando fiados,
+  deudas libres y préstamos. Duplicar acá esas reglas es exactamente lo que haría
+  divergir la compensación del cobro normal.
+- **Las dos patas no se topean igual.** Contra el **acreedor** no se puede
+  transferir de más: si X le manda a Y más de lo que el negocio le debe, Y pasa a
+  deberle al negocio, y eso es otra operación — se rechaza. Contra el **cliente**
+  sí puede sobrar (paga lo que tiene): el excedente le queda a favor como pasivo
+  del negocio con él, el mismo mecanismo que el vuelto de un cheque (§5), y **en
+  la moneda en que transfirió**, que es la plata que realmente se movió.
+- **Cross-moneda:** la cotización la dicta el operador, como siempre, y sirve para
+  imputar las dos patas. `moneda_deuda` declara contra qué deuda del cliente va:
+  ARS y USD son cajas distintas y no se suman.
+- **Se puede revertir** _(decisión del dueño: toda operación debe poder
+  deshacerse)_. Cada renglón alcanzado guarda cuánto se le imputó en
+  `compensacion_imputaciones` —**medido** contra su saldo antes y después, no
+  recalculado— y la reversión devuelve exactamente eso. Del préstamo se anota la
+  **cuota**, que es donde cae la plata. Recalcular el reparto al revés daría
+  distinto apenas el cliente reciba otro cobro entre medio, y esa diferencia sería
+  plata que aparece o desaparece. Si el excedente que le quedó a favor al cliente
+  ya se usó o se pagó, la reversión **se bloquea**.
+- **Entra al motor de anulación** (`_ENTIDADES["compensacion"]`) para que el panel
+  y el bot la deshagan por la misma puerta que el resto, con operador y motivo.
+  Es la **única entidad con `refs` vacío**, a propósito: no tiene líneas de caja
+  que revertir. `anular` delega en `svc_compensaciones.revertir`.
+- **Endpoints:** `POST /compensaciones`, `GET /compensaciones` (filtrable por
+  cliente o pasivo), `POST /compensaciones/{id}/revertir`.
+- **Panel:** el mismo `ModalCompensar` con **dos entradas** —botón "Compensar" en
+  la pestaña General de Deudores (cliente fijo) y por fila en Deudas (pasivo
+  fijo)—, porque según el día el operador piensa la operación de un lado o del
+  otro. Muestra en vivo cuánto le baja al acreedor y que de la caja no sale nada.
+- **Bot:** intent `COMPENSAR_DEUDA`; se deshace con `REVERTIR_OPERACION` tipo
+  `COMPENSACION`. Ver §Bot para las tres frases que se confunden.
+
+---
+
 ## Anulación y reversión — "Eliminar" no borra _(régimen definido 2026-08-06)_
 
 El botón **Eliminar** del panel **anula**: la fila queda con `anulado_at` /
@@ -215,6 +329,10 @@ imposible esa reconstrucción.
 ## Módulos de negocio
 
 ### 1. Chequera Virtual
+
+- **La compra puede quedar a deber** (§Comprar sin abonar): el cheque entra a
+  cartera igual, sale de caja solo lo abonado y el resto se convierte en un
+  pasivo con el vendedor, por el **valor neto**.
 
 - **Identidad:** la PK de `cheques` es la subrogada `id` (UUID). El `nro_cheque` **no es
   único globalmente** (solo lo es dentro de un banco); por eso la unicidad real es
@@ -455,6 +573,13 @@ que marcan `COBRADA` fijan `monto_pagado = monto`.
 ### 4. Movimientos de Efectivo (compra/venta de divisas)
 
 - Operaciones de compra/venta de divisas (ARS ↔ USD).
+- **Se cargan desde el panel** (Movimientos → "+ Operación USD") **y desde el
+  bot**. Hasta 2026-08-21 el panel solo listaba y editaba: el alta era
+  exclusiva del bot.
+- **La compra puede quedar a deber** (§Comprar sin abonar): los USD entran al
+  lote FIFO con su costo real, de la caja ARS sale solo lo abonado y el resto
+  queda como pasivo con el vendedor. La **venta** no: si le quedaron debiendo,
+  el que debe es el cliente (§2.b).
 - **Regla crítica:** la cotización **siempre** la dicta el operador. El sistema jamás la asume ni la consulta.
   `cotizacion_aplicada` = **pesos por 1 USD**; `monto` = **cantidad de USD** de la operación.
   - **COMPRA:** el operador marca a cuánto pagó cada USD. Pesos que salen = `monto × cotizacion`. Es un **egreso** ARS y suma USD al stock.
@@ -474,6 +599,11 @@ que marcan `COBRADA` fijan `monto_pagado = monto`.
 ### 5. Pasivos _(módulo agregado 2026-06-08)_
 
 - Registro de **deudas del negocio** con clientes y proveedores (cuentas a pagar).
+- **Tres orígenes:** carga a mano (panel o bot), **una compra que quedó a deber**
+  —dólares o cheques, §Comprar sin abonar, con `origen_tipo`/`origen_id`— o el
+  **excedente a favor de un cliente** (vuelto de cheque, §2.b, y compensación).
+- **Se puede saldar compensándolo** contra lo que un cliente le debe al negocio,
+  sin que la caja se mueva (§Compensación).
 - **Alta** via bot de WhatsApp (intent `REGISTRAR_DEUDA`) o desde el panel web (botón "Nueva deuda").
 - El bot **exige** que el operador indique el concepto; si falta, responde con `ACLARACION_REQUERIDA`.
 - **Cancelación** solo desde el panel web (el bot no puede cancelar pasivos).
@@ -592,6 +722,10 @@ lo que hay que respetar al tocar dólares).
 - `GET /api/v1/backup/exportar-excel`: export a XLSX (filtrable por día local ART). **Excluye los
   anulados** (y las cuotas de préstamos anulados): es un reporte de trabajo, no una copia.
 - `POST /api/v1/backup/importar`: import con **validación de schema** antes de aplicar.
+- Tablas incluidas: las de siempre más `compensaciones` y
+  `compensacion_imputaciones` (§Compensación). El detalle por renglón viaja
+  aparte porque es lo que permite **revertir** una compensación devolviendo
+  exactamente lo que sacó de cada deuda.
 
 ### 9. Autenticación / Usuarios _(módulo agregado 2026-06-19)_
 
@@ -786,6 +920,8 @@ avisa **por Telegram** diciendo **qué** se rompió.
 - Préstamos: `NUEVO_PRESTAMO`, `COBRAR_CUOTA`.
 - Fiados: `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
 - Deuda del cliente: `COBRAR_DEUDA_CLIENTE` (cobro consolidado de las tres fuentes, §2.c).
+- Deuda del cliente: `COMPENSAR_DEUDA` (le transfirió a un acreedor del negocio,
+  §Compensación).
 - Otros: `REGISTRAR_DEUDA`, `REGISTRAR_DEUDA_CLIENTE`, `MOVIMIENTO_EFECTIVO`,
   `REGISTRAR_GASTO`, `EDITAR_OPERACION`, `REVERTIR_OPERACION`.
   - **Dirección de la deuda _(régimen definido 2026-08-18)_.** Tres mensajes que se dicen
@@ -800,9 +936,24 @@ avisa **por Telegram** diciendo **qué** se rompió.
     separación. Dos trampas del vocabulario que resuelve el prompt: **sin cuotas no es
     préstamo** (pregunta en vez de inventar un cuadro de cuotas) y **"fiar" acá es entregar
     un cheque** (`FIAR_CHEQUE`), así que "le fié plata" es una deuda de cliente.
+  - **"Me pagó" vs. "le pagué a" vs. "le transfirió a"** _(régimen definido
+    2026-08-21)_. Tres frases que se dicen casi igual y mueven la caja de tres
+    maneras distintas: **"Juan me pagó 500 lucas"** → `COBRAR_DEUDA_CLIENTE`
+    (entra plata); **"le pagué 500 lucas a Pedro"** → pago de pasivo (sale
+    plata); **"Juan le transfirió 500 a Pedro"** → `COMPENSAR_DEUDA` (no se
+    mueve). Entre la primera y la tercera hay un simple *"a Pedro"*, y el error
+    **no es simétrico**: leerla como cobro mete un ingreso que nunca entró **y
+    además** deja viva la deuda con Pedro — descuadra dos cosas de una y no se
+    nota hasta leer el reporte. Por eso el prompt las contrasta en un mismo
+    bloque, la respuesta del bot dice explícitamente **"no movió la caja"** y
+    `test_bot_compensacion.py` custodia la separación. El acreedor se resuelve
+    por nombre entre los pasivos vivos (es texto libre, no un cliente): si
+    coincide más de uno, pregunta.
   - **`REVERTIR_OPERACION` deshace; `EDITAR_OPERACION` corrige.** Editar cambia un valor mal
     cargado ("el % era 3 no 2"); revertir deshace la operación entera ("no se vendió",
     "borrá eso"). El prompt marca la diferencia explícitamente y hay un test que la custodia.
+  - Tipos que sabe deshacer: `CHEQUE`, `GASTO`, `PRESTAMO`, `PASIVO`,
+    `MOVIMIENTO` y `COMPENSACION` (por cliente o "ultimo").
   - `accion: REVERTIR` (solo cheques → vuelven a `EN_CARTERA` sin eliminarse) o `ELIMINAR`
     (anula y revierte la caja). Ambas delegan en `svc_anulacion`, así que **las reglas de
     bloqueo son las mismas que en el panel** — un fiado con cobros encima o una venta de USD
@@ -905,6 +1056,9 @@ avisa **por Telegram** diciendo **qué** se rompió.
 - Los **ENUM de PostgreSQL** se crean dentro de la migración; los modelos los referencian con
   `create_type=False` para que SQLAlchemy no intente recrearlos (ver también §Reglas de código).
 - Aplicar con `alembic upgrade head`.
+- Últimas: `0021` (compras a deber — `monto_abonado` en cheques y divisas,
+  `origen_tipo`/`origen_id` en pasivos) y `0022` (`compensaciones` +
+  `compensacion_imputaciones`).
 
 ---
 

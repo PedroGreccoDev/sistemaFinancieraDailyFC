@@ -167,6 +167,8 @@ _DEC_COLS = frozenset({
     "porcentaje_compra", "porcentaje_venta", "cotizacion_aplicada",
     "monto_original", "saldo_pendiente", "usd_restante", "cotizacion_pago",
     "cotizacion_usd", "cotizacion",
+    # Compras a deber y compensaciones (§Comprar sin abonar, §Compensación).
+    "monto_abonado", "imputado_cliente", "imputado_pasivo", "excedente",
 })
 _DT_COLS = frozenset({"created_at", "updated_at", "ultimo_evento_manual_at", "anulado_at"})
 _BYTES_COLS = frozenset({"foto"})

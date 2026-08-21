@@ -109,6 +109,36 @@ dar por cobrada una cuota entera cuando te dieron la mitad te descuadra la caja 
 Mismo cliente, mismo monto, y la caja del día se va al doble para el lado equivocado. Si el
 bot no entiende para qué lado va, te pregunta.
 
+### Cuando un cliente le paga a alguien a quien vos le debés
+
+| Decís | Hace |
+|---|---|
+| "Juan le transfirió 500 lucas a Pedro" | Baja lo que Juan te debe **y** lo que vos le debés a Pedro |
+| "El kiosco le pagó 300 mil a Martín de lo que me debe" | Lo mismo |
+
+Pasa seguido: le comprás un lote de dólares a Pedro y le quedás debiendo; Juan, que te
+debe, le transfiere directo a Pedro. **Bajan las dos deudas de una y por tu caja no pasa
+un peso** — porque esa plata nunca pasó por tu caja: fue de Juan a Pedro.
+
+⚠️ **Ojo con cómo lo decís, que son tres cosas distintas:**
+
+- *"Juan me pagó 500 lucas"* → te trajo la plata a **vos**: **entra** a la caja.
+- *"Le pagué 500 lucas a Pedro"* → se la pagaste **vos**: **sale** de la caja.
+- *"Juan le transfirió 500 lucas a Pedro"* → **no se mueve la caja**: bajan las dos deudas.
+
+Entre la primera y la tercera hay un simple *"a Pedro"*, y el error es caro: el bot
+anotaría plata que nunca entró **y encima** te dejaría viva la deuda con Pedro. Por eso,
+cuando compensa, te contesta siempre **"no movió la caja"**. Si ves esa línea y en realidad
+te trajeron la plata a vos, avisale.
+
+**Decile los dos nombres y el monto**: quién transfirió, a quién, y cuánto. Si le debés a
+varios que se llaman parecido, te pregunta a cuál.
+
+**También lo podés hacer a mano** —cobrarle a Juan por un lado y pagarle a Pedro por el
+otro— y funciona igual. Pero ahí quedan anotados un ingreso y un egreso que no existieron,
+y si te olvidás de hacer la segunda mitad, la caja te queda con plata de más que no está
+en el cajón. En un solo mensaje no te podés olvidar.
+
 ### Plata que sale
 
 | Decís | Hace |
@@ -137,8 +167,26 @@ salió de caja: si ahí ves un descuento que no esperabas, avisale en el momento
 | "Presté $500.000 a María en 6 cuotas mensuales, total $750.000" | Arma el préstamo |
 | "Compré 1.000 dólares a 1.250" | Registra la compra |
 | "Vendí 500 USD a 1.310" | Registra la venta y calcula la ganancia |
+| "Compré 1.000 dólares a 1.250 a Pedro pero no se los pagué" | Los dólares entran igual y quedan **debiéndose** a Pedro |
+| "Le compré el cheque 4455 al 10% a Juan y le pago la semana que viene" | El cheque entra a cartera y queda **debiéndose** a Juan |
+| "Le di 200 mil de los 900 del cheque" | Sale de caja solo lo que pagaste; el resto queda debiéndose |
 
 **La cotización la decís vos, siempre.** El bot nunca la inventa.
+
+**Cuando comprás sin pagar.** Decilo con todas las letras: *"no se los pagué"*,
+*"le pago después"*, *"quedé debiendo"*. La mercadería entra igual —los dólares a tu
+stock, el cheque a tu cartera— pero **de la caja no sale la plata que no pagaste**: queda
+anotada como deuda tuya con el vendedor, y la vas a ver en la sección Deudas del panel.
+
+Dos cosas para tener en cuenta:
+
+- **Decí a quién se lo comprás.** Sin nombre no puede anotar la deuda, así que te pregunta.
+- **De un cheque se debe lo que vale, no lo que dice.** Un cheque de $1.000.000 al 10% se
+  compra por $900.000: eso es lo que le quedás debiendo.
+
+Si no aclarás nada, el bot asume que **la pagaste** — que es lo normal. Por eso siempre te
+contesta **cuánto salió de caja**: si ahí ves el total cuando en realidad no pagaste,
+avisale en el momento.
 
 ### Preguntas
 
@@ -189,6 +237,12 @@ Hay cosas que no te va a dejar borrar: un fiado que ya cobraste en parte, dólar
 vendiste, o un cheque que usaste para pagar una deuda. Eso se resuelve en el panel.
 
 ---
+
+### Deshacer una compensación
+
+Decile *"deshacé la transferencia que Juan le hizo a Pedro"* o *"borrá la última
+compensación"*. Las dos deudas vuelven a como estaban y la caja no cambia, porque nunca
+se había movido.
 
 ## Lo que NO hace el bot
 
@@ -281,6 +335,10 @@ Hay **dos cajas separadas: pesos y dólares.** Un gasto en dólares no baja la c
 - **Los cheques que ya tenías antes de arrancar el sistema.** Esos los pagaste antes, y el
   efectivo con el que se abrió el sistema ya los tiene descontados. Contarlos otra vez
   sería restar la misma plata dos veces.
+- **Comprar sin pagar.** Los dólares o el cheque entran, pero la plata sigue en el cajón:
+  sale el día que le pagues al vendedor.
+- **Que un cliente le transfiera a alguien a quien vos le debés.** Bajan las dos deudas,
+  pero esa plata fue de uno al otro sin pasar por tu caja.
 
 ### Por qué un buen día puede aparecer "en rojo"
 

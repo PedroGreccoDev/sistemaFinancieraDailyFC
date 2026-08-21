@@ -78,3 +78,31 @@ def test_las_columnas_decimales_del_backup_se_deserializan_como_decimal() -> Non
     descuadre recién se nota al sumar la caja."""
     for col in ("cotizacion", "cotizacion_usd", "cotizacion_pago", "cotizacion_aplicada"):
         assert col in backup._DEC_COLS, f"`{col}` tiene que estar en _DEC_COLS."
+
+
+# ── Columnas de plata ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize(("nombre", "columnas", "modelo"), _TABLAS)
+def test_toda_columna_numerica_esta_en_dec_cols(
+    nombre: str, columnas: list, modelo: type
+) -> None:
+    """Una columna Numeric que no esté en `_DEC_COLS` se importa como TEXTO.
+
+    El export la escribe como string (así viaja un Decimal en JSON) y el import
+    la inserta tal cual si no sabe que hay que reconstruirla: la fila entra, no
+    falla nada, y el descuadre recién se nota al sumar la caja. Igual que con las
+    listas de columnas, esto se compara contra el modelo para que una migración
+    nueva obligue a decidir.
+    """
+    import sqlalchemy as sa
+
+    numericas = {
+        c.name
+        for c in modelo.__table__.columns
+        if isinstance(c.type, sa.Numeric) and c.name in columnas
+    }
+    faltantes = sorted(numericas - backup._DEC_COLS)
+    assert not faltantes, (
+        f"{nombre} exporta {faltantes} como Decimal pero `_DEC_COLS` no las "
+        f"reconoce: el import las guardaría como texto."
+    )
