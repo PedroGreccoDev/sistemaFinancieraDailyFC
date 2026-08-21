@@ -1,69 +1,23 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getChequeCartera, getCheques, chequeFotoUrl, editarCheque, crearCheque } from '../api/cheques'
-import { getClientes, createCliente } from '../api/clientes'
+import { getClientes } from '../api/clientes'
 import { fmtARS, fmtDate, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
 import { btnBordered, btnSolid } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconRefresh, IconCamera } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
 import ChequeFotoModal from '../components/ChequeFotoModal'
-import type { Cheque, Cliente } from '../types'
+import type { Cheque } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
 import DateRangePicker from '../components/DateRangePicker'
 import ModalEliminar from '../components/ModalEliminar'
 import ModalRevertirCheque from '../components/ModalRevertirCheque'
+import ClienteSelect from '../components/ClienteSelect'
 
 const MODAL_BG = 'var(--modal)'
 const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: "'Manrope', sans-serif", fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
 const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: "'Manrope', sans-serif", fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
-
-// ── Selector de cliente (con alta inline) ─────────────────────────────
-
-function ClienteSelect({ label, value, onChange, clientes }: { label: string; value: string; onChange: (id: string) => void; clientes: Cliente[] }) {
-  const qc = useQueryClient()
-  const [creating, setCreating] = useState(false)
-  const [nombre, setNombre] = useState('')
-  const [tel, setTel] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  async function crear() {
-    if (!nombre.trim()) return
-    setBusy(true); setErr(null)
-    try {
-      const nuevo = await createCliente({ nombre: nombre.trim(), telefono: tel.trim() || null })
-      qc.setQueryData<Cliente[]>(['clientes'], (prev) => [...(prev ?? []), nuevo])
-      onChange(nuevo.id); setCreating(false); setNombre(''); setTel('')
-    } catch (e) { setErr((e as Error).message) }
-    finally { setBusy(false) }
-  }
-
-  return (
-    <div>
-      <label style={LABEL_STYLE}>{label}</label>
-      {!creating ? (
-        <>
-          <select value={value} onChange={(e) => onChange(e.target.value)} style={{ ...INPUT_STYLE, cursor: 'pointer' }}>
-            <option value="">— Sin asignar —</option>
-            {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-          </select>
-          <button type="button" onClick={() => setCreating(true)} style={{ fontFamily: FM, fontSize: '0.7rem', color: 'var(--primary)', background: 'transparent', border: 'none', cursor: 'pointer', marginTop: '0.35rem', padding: 0 }}>+ Agregar cliente nuevo</button>
-        </>
-      ) : (
-        <div style={{ border: '1px solid var(--bd-008)', borderRadius: 'var(--r-md)', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', background: 'var(--ov-002)' }}>
-          <input type="text" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre *" autoFocus style={INPUT_STYLE} />
-          <input type="text" value={tel} onChange={(e) => setTel(e.target.value)} placeholder="Teléfono (opcional)" style={INPUT_STYLE} />
-          {err && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171' }}>{err}</p>}
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button type="button" onClick={() => { setCreating(false); setErr(null) }} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.4rem', fontSize: '0.72rem' }}>Volver</button>
-            <button type="button" onClick={crear} disabled={busy || !nombre.trim()} style={{ ...btnSolid('primary'), flex: 1, padding: '0.4rem', fontSize: '0.72rem', opacity: (busy || !nombre.trim()) ? 0.5 : 1 }}>{busy ? 'Creando…' : 'Crear'}</button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ── Modal nuevo cheque (alta manual) ──────────────────────────────────
 

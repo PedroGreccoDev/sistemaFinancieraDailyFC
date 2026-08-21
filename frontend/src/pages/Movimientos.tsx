@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getMovimientos, editarMovimiento } from '../api/movimientos'
+import { getMovimientos, editarMovimiento, crearMovimiento } from '../api/movimientos'
+import { getClientes } from '../api/clientes'
 import { getMovimientosUnificados } from '../api/reportes'
 import { fmtUSD, fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
@@ -11,6 +12,7 @@ import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
 import ModalEliminar from '../components/ModalEliminar'
 import ModalAjusteCaja from '../components/ModalAjusteCaja'
+import ClienteSelect from '../components/ClienteSelect'
 
 type GrupoFiltro = 'TODOS' | MovimientoGrupo
 type FlujoFiltro = 'TODOS' | MovimientoFlujo
@@ -29,6 +31,131 @@ const CARD   = {
 const MODAL_BG = 'var(--modal)'
 const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
 const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
+
+// ── Modal nueva operación de divisas (compra/venta USD) ───────────────
+
+function ModalNuevaDivisa({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [tipo, setTipo] = useState<'COMPRA' | 'VENTA'>('COMPRA')
+  const [monto, setMonto] = useState('')
+  const [cotiz, setCotiz] = useState('')
+  const [clienteId, setClienteId] = useState('')
+  const [observaciones, setObservaciones] = useState('')
+  const [aDeber, setADeber] = useState(false)
+  const [montoAbonado, setMontoAbonado] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const toast = useToast()
+
+  const { data: clientes = [] } = useQuery({ queryKey: ['clientes'], queryFn: getClientes, staleTime: 60_000 })
+
+  const montoNum = parseFloat(monto) || 0
+  const cotizNum = parseFloat(cotiz) || 0
+  const pesos = montoNum * cotizNum
+  const esCompra = tipo === 'COMPRA'
+  // Solo una compra puede quedar a deber: si vendiste y no te pagaron, el que
+  // debe es el cliente y eso es una deuda de cliente, no un pasivo del negocio.
+  const debiendo = esCompra && aDeber
+  const abonadoNum = debiendo ? (parseFloat(montoAbonado) || 0) : pesos
+  const debe = debiendo ? Math.max(pesos - abonadoNum, 0) : 0
+  const abonadoExcede = debiendo && pesos > 0 && abonadoNum > pesos
+  const faltaVendedor = debiendo && !clienteId
+  const invalido = loading || montoNum <= 0 || cotizNum <= 0 || abonadoExcede || faltaVendedor
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+    try {
+      await crearMovimiento({
+        tipo,
+        moneda: 'USD',
+        monto: montoNum,
+        cotizacion_aplicada: cotizNum,
+        cliente_id: clienteId || null,
+        observaciones: observaciones.trim() || null,
+        // Sin la marca no viaja el campo: el backend lo lee como compra pagada.
+        ...(debiendo ? { monto_abonado: abonadoNum } : {}),
+      })
+      toast('success', debiendo ? 'Compra registrada (queda a deber)' : (esCompra ? 'Compra registrada' : 'Venta registrada'))
+      onSuccess()
+    } catch (err) { setError((err as Error).message) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
+        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Nueva operación USD</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>La cotización la ponés vos: el sistema nunca la asume</p>
+        </div>
+        <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {(['COMPRA', 'VENTA'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => { setTipo(t); if (t === 'VENTA') { setADeber(false); setMontoAbonado('') } }}
+                style={{ ...(tipo === t ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.5rem', fontSize: '0.78rem' }}
+              >
+                {t === 'COMPRA' ? 'Compra' : 'Venta'}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div><label style={LABEL_STYLE}>Cantidad USD</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required autoFocus placeholder="0.00" style={INPUT_STYLE} /></div>
+            <div><label style={LABEL_STYLE}>Cotización ($/USD)</label><input type="number" step="0.000001" min="0.000001" value={cotiz} onChange={(e) => setCotiz(e.target.value)} required placeholder="0.00" style={INPUT_STYLE} /></div>
+          </div>
+          {pesos > 0 && (
+            <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.6rem 0.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontFamily: FM, fontSize: '0.78rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'rgba(100,116,139,0.7)' }}>{debiendo ? 'Vale la compra' : (esCompra ? 'Pesos que salen' : 'Pesos que entran')}</span>
+                <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtMonto(pesos, 'ARS')}</span>
+              </div>
+              {debiendo && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'rgba(100,116,139,0.7)' }}>Sale de caja ahora</span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtMonto(abonadoNum, 'ARS')}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'rgba(100,116,139,0.7)' }}>Queda a deber</span>
+                    <span style={{ fontWeight: 700, color: '#fbbf24' }}>{fmtMonto(debe, 'ARS')}</span>
+                  </div>
+                </>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'rgba(100,116,139,0.7)' }}>Dólares que {esCompra ? 'entran' : 'salen'}</span>
+                <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtUSD(montoNum)}</span>
+              </div>
+            </div>
+          )}
+          {esCompra && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', fontFamily: FM, fontSize: '0.76rem', color: 'var(--text-2)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={aDeber} onChange={(e) => { setADeber(e.target.checked); if (!e.target.checked) setMontoAbonado('') }} style={{ cursor: 'pointer' }} />
+              No la pagué (queda a deber)
+            </label>
+          )}
+          {debiendo && (
+            <div>
+              <label style={LABEL_STYLE}>Monto abonado <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(vacío = nada)</span></label>
+              <input type="number" step="0.01" min="0" value={montoAbonado} onChange={(e) => setMontoAbonado(e.target.value)} placeholder="0.00" style={INPUT_STYLE} />
+              {abonadoExcede && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171', marginTop: '0.3rem' }}>No podés abonar más de {fmtMonto(pesos, 'ARS')}, que es lo que vale la compra.</p>}
+              {faltaVendedor && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171', marginTop: '0.3rem' }}>Indicá el cliente: la deuda queda a su nombre.</p>}
+            </div>
+          )}
+          <ClienteSelect label={esCompra ? 'Cliente (a quién le compré)' : 'Cliente (a quién le vendí)'} value={clienteId} onChange={setClienteId} clientes={clientes} />
+          <div><label style={LABEL_STYLE}>Observaciones <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
+          {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
+          <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
+            <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
+            <button type="submit" disabled={invalido} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: invalido ? 0.6 : 1 }}>{loading ? 'Registrando…' : 'Registrar'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
 
 // ── Modal editar divisa (compra/venta USD) ────────────────────────────
 
@@ -177,6 +304,7 @@ export default function Movimientos() {
   const [editarDivisaId, setEditarDivisaId] = useState<string | null>(null)
   const [eliminarDivisaId, setEliminarDivisaId] = useState<string | null>(null)
   const [ajustandoCaja, setAjustandoCaja] = useState(false)
+  const [nuevaDivisa, setNuevaDivisa] = useState(false)
   const [eliminarAjusteId, setEliminarAjusteId] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
@@ -222,6 +350,17 @@ export default function Movimientos() {
     // Sacar la operación de la cadena reimputa el FIFO: cambian ganancias del reporte.
     queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
     queryClient.invalidateQueries({ queryKey: ['reporte'] })
+  }
+
+  function handleNuevaDivisa() {
+    setNuevaDivisa(false)
+    queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
+    queryClient.invalidateQueries({ queryKey: ['movimientos'] })
+    queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
+    queryClient.invalidateQueries({ queryKey: ['reporte'] })
+    // Una compra a deber genera un pasivo: sin esto, Deudas sigue mostrando el
+    // listado viejo y la deuda recién creada no aparece hasta recargar.
+    queryClient.invalidateQueries({ queryKey: ['pasivos'] })
   }
 
   function handleAjusteCaja() {
@@ -314,6 +453,13 @@ export default function Movimientos() {
 
         {/* Derecha: filtros */}
         <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setNuevaDivisa(true)}
+            style={{ ...btnSolid('primary'), padding: '0.45rem 0.9rem', fontSize: '0.78rem', whiteSpace: 'nowrap' }}
+          >
+            + Operación USD
+          </button>
           <button
             type="button"
             onClick={() => setAjustandoCaja(true)}
@@ -545,6 +691,12 @@ export default function Movimientos() {
           id={eliminarDivisaId}
           onClose={() => setEliminarDivisaId(null)}
           onSuccess={handleEliminarDivisa}
+        />
+      )}
+      {nuevaDivisa && (
+        <ModalNuevaDivisa
+          onClose={() => setNuevaDivisa(false)}
+          onSuccess={handleNuevaDivisa}
         />
       )}
       {ajustandoCaja && (
