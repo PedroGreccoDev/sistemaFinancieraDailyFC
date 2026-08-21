@@ -958,7 +958,7 @@ avisa **por Telegram** diciendo **qué** se rompió.
   `_MODEL_OCR` ante ese `None` o ante un `DESCONOCIDO`. **No escala en `ACLARACION_REQUERIDA`:**
   pedir un dato que el operador realmente no dijo es la respuesta correcta, y escalar ahí
   duplicaría el costo de un caso que funcionó bien.
-- **Prompt caching del system prompt.** Son ~5.900 tokens idénticos en cada mensaje: van en un
+- **Prompt caching del system prompt.** Son ~32.000 caracteres idénticos en cada mensaje (del orden de 9 mil tokens): van en un
   bloque con `cache_control: ephemeral`, y una lectura cacheada cuesta ~10% de la entrada. El
   caché es un match de **prefijo**: interpolar algo variable ahí (fecha, nombre del operador) lo
   rompe **sin dar error** — solo se nota en los contadores que loguea `_loguear_uso_cache`
@@ -1048,8 +1048,49 @@ avisa **por Telegram** diciendo **qué** se rompió.
     bloqueo son las mismas que en el panel** — un fiado con cobros encima o una venta de USD
     que no es la última se rechazan igual desde el chat.
   - Siempre pide **confirmación** (`confirmacion_requerida: true`): es destructiva.
-- Consultas (lectura): `CONSULTA_CARTERA`, `CONSULTA_CLIENTE`, `CONSULTA_PRESTAMOS`.
-  - **`CONSULTA_CLIENTE` tiene que cubrir las tres fuentes de deuda de un cliente:**
+- Consultas (lectura): **un solo intent `CONSULTA`** con `tipo` y `periodo` adentro
+  _(régimen definido 2026-08-21)_. Hasta esa fecha eran tres intents sueltos
+  (`CONSULTA_CARTERA`, `CONSULTA_CLIENTE`, `CONSULTA_PRESTAMOS`), que **siguen en `INTENTS`
+  como alias** —el dispatcher los mapea en `_CONSULTAS_LEGACY`— porque una sesión abierta
+  arrastra historial con el contrato viejo y bajarlos a `DESCONOCIDO` haría que el bot
+  conteste "no entendí" a media conversación. El prompt ya no los documenta.
+  - **Once tipos:** `CARTERA`, `VENTAS`, `PASIVOS`, `DEUDORES`, `CLIENTE`, `PRESTAMOS`,
+    `MOVIMIENTOS`, `CAJA`, `GASTOS`, `DIVISAS`, `RESUMEN`. El ruteo es la tabla
+    `_CONSULTAS` del dispatcher: **una consulta nueva es una línea ahí y un renglón en el
+    prompt**. Los dos catálogos tienen que coincidir y `test_bot_consultas.py` los compara
+    en las dos direcciones — un tipo que el prompt enseña sin handler no falla en ningún
+    lado: el operador pregunta algo válido y el bot le dice que no sabe qué consultar.
+  - **El período lo resuelve el sistema, no el modelo** (`_resolver_periodo`, función pura).
+    El system prompt está cacheado por prefijo y **no puede llevar la fecha de hoy adentro**,
+    así que "esta semana" llega como la palabra `SEMANA` y se convierte con el calendario
+    local. `SEMANA` = lunes a hoy; `MES` = día 1 a hoy; sin período, las consultas de
+    **flujo** (`MOVIMIENTOS`, `CAJA`, `GASTOS`, `VENTAS`, `DIVISAS`) caen en `HOY` y las de
+    **stock** en `TODO`. `RANGO` sin fecha de inicio **pregunta** en vez de inventar una:
+    un rango asumido devuelve un reporte de un período que nadie pidió, con pinta de
+    correcto.
+  - **La fecha de hoy viaja en el MENSAJE, no en el system** (`claude.contexto_fecha`,
+    antepuesta al texto del operador). Sin eso el modelo no tiene forma de saber qué día es
+    y "del 5 al 10" o "en julio" salían con el año que supusiera, devolviendo un rango
+    vacío. Ponerla en el system tiraría el caché en cada cambio de día, en silencio.
+  - **"Deudas" a secas es ambiguo y los dos lados son opuestos** (§Reglas de código: Pasivos
+    vs. Deudores): "le debo" → `PASIVOS`, "me deben" → `DEUDORES`. El prompt las contrasta y
+    manda a `ACLARACION_REQUERIDA` si el mensaje no distingue — contestar el lado equivocado
+    le da al operador un número que parece el suyo y no lo es.
+  - **Las respuestas largas se cortan y lo dicen** (`_detalle`, tope `_MAX_DETALLE`): van los
+    totales completos —que es lo que se pregunta— y las primeras líneas, con el resto contado
+    al pie. Cortar en silencio haría leer "esto es todo" cuando no lo es.
+  - **`CARTERA` informa nominal, costo con descuento y la diferencia.** El costo usa
+    `_neto_compra` = `monto × (1 − %compra)`, **la misma cuenta que el panel** en
+    `Cartera.tsx`: si divergen, el bot y la pantalla muestran dos valores para la misma
+    cartera.
+  - **`VENTAS` se lee del libro de caja, no del estado del cheque.** El estado dice cómo está
+    hoy pero no cuándo salió, y la pregunta es qué pasó en estos días; además, al revertir una
+    venta su línea de caja se borra, así que lo que queda es lo que de verdad ocurrió.
+  - **`DEUDORES` cruza las tres fuentes con `svc_deudores.armar_renglones`**, el mismo
+    repartidor que usa el cobro consolidado (§2.c), para que el total que se ve por chat sea
+    exactamente el que se va a imputar al cobrar. Lee las tres tablas de una vez y agrupa en
+    memoria: preguntar "quién me debe" no puede disparar una consulta por cliente.
+  - **`CONSULTA` tipo `CLIENTE` tiene que cubrir las tres fuentes de deuda de un cliente:**
     préstamos activos, fiados abiertos y **otras deudas** (§2.b). Una fuente que falte no
     da error: el bot contesta "no tiene deudas activas" con toda seguridad mientras el
     panel muestra el saldo. Un módulo nuevo de deuda de cliente se da de alta acá.
@@ -1133,6 +1174,14 @@ avisa **por Telegram** diciendo **qué** se rompió.
     prompt siga contrastando "le debo a X" / "X me debe" / "le presté en N cuotas", que
     diga por qué importa (una descuenta la caja y la otra no) y que los dos handlers no se
     crucen —el de cliente crea una `DeudaSimple`, el del negocio un `Pasivo`—.
+  - **`test_bot_consultas.py`** — el intent genérico `CONSULTA` (§Bot): que el catálogo de
+    tipos del prompt y el de la tabla `_CONSULTAS` sean **el mismo en las dos direcciones**
+    (un tipo enseñado sin handler no falla en ningún lado, solo no anda), que los tres
+    intents viejos sigan ruteando, y toda la resolución de períodos —la semana arranca el
+    lunes, el mes el día 1, los defaults de flujo y de stock, y que un `RANGO` sin fecha de
+    inicio o al revés se rechace en vez de devolver un período que nadie pidió—. Custodia
+    además que **la fecha de hoy no esté en el system prompt** (rompería el caché en cada
+    cambio de día, sin dar error) y que el neto de compra sea la misma cuenta que el panel.
   - **`test_apertura.py`** — fecha de corte de la carga inicial (§Apertura): el día del corte es
     inclusive, después vuelve a descontar, y sin corte definido todo es operación normal. Fija
     además que `SALDO_INICIAL` va al grupo `APERTURA` y no cuenta como ingreso del día.

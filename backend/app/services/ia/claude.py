@@ -3,12 +3,14 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from datetime import date
 from typing import Any
 
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
+from app.core.fechas import hoy_local
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,11 @@ INTENTS = {
     "REGISTRAR_DEUDA_CLIENTE",
     "MOVIMIENTO_EFECTIVO",
     "REGISTRAR_GASTO",
+    "CONSULTA",
+    # Los tres intents de consulta del contrato anterior. Ya no se documentan en
+    # el prompt (los reemplazó CONSULTA con `tipo`), pero siguen en la lista
+    # blanca: una sesión abierta arrastra historial con ellos y bajarlos a
+    # DESCONOCIDO haría que el bot conteste "no entendí" a media conversación.
     "CONSULTA_CARTERA",
     "CONSULTA_CLIENTE",
     "CONSULTA_PRESTAMOS",
@@ -362,26 +369,57 @@ OPERACIONES DISPONIBLES
           * moneda: "ARS" o "USD" (default ARS)
       (Si es un solo gasto, igual usá la lista con un único elemento.)
 
-13. CONSULTA_CARTERA
-    Cuándo: El operador pregunta qué cheques tiene.
-    Ej: "Qué cheques tengo?", "Estado de cartera", "Cuánto hay en cartera?"
-    data: {}
-
-13b. CONSULTA_CLIENTE
-    Cuándo: El operador pregunta qué deudas o situación tiene un cliente específico.
-    Ej: "Qué tiene Juan?", "No me acuerdo lo que me debe Pedro", "Cuánto me debe María?",
-        "Qué deuda tiene X", "Qué tiene pendiente X"
+13. CONSULTA  ←— cualquier pregunta de lectura (NUNCA modifica nada)
+    Cuándo: El operador pregunta por el estado del negocio en vez de cargar una operación.
     data:
-      - cliente_nombre: string
-
-13c. CONSULTA_PRESTAMOS
-    Cuándo: El operador pregunta por los préstamos en general (sin nombrar a un cliente),
-        típicamente para saber qué tiene por cobrar.
-    Ej: "Qué préstamos tengo por cobrar?", "Qué préstamos tengo activos?",
-        "Cuánto me deben en préstamos?", "Listame los préstamos"
-    ⚠️ NO confundir con CONSULTA_CARTERA (eso es cheques). Los préstamos son dinero
-       prestado sin cheque. Si dice "préstamo(s)" o "cuotas" → CONSULTA_PRESTAMOS.
-    data: {}
+      - tipo: qué quiere ver
+          * CARTERA     → cheques en stock: cuántos son, su nominal y cuánto valen
+                          con el descuento de compra aplicado
+          * VENTAS      → cheques vendidos o cobrados en el período y qué ganancia dejaron
+          * PASIVOS     → lo que el NEGOCIO debe, agrupado por acreedor
+          * DEUDORES    → lo que los CLIENTES deben, todos juntos
+          * CLIENTE     → la situación de UN cliente (requiere cliente_nombre)
+          * PRESTAMOS   → préstamos activos por cobrar
+          * MOVIMIENTOS → historial de operaciones del período
+          * CAJA        → ingresos, egresos, neto y saldo del período
+          * GASTOS      → gastos operativos del período
+          * DIVISAS     → stock de dólares y ganancia por venta en el período
+          * RESUMEN     → foto general del negocio ("cómo venimos", "resumen", "estado")
+      - periodo: "HOY" | "AYER" | "SEMANA" | "MES" | "RANGO" | "TODO"
+          SEMANA = de lunes a hoy. MES = del día 1 a hoy. TODO = sin límite de fechas.
+          Default: TODO para lo que es stock (CARTERA, PASIVOS, DEUDORES, PRESTAMOS,
+          CLIENTE); HOY para lo que es flujo (MOVIMIENTOS, CAJA, GASTOS, VENTAS, DIVISAS).
+      - desde / hasta: "YYYY-MM-DD" — SOLO cuando periodo es "RANGO"
+      - cliente_nombre: string o null — SOLO cuando tipo es CLIENTE
+    Ejemplos:
+      "qué cheques tengo" / "estado de cartera"       → CARTERA
+      "cuánto vale la cartera con los descuentos"     → CARTERA
+      "qué vendí esta semana"                         → VENTAS, periodo SEMANA
+      "movimientos de hoy" / "qué se movió hoy"       → MOVIMIENTOS, periodo HOY
+      "cómo venimos este mes"                         → CAJA, periodo MES
+      "movimientos del 1 al 15 de agosto"             → MOVIMIENTOS, periodo RANGO + fechas
+      "a quién le debo" / "qué deudas tengo"          → PASIVOS
+      "quién me debe" / "cuánto me deben"             → DEUDORES
+      "qué tiene Kiosco" / "cuánto me debe Pedro"     → CLIENTE + cliente_nombre
+      "qué préstamos tengo por cobrar"                → PRESTAMOS
+      "cuántos dólares tengo"                         → DIVISAS
+      "cuánto gasté este mes"                         → GASTOS, periodo MES
+    Reglas:
+      - "DEUDAS" A SECAS ES AMBIGUO en este negocio y los dos lados son opuestos:
+        "le debo" / "mis deudas" / "a quién le debo"  → PASIVOS (el negocio debe)
+        "me deben" / "los deudores" / "quién me debe" → DEUDORES (los clientes deben)
+        Si el mensaje no distingue para qué lado va → ACLARACION_REQUERIDA. Contestar
+        el lado equivocado es peor que preguntar: el operador se lleva un número que
+        parece el suyo y no lo es.
+      - PRESTAMOS es plata prestada SIN cheque; CARTERA son cheques. Si dice
+        "préstamo(s)" o "cuotas" → PRESTAMOS, aunque pregunte por lo que le deben.
+      - Una consulta NUNCA lleva confirmacion_requerida: no toca nada.
+      - NO inventes ni calcules los números en respuesta_usuario: los saca el sistema
+        de la base. Poné ahí solo una frase corta ("Te paso la cartera").
+      - Si pide algo que no encaja en ningún tipo, usá RESUMEN antes que DESCONOCIDO.
+      - Las fechas de "RANGO" van completas ("YYYY-MM-DD"). El mensaje del operador
+        viene con la fecha de hoy al principio: usala para resolver "del 5 al 10",
+        "en julio" o "la semana pasada" al año y mes que corresponden.
 
 14. EDITAR_OPERACION
     Cuándo: El operador quiere corregir un dato ya registrado.
@@ -550,6 +588,23 @@ FORMATO DE RESPUESTA — SIEMPRE ESTE EXACTO
 # MIME types que acepta la API de Claude para imágenes
 _VALID_IMAGE_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
 
+_DIAS_ES = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+
+
+def contexto_fecha(hoy: date | None = None) -> str:
+    """La fecha de hoy, para anteponer al MENSAJE del operador.
+
+    El bot no tenía forma de saber qué día es: "movimientos del 5 al 10" o "en
+    julio" salían con el año que el modelo supusiera y la consulta devolvía un
+    rango vacío sin que nadie lo notara.
+
+    Va en el mensaje y **NO** en el system prompt a propósito: el system se
+    cachea por coincidencia de PREFIJO, así que una fecha ahí adentro tiraría el
+    caché en cada cambio de día — en silencio, sin error, solo más caro (§Bot).
+    """
+    hoy = hoy or hoy_local()
+    return f"(Hoy es {_DIAS_ES[hoy.weekday()]} {hoy.isoformat()}.)"
+
 # El bot tiene dos cargas de trabajo muy distintas y se rutean por separado según
 # venga o no una foto. La señal está disponible ANTES de llamar (`image_bytes`).
 #
@@ -619,6 +674,8 @@ class IntentResult(BaseModel):
     def is_write_operation(self) -> bool:
         """True si la intención modifica la base de datos."""
         return self.intent not in {
+            "CONSULTA",
+            # Alias del contrato anterior (ver INTENTS): siguen siendo lectura.
             "CONSULTA_CARTERA",
             "CONSULTA_CLIENTE",
             "CONSULTA_PRESTAMOS",
@@ -743,7 +800,7 @@ async def _extraer_con_modelo(
             # Es un techo, no un cargo: solo se paga lo que se genera.
             max_tokens=8192,
             output_config={"effort": effort},
-            # El system prompt son ~5.900 tokens idénticos en cada mensaje: es el
+            # El system prompt son ~32.000 caracteres idénticos en cada mensaje: es el
             # bloque más caro y el más estable, así que se cachea. Una lectura
             # cacheada cuesta ~10% de la entrada normal. El caché es un match de
             # PREFIJO — si algún día se interpola algo variable acá (fecha, nombre
@@ -815,13 +872,15 @@ async def extraer_intencion(
             {
                 "type": "text",
                 "text": (
-                    f"El operador envió una foto de cheque."
+                    f"{contexto_fecha()} El operador envió una foto de cheque."
                     + (f" Su mensaje adicional: {text}" if text else "")
                 ),
             },
         ]
     else:
-        user_content = [{"type": "text", "text": text or "(mensaje vacío)"}]
+        user_content = [
+            {"type": "text", "text": f"{contexto_fecha()} {text or '(mensaje vacío)'}"}
+        ]
 
     # Construir la lista de mensajes con historial + mensaje actual
     messages: list[dict[str, Any]] = [*history, {"role": "user", "content": user_content}]

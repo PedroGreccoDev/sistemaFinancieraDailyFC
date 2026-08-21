@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
     Compensacion,
@@ -30,6 +30,7 @@ from app.db.models import (
     ChequeEstado,
     FrecuenciaCuotas,
     Moneda,
+    MovimientoCaja,
     MovimientoEfectivo,
     MovimientoEfectivoTipo,
 )
@@ -55,8 +56,9 @@ from app.services import clientes as svc_clientes
 from app.services import fiados as svc_fiados
 from app.services import movimientos as svc_movimientos
 from app.services import prestamos as svc_prestamos
+from app.services import reportes as svc_reportes
 from app.core.fechas import fecha_local, hora_local, hoy_local
-from app.services.exceptions import ServiceError
+from app.services.exceptions import ServiceError, ValidationError
 from app.services.ia.claude import IntentResult
 
 logger = logging.getLogger(__name__)
@@ -138,12 +140,13 @@ def dispatch(
             return _movimiento_efectivo(db, data, msg_at)
         if intent == "REGISTRAR_GASTO":
             return _registrar_gasto(db, data, msg_at)
-        if intent == "CONSULTA_CARTERA":
-            return _consulta_cartera(db)
-        if intent == "CONSULTA_CLIENTE":
-            return _consulta_cliente(db, data)
-        if intent == "CONSULTA_PRESTAMOS":
-            return _consulta_prestamos(db)
+        if intent == "CONSULTA":
+            return _consulta(db, data)
+        if intent in _CONSULTAS_LEGACY:
+            # Contrato anterior (un intent por consulta). Una sesión abierta puede
+            # traerlos en el historial: se mapean al tipo equivalente en vez de
+            # caer en la respuesta genérica a mitad de conversación.
+            return _consulta(db, {**data, "tipo": _CONSULTAS_LEGACY[intent]})
         if intent == "EDITAR_OPERACION":
             return _editar_operacion(db, data)
         if intent == "REVERTIR_OPERACION":
@@ -1697,23 +1700,270 @@ def _editar_pasivo(db: Session, identificador: str, campo: str, nuevo_valor: Any
     )
 
 
-def _consulta_cartera(db: Session) -> DispatchResult:
+# Cuántas líneas de detalle entran en una respuesta antes de cortar. Un mes de
+# movimientos o una cartera de 200 cheques no se leen en un celular: van los
+# totales completos —que es lo que el operador pregunta— y las primeras líneas,
+# con el resto contado al pie para que se note que hay más.
+_MAX_DETALLE = 12
+
+# Fecha desde la que se cuenta "TODO". Anterior a cualquier operación del
+# sistema, y lo bastante concreta como para no pelearse con `date.min` en las
+# comparaciones de Postgres.
+_ORIGEN = date(2000, 1, 1)
+
+# Consultas de FLUJO (lo que pasó en un período). El resto son de STOCK: una foto
+# de cómo están las cosas ahora, donde el período no significa nada.
+_CONSULTAS_DE_FLUJO = frozenset({"MOVIMIENTOS", "CAJA", "GASTOS", "VENTAS", "DIVISAS"})
+
+# Intents del contrato anterior (uno por consulta) → su `tipo` de hoy.
+_CONSULTAS_LEGACY = {
+    "CONSULTA_CARTERA":   "CARTERA",
+    "CONSULTA_CLIENTE":   "CLIENTE",
+    "CONSULTA_PRESTAMOS": "PRESTAMOS",
+}
+
+
+def _resolver_periodo(
+    data: dict[str, Any], *, hoy: date | None = None
+) -> tuple[str, date, date]:
+    """Traduce el período simbólico del modelo a fechas concretas.
+
+    **El modelo no resuelve fechas, las nombra.** El system prompt está cacheado
+    por prefijo y no puede llevar la fecha de hoy adentro, así que "esta semana"
+    llega como la palabra `SEMANA` y se convierte acá, con el calendario local
+    del negocio. Solo `RANGO` trae fechas propias, y para eso el mensaje del
+    operador viaja con la fecha de hoy antepuesta (`claude.contexto_fecha`).
+
+    Pura si se le pasa `hoy`: se testea sin BD ni reloj.
+
+    Returns:
+        (periodo_normalizado, desde, hasta)
+    """
+    hoy = hoy or hoy_local()
+    periodo = str(data.get("periodo") or "").strip().upper()
+    tipo = str(data.get("tipo") or "").strip().upper()
+
+    if not periodo:
+        # Sin período, cada consulta cae en lo que el operador quiso decir:
+        # "movimientos" a secas es los de hoy; "cartera" a secas es toda.
+        periodo = "HOY" if tipo in _CONSULTAS_DE_FLUJO else "TODO"
+
+    if periodo == "HOY":
+        return periodo, hoy, hoy
+    if periodo == "AYER":
+        ayer = hoy - timedelta(days=1)
+        return periodo, ayer, ayer
+    if periodo == "SEMANA":
+        return periodo, hoy - timedelta(days=hoy.weekday()), hoy  # lunes a hoy
+    if periodo == "MES":
+        return periodo, hoy.replace(day=1), hoy
+    if periodo == "RANGO":
+        desde = _parse_date_val(data.get("desde"))
+        hasta = _parse_date_val(data.get("hasta")) or hoy
+        if desde is None:
+            raise ValidationError(
+                "¿Desde qué fecha? Decime el rango (ej: \"del 1 al 15 de agosto\")."
+            )
+        if desde > hasta:
+            raise ValidationError(
+                f"El rango está al revés: {_fmt_date(desde)} es posterior a {_fmt_date(hasta)}."
+            )
+        return periodo, desde, hasta
+
+    # TODO y cualquier cosa que el modelo invente: sin límite hacia atrás.
+    return "TODO", _ORIGEN, hoy
+
+
+def _etiqueta_periodo(periodo: str, desde: date, hasta: date) -> str:
+    """Cómo se nombra el período en el encabezado de la respuesta."""
+    if periodo == "HOY":
+        return f"hoy ({_fmt_date(desde)})"
+    if periodo == "AYER":
+        return f"ayer ({_fmt_date(desde)})"
+    if periodo == "SEMANA":
+        return f"esta semana ({_fmt_date(desde)} a {_fmt_date(hasta)})"
+    if periodo == "MES":
+        return f"este mes ({_fmt_date(desde)} a {_fmt_date(hasta)})"
+    if periodo == "TODO":
+        return "histórico"
+    return f"del {_fmt_date(desde)} al {_fmt_date(hasta)}"
+
+
+def _detalle(lineas: list[str], limite: int = _MAX_DETALLE) -> list[str]:
+    """Recorta el detalle al tope y agrega el pie con lo que quedó afuera."""
+    if len(lineas) <= limite:
+        return lineas
+    return [*lineas[:limite], f"… y {len(lineas) - limite} más (detalle completo en el panel)"]
+
+
+def _monto(n: Decimal, moneda: Moneda) -> str:
+    """Un importe con el símbolo de su moneda."""
+    return f"{'U$D' if moneda == Moneda.USD else '$'}{_fmt_num(n)}"
+
+
+def _totales_por_moneda(totales: dict[Moneda, Decimal]) -> str:
+    """`{ARS: 100, USD: 5}` → `"$100,00 | U$D5,00"`. Vacío → `"$0,00"`."""
+    partes = [_monto(t, m) for m, t in sorted(totales.items(), key=lambda kv: kv[0].value) if t]
+    return " | ".join(partes) or "$0,00"
+
+
+def _consulta(db: Session, data: dict[str, Any]) -> DispatchResult:
+    """Entrada única de las consultas de lectura (intent `CONSULTA`).
+
+    El `tipo` elige el handler y el `periodo` se resuelve una sola vez acá, así
+    ninguna consulta se inventa su propio calendario."""
+    tipo = str(data.get("tipo") or "").strip().upper()
+    handler = _CONSULTAS.get(tipo)
+    if handler is None:
+        disponibles = ", ".join(sorted(_CONSULTAS)).lower()
+        return False, (
+            f"❓ No sé qué consultar. Puedo mostrarte: {disponibles}."
+        )
+
+    periodo, desde, hasta = _resolver_periodo(data)
+    # Las consultas no limpian la sesión: no son transacciones, y el operador
+    # suele preguntar algo y seguir la conversación sobre esa respuesta.
+    return False, handler(db, desde, hasta, data, periodo)
+
+
+# ── Cartera ──────────────────────────────────────────────────────────────────
+
+def _neto_compra(cheque: Cheque) -> Decimal:
+    """Lo que se pagó por el cheque: nominal menos el descuento de compra.
+
+    Es la misma cuenta que hace el panel en `Cartera.tsx`; si alguna vez cambia,
+    tiene que cambiar en los dos lados o el bot y la pantalla van a mostrar dos
+    valores distintos para la misma cartera."""
+    return (cheque.monto * (_CIEN_PCT - cheque.porcentaje_compra) / _CIEN_PCT).quantize(Decimal("0.01"))
+
+
+def _totales_cartera(db: Session) -> tuple[list[Cheque], Decimal, Decimal]:
+    """Cheques en stock con su nominal y su costo (nominal − descuento)."""
     cheques = svc_cheques.list_cheques(db, estado=ChequeEstado.EN_CARTERA)
+    nominal = sum((c.monto for c in cheques), Decimal("0.00"))
+    neto = sum((_neto_compra(c) for c in cheques), Decimal("0.00"))
+    return cheques, nominal, neto
+
+
+def _consulta_cartera(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
+    cheques, nominal, neto = _totales_cartera(db)
 
     if not cheques:
-        return False, "📭 La cartera está vacía. No hay cheques en stock."
+        return "📭 La cartera está vacía. No hay cheques en stock."
 
-    total = sum(c.monto for c in cheques)
-    lines = [f"📊 *Cartera — {len(cheques)} cheque(s)*", f"Total: {_ars(total)}", ""]
+    diferencia = nominal - neto
+    # Un decimal y con coma, como el resto de los números del mensaje: `_pct` usa
+    # punto y sirve para los porcentajes enteros de un cheque, no para este.
+    pct = (
+        f" ({str((diferencia / nominal * _CIEN_PCT).quantize(Decimal('0.1'))).replace('.', ',')}%)"
+        if nominal else ""
+    )
+    lines = [
+        f"📊 *Cartera — {len(cheques)} cheque(s)*",
+        f"Nominal: {_ars(nominal)}",
+        f"Con descuento: {_ars(neto)}",
+        f"Diferencia: {_ars(diferencia)}{pct}",
+        "",
+        "*Próximos a cobrar:*",
+    ]
 
-    for c in sorted(cheques, key=lambda x: x.fecha_pago or date.max):
-        pago = _fmt_date(c.fecha_pago) if c.fecha_pago else "sin fecha"
-        lines.append(f"📄 Nº {c.nro_cheque} | {_ars(c.monto)} | Pago: {pago} | Compra: {_pct(c.porcentaje_compra)}%")
+    detalle = [
+        f"📄 Nº {c.nro_cheque} | {_ars(c.monto)} | Pago: "
+        f"{_fmt_date(c.fecha_pago) if c.fecha_pago else 'sin fecha'} | "
+        f"Compra: {_pct(c.porcentaje_compra)}%"
+        for c in sorted(cheques, key=lambda x: x.fecha_pago or date.max)
+    ]
+    lines.extend(_detalle(detalle))
 
-    return False, "\n".join(lines)  # No limpia sesión (es consulta, no transacción)
+    return "\n".join(lines)
 
 
-def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
+# ── Ventas de cartera ────────────────────────────────────────────────────────
+
+def _consulta_ventas(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
+    """Qué cheques salieron de cartera en el período y qué dejaron.
+
+    Se lee del libro de caja y no del estado del cheque: el estado dice cómo
+    está hoy, pero no cuándo salió, y lo que el operador pregunta es qué pasó en
+    estos días. Al revertir una venta su línea de caja se borra, así que lo que
+    quedó acá es lo que de verdad ocurrió."""
+    movs = list(
+        db.scalars(
+            select(MovimientoCaja)
+            .where(
+                MovimientoCaja.categoria.in_(
+                    [CajaCategoria.VENTA_CHEQUE, CajaCategoria.COBRO_CHEQUE]
+                ),
+                MovimientoCaja.fecha >= desde,
+                MovimientoCaja.fecha <= hasta,
+            )
+            .order_by(MovimientoCaja.fecha.desc(), MovimientoCaja.created_at.desc())
+        )
+    )
+
+    etiqueta = _etiqueta_periodo(periodo, desde, hasta)
+    if not movs:
+        return f"📭 No hubo ventas ni cobros de cheques — {etiqueta}."
+
+    ids = {m.referencia_id for m in movs if m.referencia_id is not None}
+    cheques: dict[Any, Cheque] = (
+        {c.id: c for c in db.scalars(select(Cheque).where(Cheque.id.in_(ids)))} if ids else {}
+    )
+
+    vendidos = [m for m in movs if m.categoria == CajaCategoria.VENTA_CHEQUE]
+    cobrados = [m for m in movs if m.categoria == CajaCategoria.COBRO_CHEQUE]
+
+    def _nominal(movimientos: list[MovimientoCaja]) -> Decimal:
+        return sum(
+            (cheques[m.referencia_id].monto for m in movimientos if m.referencia_id in cheques),
+            Decimal("0.00"),
+        )
+
+    ganancia = sum(
+        (cheques[m.referencia_id].ganancia for m in vendidos if m.referencia_id in cheques),
+        Decimal("0.00"),
+    )
+
+    lines = [f"💸 *Ventas de cartera — {etiqueta}*", ""]
+    if vendidos:
+        cobrado = sum((m.monto for m in vendidos), Decimal("0.00"))
+        lines.append(f"*Vendidos:* {len(vendidos)}")
+        lines.append(f"  Nominal: {_ars(_nominal(vendidos))}")
+        lines.append(f"  Cobrado: {_ars(cobrado)}")
+        lines.append(f"  Ganancia: {_ars(ganancia)}")
+    if cobrados:
+        entrado = sum((m.monto for m in cobrados), Decimal("0.00"))
+        lines.append(f"*Cobrados por ventanilla:* {len(cobrados)} — {_ars(entrado)}")
+    lines.append("")
+
+    detalle = []
+    for m in movs:
+        cheque = cheques.get(m.referencia_id)
+        nro = cheque.nro_cheque if cheque else "?"
+        if m.categoria == CajaCategoria.COBRO_CHEQUE:
+            detalle.append(f"🏦 {_fmt_date(m.fecha)} | Nº {nro} | cobrado {_ars(m.monto)}")
+            continue
+        venta_pct = (
+            f" al {_pct(cheque.porcentaje_venta)}%"
+            if cheque is not None and cheque.porcentaje_venta is not None
+            else ""
+        )
+        gan = f" | ganancia {_ars(cheque.ganancia)}" if cheque is not None else ""
+        detalle.append(
+            f"📄 {_fmt_date(m.fecha)} | Nº {nro}{venta_pct} → {_ars(m.monto)}{gan}"
+        )
+    lines.extend(_detalle(detalle))
+
+    return "\n".join(lines)
+
+
+def _consulta_cliente(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
     """Resumen de lo que un cliente debe: préstamos, fiados y otras deudas (§2.b).
 
     Tiene que decir lo mismo que la sección Deudores del panel: si el bot omite
@@ -1810,10 +2060,12 @@ def _consulta_cliente(db: Session, data: dict[str, Any]) -> DispatchResult:
     if not hay_algo:
         lines.append("\nNo tiene deudas activas registradas.")
 
-    return False, "\n".join(lines)
+    return "\n".join(lines)
 
 
-def _consulta_prestamos(db: Session) -> DispatchResult:
+def _consulta_prestamos(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
     """Lista todos los préstamos activos con lo que falta cobrar de cada uno."""
     prestamos: list[Prestamo] = list(
         db.scalars(
@@ -1827,11 +2079,12 @@ def _consulta_prestamos(db: Session) -> DispatchResult:
     )
 
     if not prestamos:
-        return False, "📭 No tenés préstamos activos por cobrar."
+        return "📭 No tenés préstamos activos por cobrar."
 
     # Saldo pendiente por moneda = suma de cuotas pendientes.
     pendiente_por_moneda: dict[Moneda, Decimal] = {}
     lines: list[str] = [f"💳 *Préstamos activos — {len(prestamos)}*", ""]
+    detalle: list[str] = []
 
     for p in prestamos:
         cuotas_pendientes: list[Cuota] = list(
@@ -1845,26 +2098,451 @@ def _consulta_prestamos(db: Session) -> DispatchResult:
         saldo = sum((c.monto for c in cuotas_pendientes), Decimal("0.00"))
         pendiente_por_moneda[p.moneda] = pendiente_por_moneda.get(p.moneda, Decimal("0.00")) + saldo
 
-        simbolo = "U$D" if p.moneda == Moneda.USD else "$"
         proxima = cuotas_pendientes[0] if cuotas_pendientes else None
         prox_txt = (
             f"próx. #{proxima.numero_cuota} ({_fmt_date(proxima.fecha_vencimiento)})"
             if proxima else "sin cuotas pendientes"
         )
-        lines.append(
-            f"👤 {p.cliente.nombre} — falta {simbolo}{_fmt_num(saldo)} "
+        detalle.append(
+            f"👤 {p.cliente.nombre} — falta {_monto(saldo, p.moneda)} "
             f"({len(cuotas_pendientes)} cuota(s), {prox_txt})"
         )
 
+    lines.extend(_detalle(detalle))
     lines.append("")
-    totales = " | ".join(
-        f"{'U$D' if m == Moneda.USD else '$'}{_fmt_num(t)}"
-        for m, t in pendiente_por_moneda.items()
-        if t > 0
-    )
-    lines.append(f"*Total por cobrar:* {totales or '$0,00'}")
+    lines.append(f"*Total por cobrar:* {_totales_por_moneda(pendiente_por_moneda)}")
 
-    return False, "\n".join(lines)
+    return "\n".join(lines)
+
+
+# ── Pasivos (lo que el negocio debe) ─────────────────────────────────────────
+
+def _pasivos_pendientes(db: Session) -> list[Pasivo]:
+    return list(
+        db.scalars(
+            select(Pasivo)
+            .where(
+                Pasivo.estado == PasivoEstado.PENDIENTE,
+                Pasivo.anulado_at.is_(None),
+            )
+            .order_by(Pasivo.fecha_vencimiento.asc().nullslast())
+        )
+    )
+
+
+def _totales_pasivos(db: Session) -> dict[Moneda, Decimal]:
+    totales: dict[Moneda, Decimal] = {}
+    for p in _pasivos_pendientes(db):
+        totales[p.moneda] = totales.get(p.moneda, Decimal("0.00")) + p.saldo_pendiente
+    return totales
+
+
+def _consulta_pasivos(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
+    """Lo que el NEGOCIO debe, agrupado por acreedor (§5).
+
+    Es el lado opuesto de DEUDORES y se pregunta casi igual ("las deudas"), así
+    que el encabezado dice explícitamente de quién es la deuda: un operador que
+    lee el número equivocado no tiene forma de darse cuenta."""
+    pasivos = _pasivos_pendientes(db)
+    if not pasivos:
+        return "📭 No tenés deudas pendientes. El negocio no le debe nada a nadie."
+
+    por_acreedor: dict[str, list[Pasivo]] = {}
+    totales: dict[Moneda, Decimal] = {}
+    for p in pasivos:
+        por_acreedor.setdefault(p.acreedor, []).append(p)
+        totales[p.moneda] = totales.get(p.moneda, Decimal("0.00")) + p.saldo_pendiente
+
+    lines = [
+        f"🧾 *Deudas del negocio — {len(pasivos)} pendiente(s)*",
+        f"Total: {_totales_por_moneda(totales)}",
+        "",
+    ]
+
+    def _saldo_ars(deudas: list[Pasivo]) -> Decimal:
+        return sum(
+            (d.saldo_pendiente for d in deudas if d.moneda == Moneda.ARS), Decimal("0.00")
+        )
+
+    detalle = []
+    for acreedor, deudas in sorted(por_acreedor.items(), key=lambda kv: -_saldo_ars(kv[1])):
+        del_acreedor: dict[Moneda, Decimal] = {}
+        for d in deudas:
+            del_acreedor[d.moneda] = del_acreedor.get(d.moneda, Decimal("0.00")) + d.saldo_pendiente
+        cuanto = _totales_por_moneda(del_acreedor)
+        if len(deudas) == 1:
+            unica = deudas[0]
+            vence = (
+                f" · vence {_fmt_date(unica.fecha_vencimiento)}"
+                if unica.fecha_vencimiento else ""
+            )
+            detalle.append(f"👤 {acreedor} — {cuanto} · {unica.concepto}{vence}")
+        else:
+            detalle.append(f"👤 {acreedor} — {cuanto} ({len(deudas)} deudas)")
+    lines.extend(_detalle(detalle))
+
+    return "\n".join(lines)
+
+
+# ── Deudores (lo que los clientes deben) ─────────────────────────────────────
+
+def _deuda_por_cliente(db: Session) -> list[tuple[str, dict[Moneda, Decimal]]]:
+    """Saldo consolidado de cada cliente que debe algo, por moneda.
+
+    Cruza las tres fuentes (§2.c) con la misma función que usa el cobro
+    consolidado —`svc_deudores.armar_renglones`—, para que el total que ve el
+    operador por chat sea exactamente el que se va a imputar cuando cobre. Las
+    tres tablas se leen de una sola vez y se agrupan en memoria: preguntar
+    "quién me debe" no puede disparar una consulta por cliente."""
+    fiados = list(
+        db.scalars(
+            select(Fiado).where(
+                Fiado.estado == FiadoEstado.ABIERTO,
+                Fiado.anulado_at.is_(None),
+            )
+        )
+    )
+    deudas = list(
+        db.scalars(
+            select(DeudaSimple).where(
+                DeudaSimple.estado == DeudaSimpleEstado.ABIERTA,
+                DeudaSimple.anulado_at.is_(None),
+            )
+        )
+    )
+    prestamos = list(
+        db.scalars(
+            select(Prestamo)
+            .options(selectinload(Prestamo.cuotas_detalle))
+            .where(
+                Prestamo.estado != PrestamoEstado.CANCELADO,
+                Prestamo.anulado_at.is_(None),
+            )
+        )
+    )
+
+    ids = (
+        {f.cliente_id for f in fiados}
+        | {d.cliente_id for d in deudas}
+        | {p.cliente_id for p in prestamos}
+    )
+    if not ids:
+        return []
+    nombres = {
+        c.id: c.nombre for c in db.scalars(select(Cliente).where(Cliente.id.in_(ids)))
+    }
+
+    resultado: list[tuple[str, dict[Moneda, Decimal]]] = []
+    for cliente_id in ids:
+        del_cliente: dict[Moneda, Decimal] = {}
+        for moneda in (Moneda.ARS, Moneda.USD):
+            renglones = svc_deudores.armar_renglones(
+                [f for f in fiados if f.cliente_id == cliente_id],
+                [d for d in deudas if d.cliente_id == cliente_id],
+                [p for p in prestamos if p.cliente_id == cliente_id],
+                moneda,
+            )
+            total = sum((r.saldo for r in renglones), Decimal("0.00"))
+            if total > 0:
+                del_cliente[moneda] = total
+        if del_cliente:
+            resultado.append((nombres.get(cliente_id, "(cliente sin nombre)"), del_cliente))
+
+    resultado.sort(key=lambda item: -item[1].get(Moneda.ARS, Decimal("0.00")))
+    return resultado
+
+
+def _consulta_deudores(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
+    """Lo que los CLIENTES deben, todos juntos (§2.c)."""
+    por_cliente = _deuda_por_cliente(db)
+    if not por_cliente:
+        return "📭 Nadie te debe nada. No hay deudas de clientes abiertas."
+
+    totales: dict[Moneda, Decimal] = {}
+    for _, del_cliente in por_cliente:
+        for moneda, monto in del_cliente.items():
+            totales[moneda] = totales.get(moneda, Decimal("0.00")) + monto
+
+    lines = [
+        f"🫱 *Me deben — {len(por_cliente)} cliente(s)*",
+        f"Total: {_totales_por_moneda(totales)}",
+        "",
+    ]
+    lines.extend(
+        _detalle([f"👤 {nombre} — {_totales_por_moneda(saldos)}" for nombre, saldos in por_cliente])
+    )
+
+    return "\n".join(lines)
+
+
+# ── Movimientos y caja ───────────────────────────────────────────────────────
+
+_EMOJI_FLUJO = {"INGRESO": "🟢", "EGRESO": "🔴", "NEUTRO": "⚪"}
+
+
+def _consulta_movimientos(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
+    """Historial unificado del período: la misma fuente que la pantalla Movimientos."""
+    items = svc_reportes.get_movimientos_unificados(db, desde, hasta)
+    etiqueta = _etiqueta_periodo(periodo, desde, hasta)
+    if not items:
+        return f"📭 No hubo movimientos — {etiqueta}."
+
+    ingresos: dict[Moneda, Decimal] = {}
+    egresos: dict[Moneda, Decimal] = {}
+    for it in items:
+        moneda = Moneda(it.moneda)
+        if it.flujo == "INGRESO":
+            ingresos[moneda] = ingresos.get(moneda, Decimal("0.00")) + it.monto
+        elif it.flujo == "EGRESO":
+            egresos[moneda] = egresos.get(moneda, Decimal("0.00")) + it.monto
+
+    lines = [
+        f"📒 *Movimientos — {etiqueta}*",
+        f"{len(items)} operación(es)",
+        f"Ingresos: {_totales_por_moneda(ingresos)}",
+        f"Egresos: {_totales_por_moneda(egresos)}",
+        "",
+    ]
+    lines.extend(
+        _detalle(
+            [
+                f"{_EMOJI_FLUJO.get(it.flujo, '•')} {_fmt_date(it.fecha)} | "
+                f"{it.descripcion} | {_monto(it.monto, Moneda(it.moneda))}"
+                for it in items
+            ]
+        )
+    )
+
+    return "\n".join(lines)
+
+
+def _consulta_caja(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
+    """Caja del período: apertura, ingresos, egresos, neto y cierre por moneda.
+
+    Es el mismo reporte que el cierre del panel (§7), así que los números tienen
+    que coincidir mirando el celular o la pantalla."""
+    reporte = svc_reportes.get_reporte_caja(db, desde, hasta)
+    lines = [f"💰 *Caja — {_etiqueta_periodo(periodo, desde, hasta)}*"]
+
+    for caja, moneda in ((reporte.ars, Moneda.ARS), (reporte.usd, Moneda.USD)):
+        # La caja en dólares solo se muestra si tiene algo que decir: en un
+        # negocio que operó todo el día en pesos, cuatro ceros son ruido.
+        if moneda == Moneda.USD and not any(
+            (caja.ingresos_total, caja.egresos_total, caja.saldo_apertura, caja.saldo_cierre)
+        ):
+            continue
+        lines.extend(
+            [
+                "",
+                f"*{moneda.value}*",
+                f"Apertura: {_monto(caja.saldo_apertura, moneda)}",
+                f"Ingresos: {_monto(caja.ingresos_total, moneda)}",
+                f"Egresos: {_monto(caja.egresos_total, moneda)}",
+                f"Neto: {_monto(caja.neto, moneda)}",
+                f"Cierre: {_monto(caja.saldo_cierre, moneda)}",
+            ]
+        )
+
+    if reporte.ganancia_divisas:
+        lines.append("")
+        lines.append(f"Ganancia por venta de dólares: {_ars(reporte.ganancia_divisas)}")
+
+    pendientes = {
+        Moneda.ARS: reporte.saldo_pasivos.pendiente_ars,
+        Moneda.USD: reporte.saldo_pasivos.pendiente_usd,
+    }
+    if any(pendientes.values()):
+        lines.append(f"Deudas pendientes: {_totales_por_moneda(pendientes)}")
+
+    return "\n".join(lines)
+
+
+# ── Gastos ───────────────────────────────────────────────────────────────────
+
+def _consulta_gastos(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
+    gastos = list(
+        db.scalars(
+            select(GastoOperativo)
+            .where(
+                GastoOperativo.fecha_operacion >= desde,
+                GastoOperativo.fecha_operacion <= hasta,
+                GastoOperativo.anulado_at.is_(None),
+            )
+            .order_by(GastoOperativo.monto.desc())
+        )
+    )
+    etiqueta = _etiqueta_periodo(periodo, desde, hasta)
+    if not gastos:
+        return f"📭 No hubo gastos — {etiqueta}."
+
+    totales: dict[Moneda, Decimal] = {}
+    for g in gastos:
+        totales[g.moneda] = totales.get(g.moneda, Decimal("0.00")) + g.monto
+
+    lines = [
+        f"🧾 *Gastos — {etiqueta}*",
+        f"{len(gastos)} gasto(s) — Total: {_totales_por_moneda(totales)}",
+        "",
+    ]
+    lines.extend(
+        _detalle(
+            [
+                f"• {g.concepto} — {_monto(g.monto, g.moneda)} ({_fmt_date(g.fecha_operacion)})"
+                for g in gastos
+            ]
+        )
+    )
+
+    return "\n".join(lines)
+
+
+# ── Divisas ──────────────────────────────────────────────────────────────────
+
+def _consulta_divisas(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
+    """Stock de dólares (con su costo) y las operaciones del período.
+
+    El stock sale de `usd_restante`, que es lo que el FIFO todavía no consumió:
+    contar las compras enteras diría que hay dólares que ya se vendieron."""
+    lotes = list(
+        db.scalars(
+            select(MovimientoEfectivo).where(
+                MovimientoEfectivo.tipo == MovimientoEfectivoTipo.COMPRA,
+                MovimientoEfectivo.usd_restante > 0,
+                MovimientoEfectivo.anulado_at.is_(None),
+            )
+        )
+    )
+    stock = sum((lote.usd_restante for lote in lotes), Decimal("0.00"))
+    costo = sum(
+        (lote.usd_restante * lote.cotizacion_aplicada for lote in lotes), Decimal("0.00")
+    )
+
+    lines = ["💵 *Dólares*", f"Stock: U$D{_fmt_num(stock)}"]
+    if stock > 0:
+        promedio = (costo / stock).quantize(Decimal("0.01"))
+        lines.append(f"Costo promedio: {_ars(promedio)} por dólar")
+        lines.append(f"Valor de compra del stock: {_ars(costo)}")
+
+    # `fecha_operacion` es un timestamp UTC: se consulta con la ventana ensanchada
+    # y se filtra por fecha local, como hace el historial unificado, para no
+    # traspapelar al día siguiente una operación cargada de noche.
+    del_periodo = [
+        m
+        for m in db.scalars(
+            select(MovimientoEfectivo)
+            .where(
+                func.date(MovimientoEfectivo.fecha_operacion) >= desde - timedelta(days=1),
+                func.date(MovimientoEfectivo.fecha_operacion) <= hasta + timedelta(days=1),
+                MovimientoEfectivo.anulado_at.is_(None),
+                MovimientoEfectivo.es_ajuste.is_(False),
+                MovimientoEfectivo.es_apertura.is_(False),
+            )
+            .order_by(MovimientoEfectivo.fecha_operacion.desc())
+        )
+        if desde <= fecha_local(m.fecha_operacion) <= hasta
+    ]
+
+    etiqueta = _etiqueta_periodo(periodo, desde, hasta)
+    if not del_periodo:
+        lines.append("")
+        lines.append(f"Sin operaciones de divisas — {etiqueta}.")
+        return "\n".join(lines)
+
+    compras = [m for m in del_periodo if m.tipo == MovimientoEfectivoTipo.COMPRA]
+    ventas = [m for m in del_periodo if m.tipo == MovimientoEfectivoTipo.VENTA]
+    ganancia = sum((v.ganancia for v in ventas), Decimal("0.00"))
+
+    lines.extend(["", f"*Operaciones — {etiqueta}*"])
+    if compras:
+        lines.append(
+            f"Compras: {len(compras)} — U$D{_fmt_num(sum((c.monto for c in compras), Decimal('0.00')))}"
+        )
+    if ventas:
+        lines.append(
+            f"Ventas: {len(ventas)} — U$D{_fmt_num(sum((v.monto for v in ventas), Decimal('0.00')))}"
+        )
+        lines.append(f"Ganancia: {_ars(ganancia)}")
+    lines.append("")
+    lines.extend(
+        _detalle(
+            [
+                f"{'🔴' if m.tipo == MovimientoEfectivoTipo.COMPRA else '🟢'} "
+                f"{_fmt_date(fecha_local(m.fecha_operacion))} | "
+                f"{'Compra' if m.tipo == MovimientoEfectivoTipo.COMPRA else 'Venta'} "
+                f"U$D{_fmt_num(m.monto)} a {_ars(m.cotizacion_aplicada)}"
+                for m in del_periodo
+            ]
+        )
+    )
+
+    return "\n".join(lines)
+
+
+# ── Resumen general ──────────────────────────────────────────────────────────
+
+def _consulta_resumen(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
+    """Foto del negocio: qué hay, quién debe y cómo cerró el período."""
+    cheques, nominal, neto = _totales_cartera(db)
+    reporte = svc_reportes.get_reporte_caja(db, desde, hasta)
+
+    deudores: dict[Moneda, Decimal] = {}
+    for _, saldos in _deuda_por_cliente(db):
+        for moneda, monto in saldos.items():
+            deudores[moneda] = deudores.get(moneda, Decimal("0.00")) + monto
+
+    lines = [
+        f"📌 *Resumen — {_etiqueta_periodo(periodo, desde, hasta)}*",
+        "",
+        f"💰 Caja: {_ars(reporte.ars.saldo_cierre)}",
+    ]
+    if reporte.usd.saldo_cierre:
+        lines.append(f"💵 Dólares: U$D{_fmt_num(reporte.usd.saldo_cierre)}")
+    lines.extend(
+        [
+            "",
+            f"📊 Cartera: {len(cheques)} cheque(s) — {_ars(nominal)} nominal, "
+            f"{_ars(neto)} con descuento",
+            f"🫱 Me deben: {_totales_por_moneda(deudores)}",
+            f"🧾 Debo: {_totales_por_moneda(_totales_pasivos(db))}",
+            "",
+            f"Neto del período: {_ars(reporte.ars.neto)}",
+        ]
+    )
+    if reporte.ganancia_divisas:
+        lines.append(f"Ganancia por venta de dólares: {_ars(reporte.ganancia_divisas)}")
+
+    return "\n".join(lines)
+
+
+# Tipo de consulta → handler. Agregar una consulta nueva es una línea acá y un
+# renglón en el prompt (§Bot): el ruteo no se toca.
+_CONSULTAS = {
+    "CARTERA":     _consulta_cartera,
+    "VENTAS":      _consulta_ventas,
+    "PASIVOS":     _consulta_pasivos,
+    "DEUDORES":    _consulta_deudores,
+    "CLIENTE":     _consulta_cliente,
+    "PRESTAMOS":   _consulta_prestamos,
+    "MOVIMIENTOS": _consulta_movimientos,
+    "CAJA":        _consulta_caja,
+    "GASTOS":      _consulta_gastos,
+    "DIVISAS":     _consulta_divisas,
+    "RESUMEN":     _consulta_resumen,
+}
 
 
 # ────────────────────────────────────────────────────────────────────────────
