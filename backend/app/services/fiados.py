@@ -19,6 +19,7 @@ from app.db.models import (
 )
 from app.core.fechas import hoy_local
 from app.services import caja as svc_caja
+from app.services import stock_usd as svc_stock
 from app.services.conversion import calcular_reduccion_saldo
 from app.schemas.cheques import ChequeRead, FiadoCobrarConChequeResponse
 from app.schemas.fiados import (
@@ -96,6 +97,24 @@ def imputar_cobro(
         detalle=detalle,
         cotizacion=cotizacion,
     )
+    if moneda_pago == Moneda.USD:
+        # Entraron dólares: van al stock con su costo o no se van a poder vender
+        # (§Stock de dólares). Acá la cotización nunca falta —la deuda del fiado
+        # es siempre en pesos, así que cobrar en USD ya cruza monedas y el
+        # operador tuvo que declararla—.
+        svc_stock.ingresar(
+            db,
+            monto=monto_caja,
+            cotizacion=cotizacion,
+            fecha=fecha,
+            origen_tipo="fiado_cobro",
+            origen_id=fiado.id,
+            detalle=f"Stock por {detalle}",
+        )
+        db.flush()
+        from app.services.movimientos import _reimputar_fifo
+
+        _reimputar_fifo(db)
     return cancelado
 
 

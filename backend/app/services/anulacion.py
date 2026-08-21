@@ -47,6 +47,7 @@ from app.db.models import (
     Prestamo,
 )
 from app.services import caja as svc_caja
+from app.services import stock_usd as svc_stock
 from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
@@ -99,6 +100,39 @@ def _spec(entidad: str) -> _Spec:
         validos = ", ".join(sorted(_ENTIDADES))
         raise ValidationError(f"Tipo de entidad '{entidad}' desconocido. Válidos: {validos}.")
     return spec
+
+
+# Movimientos de **stock de dólares** que cuelgan de cada entidad (§Stock de
+# dólares, migración `0025`): la salida de stock de lo que se otorgó o gastó en
+# USD, y la entrada de lo que se cobró en USD. Anular la operación los borra —si
+# no existió, esos dólares no entraron ni salieron—, y eso obliga a reimputar el
+# FIFO. **Una entidad que mueva stock se da de alta acá**, o al anularla sus
+# dólares quedarían dando vueltas en la cadena: prestando su costo a una ganancia
+# futura, o consumiendo un stock que ya nadie sacó.
+_ORIGENES_STOCK: dict[str, tuple[str, ...]] = {
+    "gasto":        ("gasto",),
+    "deuda_simple": ("deuda_simple", "deuda_simple_cobro"),
+    "prestamo":     ("prestamo", "prestamo_cobro"),
+    "fiado":        ("fiado_cobro",),
+    "pasivo":       ("pasivo_pago",),
+}
+
+
+def _bloqueo_stock(db: Session, entidad: str, entidad_id: uuid.UUID) -> str | None:
+    """Impide anular si los dólares que entraron con esta operación ya se vendieron.
+
+    Quitar ese lote dejaría esas ventas sin el stock del que salieron y
+    reescribiría su ganancia ya reportada. Mismo criterio que anular un ajuste en
+    USD o un préstamo recibido en dólares (§5)."""
+    for origen in _ORIGENES_STOCK.get(entidad, ()):
+        for mov in svc_stock.listar_por_origen(db, origen, entidad_id):
+            if mov.tipo == MovimientoEfectivoTipo.COMPRA and mov.usd_restante != mov.monto:
+                consumido = mov.monto - mov.usd_restante
+                return (
+                    f"No se puede anular: {consumido} de los {mov.monto} USD que "
+                    "entraron con esta operación ya se vendieron. Anulá primero esas ventas."
+                )
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -177,7 +211,7 @@ def previsualizar(db: Session, entidad: str, entidad_id: uuid.UUID) -> Impacto:
         return impacto
 
     bloqueo, arrastra = _validar(db, entidad, obj)
-    impacto.bloqueo = bloqueo
+    impacto.bloqueo = bloqueo or _bloqueo_stock(db, entidad, entidad_id)
     impacto.arrastra = arrastra
 
     # Las cuotas de un préstamo referencian cada una su propio id, no el del
@@ -577,7 +611,21 @@ def anular(
             if lote is not None:
                 db.delete(lote)
 
+        # Los dólares que esta operación movió salen de la cadena con ella
+        # (§Stock de dólares). `borrar_por_origen` vuelve a validar lo que ya
+        # chequeó `_bloqueo_stock`: es la última barrera si alguien anula sin
+        # pasar por la previsualización.
+        origenes_stock = _ORIGENES_STOCK.get(entidad, ())
+        for origen in origenes_stock:
+            svc_stock.borrar_por_origen(db, origen, entidad_id)
+
         _marcar(obj, operador_id, motivo)
+
+        if origenes_stock:
+            from app.services.movimientos import _reimputar_fifo
+
+            db.flush()
+            _reimputar_fifo(db)
 
         # Sacar ese stock de la cadena obliga a recalcular las imputaciones FIFO.
         if entidad == "pasivo" and obj.moneda == Moneda.USD and obj.ingreso_caja:

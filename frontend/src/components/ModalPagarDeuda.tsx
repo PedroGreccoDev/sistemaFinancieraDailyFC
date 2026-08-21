@@ -55,6 +55,10 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   const [monto, setMonto] = useState('')
   const [monedaPago, setMonedaPago] = useState<Moneda>(deuda.moneda)
   const [cotizacion, setCotizacion] = useState('')
+  // A cuánto entran al stock los dólares cobrados. Solo hace falta cuando se
+  // cobra en USD una deuda que TAMBIÉN es en USD: ahí no hay cotización de la
+  // que sacar el costo, y sin costo esos dólares no se pueden vender después.
+  const [cotizStock, setCotizStock] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
@@ -83,6 +87,9 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   const montoNum = parseFloat(monto) || 0
   const cotizNum = parseFloat(cotizacion) || 0
   const cross = monedaPago !== deuda.moneda
+  const cotizStockNum = parseFloat(cotizStock) || 0
+  const pideStock = monedaPago === 'USD' && !cross
+  const cotizacionStock = monedaPago === 'USD' ? (cross ? cotizNum : cotizStockNum) : null
 
   // Equivalente saldado en la moneda de la deuda (solo informativo en el modal).
   let equivalente: number | null = null
@@ -213,12 +220,14 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           monto_pagado: montoNum,
           moneda_pago: monedaPago,
           cotizacion: cross ? cotizNum : null,
+          cotizacion_stock: cotizacionStock,
         })
       } else if (deuda.tipo === 'deuda_simple') {
         await cobrarDeudaSimple(deuda.id, {
           monto_cobrado: montoNum,
           moneda_pago: monedaPago,
           cotizacion: cross ? cotizNum : null,
+          cotizacion_stock: cotizacionStock,
         })
       } else if (esGeneral) {
         // `deuda.id` es el cliente: el importe se reparte entre TODAS sus deudas
@@ -229,6 +238,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           monto_cobrado: montoNum,
           moneda_pago: monedaPago,
           cotizacion: cross ? cotizNum : null,
+          cotizacion_stock: cotizacionStock,
         })
         const restante = parseFloat(r.saldo_restante)
         toast(
@@ -248,6 +258,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           monto_cobrado: montoNum,
           moneda_pago: monedaPago,
           cotizacion: cross ? cotizNum : null,
+          cotizacion_stock: cotizacionStock,
         })
         const restante = parseFloat(r.saldo_restante)
         toast(
@@ -417,6 +428,20 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
               <input type="number" step="0.0001" min="0.0001" value={cotizacion} onChange={(e) => setCotizacion(e.target.value)} required style={INPUT_STYLE} />
               <p style={{ fontFamily: FM, fontSize: '0.68rem', marginTop: '0.25rem', color: 'rgba(100,116,139,0.55)' }}>
                 Pagás en {monedaPago}; la deuda es en {deuda.moneda}. La cotización imputa cuánto se salda.
+              </p>
+            </div>
+          )}
+
+          {/* Cobrar en dólares los hace entrar al stock vendible, y para eso hace
+              falta su costo: contra él se calcula la ganancia el día que se vendan.
+              Cuando el cobro cruza monedas la cotización de arriba ya sirve; acá
+              (dólares contra una deuda en dólares) no hay ninguna. */}
+          {pideStock && (
+            <div>
+              <label style={LABEL_STYLE}>¿A cuánto tomás el dólar? (pesos por 1 USD)</label>
+              <input type="number" step="0.0001" min="0.0001" value={cotizStock} onChange={(e) => setCotizStock(e.target.value)} required style={INPUT_STYLE} />
+              <p style={{ fontFamily: FM, fontSize: '0.68rem', marginTop: '0.25rem', color: 'rgba(100,116,139,0.55)' }}>
+                Es el costo con el que esos dólares entran al stock. Sin él no se pueden vender después.
               </p>
             </div>
           )}

@@ -283,6 +283,7 @@ def _imputar(
     monto_caja: Decimal | None,
     moneda_pago: Moneda,
     cotizacion: Decimal | None,
+    cotizacion_stock: Decimal | None = None,
 ) -> RenglonImputado:
     """Delega la imputación al módulo dueño del renglón y arma su resultado.
 
@@ -309,6 +310,7 @@ def _imputar(
             monto_caja=monto_caja,
             moneda_pago=moneda_pago,
             cotizacion=cotizacion,
+            cotizacion_stock=cotizacion_stock,
         )
         restante = renglon.obj.saldo_pendiente
     else:  # prestamo
@@ -320,6 +322,7 @@ def _imputar(
             monto_caja=monto_caja,
             moneda_pago=moneda_pago,
             cotizacion=cotizacion,
+            cotizacion_stock=cotizacion_stock,
         )
         restante = saldo_prestamo(renglon.obj)
 
@@ -393,6 +396,7 @@ def cobrar_cliente(
                 monto_caja=plata,
                 moneda_pago=payload.moneda_pago,
                 cotizacion=cotizacion,
+                cotizacion_stock=payload.cotizacion_stock,
             )
         )
 

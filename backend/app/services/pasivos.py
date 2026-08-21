@@ -441,6 +441,24 @@ def pagar_pasivo(
         cotizacion=payload.cotizacion if es_cross else None,
     )
 
+    if payload.moneda_pago == Moneda.USD:
+        # Pagar en dólares los entrega: salen del stock vendible igual que salen
+        # de la caja (§Stock de dólares). Cada pago parcial es su propia salida,
+        # por eso se agrega sin barrer las anteriores.
+        from app.services import stock_usd as svc_stock
+        from app.services.movimientos import _reimputar_fifo
+
+        svc_stock.egresar(
+            db,
+            monto=payload.monto_pagado,
+            fecha=fecha,
+            origen_tipo="pasivo_pago",
+            origen_id=pasivo.id,
+            detalle=f"Dólares entregados — {detalle}",
+        )
+        db.flush()
+        _reimputar_fifo(db)
+
     db.commit()
     db.refresh(pasivo)
     return pasivo

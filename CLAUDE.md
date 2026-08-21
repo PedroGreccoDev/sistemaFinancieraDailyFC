@@ -175,6 +175,71 @@ No hay intent de bot.
 
 ---
 
+## Stock de dólares — todo dólar que entra o sale mueve el stock _(régimen definido 2026-08-21)_
+
+**La caja USD y el stock vendible son cosas distintas** (§4). La caja dice cuántos
+dólares hay; el **stock** son los lotes `MovimientoEfectivo` con su costo, y es contra
+ese costo que se calcula la ganancia FIFO al venderlos. Hasta la migración `0025` solo
+movían stock la compra/venta de divisas, la apertura (`0019`), los ajustes (`0020`) y el
+préstamo recibido en dólares (`0024`). **Todo el resto movía la caja y no el stock**, en
+los dos sentidos y sin avisar:
+
+- **Cinco salidas** —otorgar una deuda simple (§2.b) o un préstamo (§3) en USD, un gasto
+  en USD (§6), pagar un pasivo en USD (§5)— sacaban los dólares de la caja pero los
+  dejaban contando como vendibles, **prestando su costo a una ganancia futura sin respaldo**.
+- **Tres entradas** —cobrar una cuota, un fiado o una deuda en USD— metían dólares que
+  después **no se podían vender**: la venta fallaba con "no hay stock" aunque estuvieran
+  en la mano.
+
+El régimen es **simétrico** y reusa la pieza que ya existía: todo movimiento de stock que
+no es una compra/venta de divisas se representa como un `MovimientoEfectivo` marcado
+**`es_ajuste`** —"stock que se movió sin una operación de divisas detrás": no asienta caja
+(la mueve la operación de negocio) y no figura en el listado de Divisas—. Servicio
+`app/services/stock_usd.py`.
+
+- **Entra como `COMPRA`**, al costo que **declara el operador**. La cotización **jamás se
+  asume** (regla 1, §4): sin costo esos dólares no se pueden vender, y descubrirlo el día
+  de la venta es tarde. `stock_usd.ingresar` lo exige y falla con `ValidationError`.
+  - **Cuándo se pide.** Si el cobro **cruza monedas** el operador ya declaró una
+    `cotizacion` y esa misma sirve de costo: no se pregunta dos veces. El caso que la
+    necesita es **dólares contra una deuda en dólares**, donde no hay ninguna — ahí viaja
+    `cotizacion_stock` en el payload (`DeudaSimplePagoRequest`, `PrestamoPagoRequest`,
+    `CuotaCobroRequest`, `CobroClienteCreate` y sus variantes por cliente). Los **fiados**
+    nunca la necesitan: su deuda es siempre en pesos, así que cobrar en USD ya cruza.
+- **Sale como `VENTA`**, consumiendo lotes FIFO **sin realizar ganancia** —esos dólares se
+  fueron, pero nadie los compró—, igual que un ajuste que resta USD. Si no hay stock, la
+  operación **se rechaza**: mismo criterio que el ajuste.
+- **`_reimputar_fifo` es la única puerta de consumo.** `stock_usd.egresar` solo agrega el
+  movimiento; el consumo lo hace la reimputación al recorrer la cadena. Un consumo hecho
+  por fuera **se restauraría solo y en silencio** la próxima vez que alguien editara o
+  anulara una operación de divisas. Por eso `_consumidores_de_stock` incluye ahora las tres
+  familias (ventas, ajustes y salidas `es_ajuste`), y la rama de consumo sin ganancia se
+  elige con `isinstance(item, AjusteCaja) or item.es_ajuste`.
+- **El orden en la cadena importa y es por tiempo real.** `_momento_operativo` fecha con la
+  **hora actual** lo del día de hoy: fechar al arranque del día un cobro hecho a la tarde lo
+  pondría **antes** de la compra de la mañana, y una venta posterior saldría del lote
+  equivocado —con la ganancia calculada contra un costo que no correspondía—. De una fecha
+  pasada solo se sabe el día, y ahí sí va al arranque (como `_orden_ajuste`).
+- **`origen_tipo`/`origen_id`** enlazan cada movimiento con la operación que lo generó
+  (mismo par que usan los pasivos para recordar de qué compra salieron, §Comprar sin
+  abonar). Es por donde se deshace: editar la operación rehace su stock, anularla lo borra.
+  El otorgamiento y los cobros usan orígenes distintos (`deuda_simple` /
+  `deuda_simple_cobro`, `prestamo` / `prestamo_cobro`), igual que sus líneas de caja, para
+  que rehacer el primero no toque los segundos.
+- **Anular:** `anulacion._ORIGENES_STOCK` mapea entidad → orígenes y `anular` los borra
+  antes de marcar. **Una entidad que mueva stock se da de alta ahí**, o al anularla sus
+  dólares quedarían dando vueltas en la cadena; `test_stock_usd.py` custodia ese catálogo.
+  Se **bloquea** si los dólares que entraron con esa operación ya se vendieron (el bloqueo
+  se muestra en la previsualización, vía `_bloqueo_stock`).
+- **Backup:** `origen_tipo` y `origen_id` viajan en `_MO` (§8). Sin ellos, un ciclo
+  export→import devuelve los movimientos huérfanos y anular la operación que los generó ya
+  no los encontraría.
+- **Panel:** el modal compartido `ModalPagarDeuda` muestra el campo "¿A cuánto tomás el
+  dólar?" solo cuando hace falta (`pideStock`). **Bot:** regla 14 del prompt y
+  `cotizacion_stock` en `COBRAR_DEUDA_CLIENTE`; si falta, pregunta en vez de asumir.
+
+---
+
 ## Comprar sin abonar — la compra que queda a deber _(régimen definido 2026-08-21)_
 
 El negocio compra a crédito: un lote de dólares o un cheque que se paga después.
@@ -1174,6 +1239,14 @@ avisa **por Telegram** diciendo **qué** se rompió.
     prompt siga contrastando "le debo a X" / "X me debe" / "le presté en N cuotas", que
     diga por qué importa (una descuenta la caja y la otra no) y que los dos handlers no se
     crucen —el de cliente crea una `DeudaSimple`, el del negocio un `Pasivo`—.
+  - **`test_stock_usd.py`** — que todo dólar que entra o sale mueva el stock (§Stock de
+    dólares): que la cotización de entrada **nunca se asuma** (sin ella, `ValidationError`),
+    cómo se representa cada movimiento (COMPRA con su costo / VENTA sin ganancia, siempre
+    `es_ajuste`), que el consumo lo haga **solo** `_reimputar_fifo` —uno hecho por fuera se
+    restauraría solo—, el orden en la cadena (hora real para hoy, arranque del día para una
+    fecha pasada) y que no se pueda deshacer un lote ya vendido. Custodia además el catálogo
+    `_ORIGENES_STOCK`: una entidad que mueva dólares y no esté ahí deja sus movimientos vivos
+    al anularse, sin que nada falle.
   - **`test_bot_consultas.py`** — el intent genérico `CONSULTA` (§Bot): que el catálogo de
     tipos del prompt y el de la tabla `_CONSULTAS` sean **el mismo en las dos direcciones**
     (un tipo enseñado sin handler no falla en ningún lado, solo no anda), que los tres
@@ -1204,7 +1277,9 @@ avisa **por Telegram** diciendo **qué** se rompió.
   `origen_tipo`/`origen_id` en pasivos), `0022` (`compensaciones` +
   `compensacion_imputaciones`) y `0023` (`ingreso_caja`/`fecha_ingreso` en pasivos, para
   la deuda que sí hace entrar plata) y `0024` (`cotizacion_ingreso_usd`/`lote_id`,
-  el stock de un préstamo recibido en dólares).
+  el stock de un préstamo recibido en dólares) y `0025` (`origen_tipo`/`origen_id` en
+  `movimientos_efectivo`, para que **toda** entrada o salida de dólares mueva el stock —
+  ver §Stock de dólares).
 
 ---
 

@@ -264,9 +264,14 @@ def _orden_ajuste(ajuste: AjusteCaja) -> tuple[datetime, datetime]:
 def _consumidores_de_stock(db: Session, movs: list[MovimientoEfectivo]) -> list:
     """Todo lo que saca dólares del stock, en orden cronológico.
 
-    Son dos cosas: las **ventas** de divisas y los **ajustes manuales que restan
-    USD** de la caja (§Ajustes de caja). Los ajustes también consumen lotes —esos
-    dólares se fueron— pero no realizan ganancia: no hubo precio de venta.
+    Son tres cosas: las **ventas** de divisas, los **ajustes manuales que restan
+    USD** de la caja (§Ajustes de caja) y las **salidas de dólares de cualquier
+    otra operación** —un gasto en USD, otorgar una deuda o un préstamo en USD,
+    pagar un pasivo en USD— que `stock_usd.egresar` representa como una VENTA
+    marcada `es_ajuste` (migración `0025`). Estas dos últimas consumen lotes
+    —esos dólares se fueron— pero **no realizan ganancia**: no hubo precio de
+    venta. Las tres entran por acá; una que quede afuera se restauraría sola y en
+    silencio en la próxima reimputación.
     """
     ajustes = list(
         db.scalars(
@@ -327,8 +332,10 @@ def _reimputar_fifo(db: Session) -> None:
         ]
         lotes = [(c.cotizacion_aplicada, c.usd_restante) for c in lotes_rows]
 
-        if isinstance(item, AjusteCaja):
-            # Salieron dólares de la caja sin venderse: consume stock, sin ganancia.
+        if isinstance(item, AjusteCaja) or item.es_ajuste:
+            # Salieron dólares sin venderse —un ajuste, un gasto en USD, una deuda
+            # otorgada en dólares—: consume stock, sin ganancia. No hubo precio de
+            # venta contra el cual compararlo.
             consumos = consumir_lotes_fifo(
                 lotes, item.monto, accion="restar de la caja"
             )

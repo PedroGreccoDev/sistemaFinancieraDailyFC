@@ -34,6 +34,7 @@ from app.schemas.deudas_simples import (
 )
 from app.services import caja as svc_caja
 from app.services import pasivos as svc_pasivos
+from app.services import stock_usd as svc_stock
 from app.services.conversion import calcular_reduccion_saldo, convertir_a_moneda_deuda
 from app.services.exceptions import (
     ConflictError,
@@ -49,6 +50,41 @@ _CIEN = Decimal("100")
 
 _REF_ORIGEN = "deuda_simple"
 _REF_COBRO = "deuda_simple_cobro"
+
+
+def _reimputar_stock(db: Session) -> None:
+    """Recalcula la cadena FIFO tras mover stock (sin commit).
+
+    El SELECT de la reimputación no vería lo recién agregado o borrado: la sesión
+    va con `autoflush=False`."""
+    db.flush()
+    from app.services.movimientos import _reimputar_fifo
+
+    _reimputar_fifo(db)
+
+
+def _resync_stock_origen(db: Session, deuda: DeudaSimple, cliente_nombre: str) -> None:
+    """Rehace la salida de stock del alta de una deuda en dólares (sin commit).
+
+    Otorgar una deuda en USD entrega dólares: salen del stock vendible igual que
+    salen de la caja (§Stock de dólares). Se barre siempre —aunque la deuda sea en
+    pesos— porque una carga corregida de USD a ARS tiene que devolver los dólares
+    que había consumido."""
+    tenia = svc_stock.listar_por_origen(db, _REF_ORIGEN, deuda.id)
+    if not tenia and deuda.moneda != Moneda.USD:
+        return
+
+    svc_stock.borrar_por_origen(db, _REF_ORIGEN, deuda.id)
+    if deuda.moneda == Moneda.USD:
+        svc_stock.egresar(
+            db,
+            monto=deuda.monto,
+            fecha=deuda.fecha,
+            origen_tipo=_REF_ORIGEN,
+            origen_id=deuda.id,
+            detalle=f"Dólares entregados a {cliente_nombre} — {deuda.concepto}",
+        )
+    _reimputar_stock(db)
 
 
 def aplicar_cobro(
@@ -158,6 +194,7 @@ def imputar_cobro(
     monto_caja: Decimal | None,
     moneda_pago: Moneda,
     cotizacion: Decimal | None,
+    cotizacion_stock: Decimal | None = None,
 ) -> bool:
     """Imputa `imputado` al saldo de la deuda y asienta su línea de caja.
 
@@ -174,6 +211,11 @@ def imputar_cobro(
 
     `cotizacion` viene con valor solo si el cobro cruza monedas; en ese caso se
     guarda como `cotizacion_pago` la primera vez, como default editable.
+
+    `cotizacion_stock` es a cuánto entran al stock los dólares cobrados, cuando se
+    cobra en USD (§Stock de dólares). Es obligatoria en ese caso y nunca se asume:
+    sin costo, esos dólares no se podrían vender. Cuando el cobro ya trae
+    `cotizacion` —porque cruzó monedas— esa misma sirve y no se pide otra.
 
     Devuelve si la deuda quedó cancelada."""
     deuda.saldo_pendiente, cancelada = aplicar_cobro(deuda.saldo_pendiente, imputado)
@@ -204,6 +246,19 @@ def imputar_cobro(
         detalle=detalle,
         cotizacion=cotizacion,
     )
+    if moneda_pago == Moneda.USD:
+        # Entraron dólares: además de la caja, tienen que entrar al stock con su
+        # costo, o no se van a poder vender (§Stock de dólares).
+        svc_stock.ingresar(
+            db,
+            monto=monto_caja,
+            cotizacion=cotizacion_stock or cotizacion,
+            fecha=fecha,
+            origen_tipo=_REF_COBRO,
+            origen_id=deuda.id,
+            detalle=f"Stock por {detalle}",
+        )
+        _reimputar_stock(db)
     return cancelada
 
 
@@ -259,6 +314,7 @@ def create_deuda_simple(db: Session, payload: DeudaSimpleCreate) -> DeudaSimple:
         db.add(deuda)
         db.flush()
         _registrar_egreso_origen(db, deuda, cliente.nombre)
+        _resync_stock_origen(db, deuda, cliente.nombre)
         db.commit()
         db.refresh(deuda)
         return deuda
@@ -309,6 +365,7 @@ def editar_deuda_simple(
         svc_caja.borrar_por_referencia(db, _REF_ORIGEN, deuda.id)
         cliente_nombre = deuda.cliente.nombre if deuda.cliente else "—"
         _registrar_egreso_origen(db, deuda, cliente_nombre)
+        _resync_stock_origen(db, deuda, cliente_nombre)
         db.commit()
         db.refresh(deuda)
         return deuda
@@ -352,6 +409,7 @@ def cobrar_deuda_simple(
         monto_caja=payload.monto_cobrado,
         moneda_pago=payload.moneda_pago,
         cotizacion=payload.cotizacion if es_cross else None,
+        cotizacion_stock=payload.cotizacion_stock,
     )
 
     try:
@@ -436,6 +494,7 @@ def cobrar_deudas_cliente(
             monto_caja=plata,
             moneda_pago=payload.moneda_pago,
             cotizacion=payload.cotizacion if es_cross else None,
+            cotizacion_stock=payload.cotizacion_stock,
         ):
             canceladas += 1
 

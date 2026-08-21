@@ -212,6 +212,10 @@ OPERACIONES DISPONIBLES
        cliente debe en las dos monedas.
      - cotizacion: number o null (pesos por 1 USD; REQUERIDA si moneda_pago y
        moneda_deuda difieren — si no la dice → ACLARACION_REQUERIDA)
+     - cotizacion_stock: number o null (pesos por 1 USD al que entran esos dólares
+       al stock). REQUERIDA si moneda_pago es USD **y** moneda_deuda también, que
+       es el caso donde no hay `cotizacion`. Si no la dice → ACLARACION_REQUERIDA
+       ("¿a cuánto tomás el dólar?"). Ver la regla 14: la cotización nunca se asume.
 
 ⚠️ CUÁL DE LOS TRES COBROS — decide QUÉ NOMBRA el mensaje:
      "X me pagó 50 lucas" / "cobré 200 mil a X"  → COBRAR_DEUDA_CLIENTE (no dice contra qué)
@@ -571,6 +575,16 @@ REGLAS CRÍTICAS
     → devolvé EDITAR_OPERACION con los datos originales más identificador="5068".
     NUNCA respondas con DESCONOCIDO ni ACLARACION_REQUERIDA si la operación original
     está clara en el historial y el operador solo está completando el dato faltante.
+
+14. TODO DÓLAR QUE ENTRA NECESITA SU COSTO. Los dólares del negocio se llevan por
+    lotes con el precio al que se consiguieron: contra ese costo se calcula la
+    ganancia el día que se vendan. Si el operador COBRA en dólares y la deuda
+    también está en dólares, no hay ninguna cotización en la operación: pedila
+    (`cotizacion_stock`) con ACLARACION_REQUERIDA — "¿a cuánto tomás el dólar?".
+    Sin ella esos dólares no se pueden vender, y para cuando eso se descubra ya
+    nadie se acuerda a cuánto estaba. Si el cobro cruza monedas, la `cotizacion`
+    que ya diste alcanza: no preguntes dos veces por lo mismo. En PESOS no hace
+    falta ninguna.
 
 ═══════════════════════════════════════
 FORMATO DE RESPUESTA — SIEMPRE ESTE EXACTO

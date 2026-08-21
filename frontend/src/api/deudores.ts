@@ -47,6 +47,8 @@ export interface CobrarClientePayload {
   moneda_pago: Moneda
   // Requerida solo si moneda_pago difiere de moneda_deuda ($/USD).
   cotizacion?: number | null
+  /** Costo ($/USD) con el que los dólares cobrados entran al stock vendible. */
+  cotizacion_stock?: number | null
   fecha_cobro?: string | null
 }
 
@@ -76,6 +78,8 @@ export interface CobrarClienteConChequePayload {
   fecha_pago?: string | null
   // Requerida solo si la deuda es en USD (el cheque siempre entra en pesos).
   cotizacion?: number | null
+  /** Costo ($/USD) con el que los dólares cobrados entran al stock vendible. */
+  cotizacion_stock?: number | null
   // Obligatorio solo si el cheque cubre todo y sobra.
   vuelto_modo?: VueltoModo | null
   fecha_cobro?: string | null

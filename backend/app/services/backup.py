@@ -72,6 +72,11 @@ _MO = [
     # como compra normal se gana líneas de caja que nunca existieron al editarlo,
     # y `_rehacer_lote_usd` deja de encontrarlo para reemplazarlo.
     "es_apertura", "es_ajuste",
+    # De qué operación salió este movimiento de stock (§Stock de dólares). Sin el
+    # par, un ciclo export→import lo devuelve huérfano: anular el gasto o el cobro
+    # que lo generó ya no lo encontraría, y esos dólares quedarían para siempre en
+    # la cadena FIFO.
+    "origen_tipo", "origen_id",
     *_ANUL,
 ]
 _FI = [

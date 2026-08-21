@@ -523,6 +523,16 @@ class MovimientoEfectivo(AnulableMixin, Base):
     )
     observaciones: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
 
+    # Operación de negocio que movió este stock, cuando no es una compra/venta de
+    # divisas: el gasto en dólares que lo consumió, el cobro en dólares que lo
+    # aportó (migración 0025). Es el enlace por el que se deshace el movimiento
+    # cuando esa operación se edita o se anula. Null en las operaciones de
+    # divisas propiamente dichas, que se identifican por su propio id.
+    origen_tipo:         Mapped[str | None]      = mapped_column(sa.String(40), nullable=True)
+    origen_id:           Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()

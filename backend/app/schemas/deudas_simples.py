@@ -52,6 +52,13 @@ class DeudaSimplePagoRequest(BaseModel):
     monto_cobrado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     moneda_pago: Moneda
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+    # A cuánto entran al stock vendible los dólares cobrados (§Stock de dólares).
+    # Obligatoria al cobrar en USD **una deuda que también es en USD**: ahí no hay
+    # `cotizacion` de la que sacar el costo, y sin costo esos dólares no se pueden
+    # vender. Cuando el cobro cruza monedas, la `cotizacion` de arriba ya sirve.
+    cotizacion_stock: Decimal | None = Field(
+        default=None, gt=0, max_digits=18, decimal_places=6
+    )
     fecha_cobro: date | None = None
 
 
@@ -72,6 +79,10 @@ class DeudaSimpleCobroClienteCreate(BaseModel):
     monto_cobrado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     moneda_pago: Moneda
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+    # Costo de entrada al stock de los dólares cobrados; ver DeudaSimplePagoRequest.
+    cotizacion_stock: Decimal | None = Field(
+        default=None, gt=0, max_digits=18, decimal_places=6
+    )
     fecha_cobro: date | None = None
 
 

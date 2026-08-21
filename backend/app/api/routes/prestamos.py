@@ -72,7 +72,9 @@ def cobrar_cuota(
     payload: CuotaCobroRequest,
     db: DbSession,
 ) -> CuotaRead:
-    return service.cobrar_cuota(db, prestamo_id, cuota_id, payload.fecha_cobro)
+    return service.cobrar_cuota(
+        db, prestamo_id, cuota_id, payload.fecha_cobro, payload.cotizacion_stock
+    )
 
 
 @router.post("/{prestamo_id}/cuotas/{cuota_id}/cobrar-con-cheque", response_model=CuotaCobrarConChequeResponse, status_code=201)
@@ -92,7 +94,9 @@ def cobrar_cuotas_lote(
     payload: CuotasLoteCobrarRequest,
     db: DbSession,
 ) -> list[CuotaRead]:
-    return service.cobrar_cuotas_lote(db, prestamo_id, payload.cuota_ids, payload.fecha_cobro)
+    return service.cobrar_cuotas_lote(
+        db, prestamo_id, payload.cuota_ids, payload.fecha_cobro, payload.cotizacion_stock
+    )
 
 
 @router.post("/{prestamo_id}/cuotas/cobrar-con-cheque-lote", response_model=CuotasLoteCobrarConChequeResponse, status_code=201)

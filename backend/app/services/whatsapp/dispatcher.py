@@ -878,12 +878,25 @@ def _cobrar_deuda_cliente(
             "¿Contra cuál imputo el pago, la deuda en pesos o la de dólares?"
         )
 
+    # Cobrar en dólares los hace entrar al stock vendible, y para eso hace falta
+    # su costo (§Stock de dólares). Cuando el cobro cruza monedas la `cotizacion`
+    # ya sirve; cuando no —dólares contra una deuda en dólares— hay que pedirla,
+    # porque sin costo esos dólares no se van a poder vender y para cuando eso se
+    # descubra nadie se acuerda a cuánto estaba.
+    cotizacion_stock = _opt_decimal(data, "cotizacion_stock") or cotizacion
+    if moneda_pago == Moneda.USD and cotizacion_stock is None:
+        return False, (
+            f"❓ ¿A cuánto tomás el dólar para esos U$D{_fmt_num(monto_cobrado)}? "
+            "Lo necesito para saber a qué costo entran al stock."
+        )
+
     payload = CobroClienteCreate(
         cliente_id=cliente.id,
         moneda_deuda=moneda_deuda,
         monto_cobrado=monto_cobrado,
         moneda_pago=moneda_pago,
         cotizacion=cotizacion,
+        cotizacion_stock=cotizacion_stock,
         fecha_cobro=fecha_local(msg_at),
     )
     r = svc_deudores.cobrar_cliente(db, payload)

@@ -84,6 +84,12 @@ class PrestamoRead(BaseModel):
 
 class CuotaCobroRequest(BaseModel):
     fecha_cobro: date | None = None
+    # A cuánto entran al stock vendible los dólares cobrados (§Stock de dólares).
+    # Obligatoria cuando el préstamo es en USD: esa cuota hace entrar dólares y sin
+    # costo declarado no se van a poder vender. En pesos no se usa.
+    cotizacion_stock: Decimal | None = Field(
+        default=None, gt=0, max_digits=18, decimal_places=6
+    )
 
 
 class PrestamoPagoRequest(BaseModel):
@@ -98,6 +104,13 @@ class PrestamoPagoRequest(BaseModel):
     monto_pagado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     moneda_pago: Moneda
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+    # A cuánto entran al stock vendible los dólares cobrados (§Stock de dólares).
+    # Obligatoria al cobrar en USD **un préstamo que también es en USD**: ahí no
+    # hay `cotizacion` de la que sacar el costo, y sin costo esos dólares no se
+    # pueden vender. Cuando el pago cruza monedas, la `cotizacion` ya sirve.
+    cotizacion_stock: Decimal | None = Field(
+        default=None, gt=0, max_digits=18, decimal_places=6
+    )
     fecha_cobro: date | None = None
 
 
@@ -120,6 +133,10 @@ class CuotaCobrarConChequeResponse(BaseModel):
 class CuotasLoteCobrarRequest(BaseModel):
     cuota_ids: list[UUID] = Field(min_length=1)
     fecha_cobro: date | None = None
+    # Costo de entrada al stock de los dólares cobrados; ver CuotaCobroRequest.
+    cotizacion_stock: Decimal | None = Field(
+        default=None, gt=0, max_digits=18, decimal_places=6
+    )
 
 
 class CuotasLoteCobrarConChequeRequest(BaseModel):

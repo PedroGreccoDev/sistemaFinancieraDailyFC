@@ -44,6 +44,8 @@ export interface PrestamoPagoPayload {
   monto_pagado: number
   moneda_pago: Moneda
   cotizacion?: number | null
+  /** Costo ($/USD) con el que los dólares cobrados entran al stock vendible. */
+  cotizacion_stock?: number | null
   fecha_cobro?: string | null
 }
 

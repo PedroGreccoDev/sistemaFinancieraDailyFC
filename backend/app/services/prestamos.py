@@ -31,6 +31,7 @@ from app.schemas.prestamos import (
     PrestamoUpdate,
 )
 from app.services import caja as svc_caja
+from app.services import stock_usd as svc_stock
 from app.services.conversion import calcular_reduccion_saldo
 from app.services.exceptions import (
     ConflictError,
@@ -40,8 +41,77 @@ from app.services.exceptions import (
 )
 
 
+def _reimputar_stock(db: Session) -> None:
+    """Recalcula la cadena FIFO tras mover stock (sin commit).
+
+    El SELECT de la reimputación no vería lo recién agregado o borrado: la sesión
+    va con `autoflush=False`."""
+    db.flush()
+    from app.services.movimientos import _reimputar_fifo
+
+    _reimputar_fifo(db)
+
+
+def _resync_stock_otorgamiento(db: Session, prestamo: Prestamo) -> None:
+    """Rehace la salida de stock de un préstamo otorgado en dólares (sin commit).
+
+    Prestar dólares los entrega: salen del stock vendible igual que salen de la
+    caja (§Stock de dólares). Se barre siempre —aunque el préstamo sea en pesos—
+    porque una carga corregida de USD a ARS tiene que devolver los dólares que
+    había consumido."""
+    tenia = svc_stock.listar_por_origen(db, "prestamo", prestamo.id)
+    if not tenia and prestamo.moneda != Moneda.USD:
+        return
+
+    svc_stock.borrar_por_origen(db, "prestamo", prestamo.id)
+    if prestamo.moneda == Moneda.USD:
+        cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
+        svc_stock.egresar(
+            db,
+            monto=prestamo.credito,
+            fecha=prestamo.fecha_inicio,
+            origen_tipo="prestamo",
+            origen_id=prestamo.id,
+            detalle=f"Dólares prestados a {cliente_nombre}",
+        )
+    _reimputar_stock(db)
+
+
+def _ingresar_stock_cobro(
+    db: Session,
+    prestamo: Prestamo,
+    *,
+    monto: Decimal,
+    moneda_pago: Moneda,
+    cotizacion_stock: Decimal | None,
+    fecha: date,
+    detalle: str,
+) -> None:
+    """Mete al stock los dólares que entraron por un cobro (sin commit).
+
+    Cobrar en USD hace entrar dólares: si no entran al stock con su costo, no se
+    van a poder vender (§Stock de dólares). La cotización la declara el operador y
+    nunca se asume."""
+    if moneda_pago != Moneda.USD or monto <= Decimal("0.00"):
+        return
+    svc_stock.ingresar(
+        db,
+        monto=monto,
+        cotizacion=cotizacion_stock,
+        fecha=fecha,
+        origen_tipo="prestamo_cobro",
+        origen_id=prestamo.id,
+        detalle=detalle,
+    )
+    _reimputar_stock(db)
+
+
 def _registrar_cobro_cuota(
-    db: Session, prestamo: Prestamo, cuota: Cuota, monto: Decimal
+    db: Session,
+    prestamo: Prestamo,
+    cuota: Cuota,
+    monto: Decimal,
+    cotizacion_stock: Decimal | None = None,
 ) -> None:
     """Asienta en la caja el ingreso por lo cobrado de una cuota (en la moneda del préstamo).
 
@@ -61,6 +131,15 @@ def _registrar_cobro_cuota(
         referencia_tipo="cuota",
         referencia_id=cuota.id,
         detalle=f"Cuota #{cuota.numero_cuota} - {cliente_nombre}",
+    )
+    _ingresar_stock_cobro(
+        db,
+        prestamo,
+        monto=monto,
+        moneda_pago=prestamo.moneda,
+        cotizacion_stock=cotizacion_stock,
+        fecha=cuota.fecha_cobro,
+        detalle=f"Stock por cuota #{cuota.numero_cuota} - {cliente_nombre}",
     )
 
 
@@ -155,6 +234,7 @@ def create_prestamo(db: Session, payload: PrestamoCreate) -> Prestamo:
             referencia_id=prestamo.id,
             detalle=f"Préstamo a {cliente.nombre}",
         )
+        _resync_stock_otorgamiento(db, prestamo)
         db.commit()
         db.refresh(prestamo)
         return get_prestamo(db, prestamo.id)
@@ -255,6 +335,7 @@ def editar_prestamo(
             referencia_id=prestamo.id,
             detalle=f"Préstamo a {cliente_nombre}",
         )
+        _resync_stock_otorgamiento(db, prestamo)
         db.commit()
         return get_prestamo(db, prestamo.id)
     except SQLAlchemyError as exc:
@@ -267,6 +348,7 @@ def cobrar_cuota(
     prestamo_id: uuid.UUID,
     cuota_id: uuid.UUID,
     fecha_cobro: date | None = None,
+    cotizacion_stock: Decimal | None = None,
 ) -> Cuota:
     cuota = db.scalar(
         select(Cuota)
@@ -288,7 +370,7 @@ def cobrar_cuota(
         db.flush()
         prestamo = db.get(Prestamo, prestamo_id)
         if prestamo is not None:
-            _registrar_cobro_cuota(db, prestamo, cuota, restante)
+            _registrar_cobro_cuota(db, prestamo, cuota, restante, cotizacion_stock)
         # Cualquier cuota no cobrada (PENDIENTE o EN_MORA) mantiene vivo el préstamo.
         pendientes_restantes = db.scalar(
             select(func.count()).select_from(Cuota).where(
@@ -370,6 +452,7 @@ def cobrar_cuotas_lote(
     prestamo_id: uuid.UUID,
     cuota_ids: list[uuid.UUID],
     fecha_cobro: date | None = None,
+    cotizacion_stock: Decimal | None = None,
 ) -> list[Cuota]:
     cuotas = list(
         db.scalars(
@@ -397,7 +480,9 @@ def cobrar_cuotas_lote(
         prestamo = db.get(Prestamo, prestamo_id)
         if prestamo is not None:
             for cuota in cuotas:
-                _registrar_cobro_cuota(db, prestamo, cuota, restantes[cuota.id])
+                _registrar_cobro_cuota(
+                    db, prestamo, cuota, restantes[cuota.id], cotizacion_stock
+                )
         pendientes_restantes = db.scalar(
             select(func.count()).select_from(Cuota).where(
                 Cuota.prestamo_id == prestamo_id,
@@ -505,6 +590,7 @@ def imputar_pago(
     monto_caja: Decimal | None,
     moneda_pago: Moneda,
     cotizacion: Decimal | None,
+    cotizacion_stock: Decimal | None = None,
 ) -> bool:
     """Imputa `reduccion` (en la moneda del préstamo) a las cuotas más viejas.
 
@@ -558,6 +644,17 @@ def imputar_pago(
         referencia_id=prestamo.id,
         detalle=detalle,
         cotizacion=cotizacion,
+    )
+    _ingresar_stock_cobro(
+        db,
+        prestamo,
+        monto=monto_caja,
+        moneda_pago=moneda_pago,
+        # Si el pago cruzó monedas el operador ya declaró una cotización: esa es
+        # el costo, no hace falta pedirle otra por lo mismo.
+        cotizacion_stock=cotizacion_stock or cotizacion,
+        fecha=fecha,
+        detalle=f"Stock por {detalle}",
     )
     return cancelado
 
@@ -613,6 +710,7 @@ def pagar_prestamo(
         monto_caja=payload.monto_pagado,
         moneda_pago=payload.moneda_pago,
         cotizacion=payload.cotizacion if es_cross else None,
+        cotizacion_stock=payload.cotizacion_stock,
     )
 
     try:
