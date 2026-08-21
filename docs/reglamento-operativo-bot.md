@@ -173,6 +173,7 @@ salió de caja: si ahí ves un descuento que no esperabas, avisale en el momento
 |---|---|
 | "Fernando me prestó 500 lucas para el lote de dólares" | Anota la deuda **y suma los $500.000 a la caja** |
 | "Pedí prestados 300 mil a mi hermano" | Lo mismo |
+| "Pedro me prestó 1.000 dólares a 1.250" | Anota la deuda, suma los USD a la caja **y al stock** para poder venderlos |
 | "Le debo $50.000 a Fernando por los insumos" | Solo anota la deuda: **no entra plata** |
 
 La diferencia es si **la plata llegó a tus manos**. Cuando te prestan, el cajón tiene esa
@@ -185,6 +186,17 @@ caja"*. **Si esa línea dice lo contrario de lo que pasó, avisale en el momento
 
 Devolver el préstamo es pagar la deuda como cualquier otra: se hace desde el panel y ahí
 sale de la caja.
+
+**Si te prestan dólares, decí a cuánto los tomás.** *"Pedro me prestó 1.000 dólares a
+1.250"*. Esa cotización es el costo con el que esos dólares entran al stock, y contra ese
+costo se calcula la ganancia el día que los vendas: si los vendés a 1.310, ganás $60 por
+dólar. **Sin ese dato no se pueden vender**, así que si no lo decís, el bot te lo pregunta
+— y conviene contestarlo en el momento, porque dentro de un mes nadie se acuerda a cuánto
+estaba el dólar ese día. En pesos no hace falta ninguna cotización.
+
+Una vez cargados, esos dólares se venden como cualquier otro. Lo único que no vas a poder
+es corregir o borrar la deuda después de haber vendido parte: primero hay que deshacer esas
+ventas, porque si no la ganancia que ya se reportó quedaría mal.
 
 ### Préstamos y dólares
 
@@ -340,6 +352,7 @@ Hay **dos cajas separadas: pesos y dólares.** Un gasto en dólares no baja la c
 | Te pagan un fiado en efectivo | lo que cobraste (aunque sea parcial) |
 | Vendés dólares | los pesos que recibiste |
 | Te prestan plata | lo que te dieron (y queda anotado como deuda tuya) |
+| Te prestan dólares | los USD (entran también al stock, al valor que declaraste) |
 
 ### Lo que hace SALIR plata
 

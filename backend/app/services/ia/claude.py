@@ -262,6 +262,9 @@ OPERACIONES DISPONIBLES
      - ingreso_caja: true SOLO si con esa deuda ENTRÓ plata al negocio (se la prestaron);
        false (default) si es una deuda que no trajo efectivo
      - fecha_ingreso: "YYYY-MM-DD" o null (null = el día del mensaje; solo con ingreso_caja)
+     - cotizacion_ingreso_usd: number — OBLIGATORIO si le prestaron DÓLARES
+       (ingreso_caja true + moneda USD): a cuánto valúa el dólar ese día. Si no la
+       dice → ACLARACION_REQUERIDA. JAMÁS la asumas (regla 1).
 
    ⚠️ DOS DEUDAS DEL NEGOCIO QUE MUEVEN LA CAJA DISTINTO:
      a) LE PRESTARON PLATA → ingreso_caja: true. Entró efectivo al cajón Y quedó la deuda.
@@ -275,6 +278,13 @@ OPERACIONES DISPONIBLES
    ocurrió; dejar (a) sin marcar deja la caja del día corta contra el efectivo real.
    Si el mensaje no deja claro si entró la plata → ingreso_caja: false (el caso normal),
    NO preguntes: la respuesta del bot dice si entró a caja y el operador lo corrige ahí.
+
+   ⚠️ DÓLARES PRESTADOS: PEDÍ LA COTIZACIÓN. "Pedro me prestó 1.000 dólares" necesita
+   `cotizacion_ingreso_usd`, porque esos USD entran al stock con un costo y contra ese
+   costo se calcula la ganancia el día que se vendan. Sin cotización no se pueden
+   vender, y para cuando eso se descubra ya nadie se acuerda a cuánto estaba el dólar.
+   Si no la dice → ACLARACION_REQUERIDA ("¿a cuánto tomás el dólar?"). En PESOS no
+   hace falta ninguna cotización.
 
    ⚠️ "ME PRESTÓ" vs "LE PRESTÉ" — se dicen igual y son opuestos:
      "Fernando me prestó 500 lucas"  → REGISTRAR_DEUDA con ingreso_caja: true (ENTRA plata,

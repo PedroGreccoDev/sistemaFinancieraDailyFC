@@ -568,6 +568,9 @@ def _registrar_deuda(db: Session, data: dict[str, Any], msg_at: datetime | None 
     fecha_vencimiento = _opt_date(data, "fecha_vencimiento")
     ingreso_caja = bool(data.get("ingreso_caja"))
     fecha_ingreso = _opt_date(data, "fecha_ingreso")
+    # Solo si le prestaron dólares: el costo con el que entran al stock. El servicio
+    # lo exige —sin lote no se pueden vender— y el prompt lo pide antes de llegar acá.
+    cotizacion_ingreso = _opt_decimal(data, "cotizacion_ingreso_usd")
 
     payload = PasivoCreate(
         acreedor=acreedor,
@@ -577,6 +580,7 @@ def _registrar_deuda(db: Session, data: dict[str, Any], msg_at: datetime | None 
         fecha_vencimiento=fecha_vencimiento,
         ingreso_caja=ingreso_caja,
         fecha_ingreso=fecha_ingreso,
+        cotizacion_ingreso_usd=cotizacion_ingreso,
     )
     pasivo = svc_pasivos.create_pasivo(db, payload, created_at=msg_at)
 
@@ -592,6 +596,12 @@ def _registrar_deuda(db: Session, data: dict[str, Any], msg_at: datetime | None 
         lines.append(f"Vencimiento: {_fmt_date(pasivo.fecha_vencimiento)}")
     if pasivo.ingreso_caja:
         lines.append(f"Entró a caja el {_fmt_date(pasivo.fecha_ingreso)}")
+        if pasivo.cotizacion_ingreso_usd is not None:
+            # Los dólares entran al stock a ese costo: es contra lo que se calcula
+            # la ganancia si los vende, así que tiene que verlo al cargarlos.
+            lines.append(
+                f"Al stock a ${_fmt_num(pasivo.cotizacion_ingreso_usd)} — ya los podés vender"
+            )
     else:
         lines.append("No mueve la caja (se descuenta cuando la pagues)")
     return True, "\n".join(lines)

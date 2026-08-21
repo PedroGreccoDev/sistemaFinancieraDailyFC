@@ -12,6 +12,9 @@ export interface PasivoCreatePayload {
   // el ingreso del efectivo que entró al cajón.
   ingreso_caja?: boolean
   fecha_ingreso?: string | null
+  // Obligatoria si le prestaron DÓLARES: costo ($/USD) del lote de stock que se
+  // crea, sin el cual esos dólares no se pueden vender.
+  cotizacion_ingreso_usd?: number | null
 }
 
 export const getPasivos = (estado?: PasivoEstado): Promise<Pasivo[]> => {
@@ -33,6 +36,7 @@ export interface PasivoUpdatePayload {
   observaciones?: string | null
   ingreso_caja?: boolean
   fecha_ingreso?: string | null
+  cotizacion_ingreso_usd?: number | null
 }
 
 export const editarPasivo = (id: string, payload: PasivoUpdatePayload): Promise<Pasivo> =>

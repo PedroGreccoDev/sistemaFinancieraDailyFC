@@ -653,10 +653,40 @@ día quedaba corto contra la plata real y solo se cuadraba con un ajuste a mano.
   deuda ya tenga pagos: son líneas independientes.
 - **Anular arrastra las dos líneas** sin cambios en el motor: ya barría todas las
   del `referencia_tipo='pasivo'`.
+
+**Si le prestaron DÓLARES, la caja no alcanza: hace falta el stock** _(migración
+`0024`)_. La caja USD y lo que se puede vender son cosas distintas (§4): la venta
+consume **lotes** `MovimientoEfectivo` con su costo real. Unos dólares que solo
+figuran en la caja no se pueden vender —la venta falla con "no hay stock"—, que es
+el mismo agujero de los dólares de apertura y de los ajustes que suman USD.
+
+- **`cotizacion_ingreso_usd` es obligatoria** cuando `ingreso_caja` y la deuda es en
+  USD (check en la tabla, `_exigir_cotizacion_usd` en el servicio y
+  `ACLARACION_REQUERIDA` en el prompt). Mejor frenar en la carga que descubrirlo el
+  día que se los quiera vender, cuando ya nadie se acuerda a cuánto estaba el dólar.
+  La cotización la dicta el operador; el sistema no la asume nunca.
+- **El lote se crea con `es_ajuste=True`** (`_crear_lote_usd`), que es la marca de
+  "stock que entró sin una compra detrás" y que comparte con la apertura y los
+  ajustes: no asienta caja —ya la mueve el `INGRESO_PASIVO`— y no figura como una
+  compra en el listado de divisas. Su costo es contra lo que se calcula la ganancia
+  el día que se vendan, igual que si se hubieran comprado. `pasivos.lote_id` guarda
+  cuál es.
+- **Bloqueo si ya se vendió parte de esos dólares**, tanto al editar la deuda
+  (`_borrar_lote_usd`) como al anularla (`_validar_pasivo`): sacar el lote dejaría
+  esas ventas sin el stock del que salieron y reescribiría su ganancia ya
+  reportada. Mismo criterio que un ajuste en USD. **Se valida antes de tocar nada**,
+  para que un corte no deje la deuda sin vínculo a un lote que sigue existiendo.
+- **Todo cambio de stock reimputa el FIFO** (`_reimputar_fifo` tras crear o borrar
+  el lote, y en `anular`): si no, las ventas posteriores quedarían apuntando a un
+  lote que ya no existe.
+- **Backup:** `cotizacion_ingreso_usd` y `lote_id` viajan en `_PA`, `fecha_ingreso`
+  va en `_DATE_PA` y la cotización en `_DEC_COLS`; **`pasivos` se borra antes que
+  `movimientos_efectivo`** porque ahora lo referencia.
 - **Panel:** casilla "Me prestaron la plata (entró a la caja)" en el alta y en la
   edición de Deudas, con el día en que entró (vacío = hoy) y el aviso de cuánto se
-  suma o se quita al guardar. **Bot:** `REGISTRAR_DEUDA` con `ingreso_caja`, y se
-  corrige por chat con `EDITAR_OPERACION` campo `ingreso_caja` ("sí"/"no").
+  suma o se quita al guardar, más el campo de cotización cuando la deuda es en USD.
+  **Bot:** `REGISTRAR_DEUDA` con `ingreso_caja`, y se corrige por chat con
+  `EDITAR_OPERACION` campo `ingreso_caja` ("sí"/"no").
 - **Se puede saldar compensándolo** contra lo que un cliente le debe al negocio,
   sin que la caja se mueva (§Compensación).
 - **Alta** via bot de WhatsApp (intent `REGISTRAR_DEUDA`) o desde el panel web (botón "Nueva deuda").
@@ -1096,7 +1126,9 @@ avisa **por Telegram** diciendo **qué** se rompió.
   - **`test_pasivo_ingreso_caja.py`** — la deuda que **sí** hace entrar plata (§5): que la
     deuda común siga sin mover la caja, que el préstamo recibido asiente su INGRESO en la
     moneda y el día correctos, que el resync acote por categoría —para no borrar los pagos
-    del mismo pasivo— y que el prompt separe "me prestó" de "le presté".
+    del mismo pasivo— y que el prompt separe "me prestó" de "le presté". Cubre además el
+    caso en dólares: que la cotización sea obligatoria, que el lote entre a ese costo sin
+    tocar la caja, y que editar o anular se bloquee si esos USD ya se vendieron.
   - **`test_bot_deuda_cliente.py`** — la **dirección** de la deuda en el bot (§Bot): que el
     prompt siga contrastando "le debo a X" / "X me debe" / "le presté en N cuotas", que
     diga por qué importa (una descuenta la caja y la otra no) y que los dos handlers no se
@@ -1122,7 +1154,8 @@ avisa **por Telegram** diciendo **qué** se rompió.
 - Últimas: `0021` (compras a deber — `monto_abonado` en cheques y divisas,
   `origen_tipo`/`origen_id` en pasivos), `0022` (`compensaciones` +
   `compensacion_imputaciones`) y `0023` (`ingreso_caja`/`fecha_ingreso` en pasivos, para
-  la deuda que sí hace entrar plata).
+  la deuda que sí hace entrar plata) y `0024` (`cotizacion_ingreso_usd`/`lote_id`,
+  el stock de un préstamo recibido en dólares).
 
 ---
 

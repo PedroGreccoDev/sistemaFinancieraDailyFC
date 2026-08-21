@@ -20,10 +20,20 @@ from decimal import Decimal
 
 import pytest
 
-from app.db.models import CajaCategoria, CajaTipo, Moneda, Pasivo, PasivoEstado
+from app.db.models import (
+    CajaCategoria,
+    CajaTipo,
+    Moneda,
+    MovimientoEfectivo,
+    MovimientoEfectivoTipo,
+    Pasivo,
+    PasivoEstado,
+)
+from app.services import anulacion as svc_anulacion
 from app.services import caja as svc_caja
 from app.services import pasivos as svc_pasivos
 from app.services import reportes as svc_reportes
+from app.services.exceptions import ConflictError, ValidationError
 from app.services.ia.claude import _SYSTEM_PROMPT
 from app.services.whatsapp import dispatcher
 
@@ -62,6 +72,30 @@ class FakeDBConQuery(FakeDB):
 
     def query(self, *_args, **_kwargs) -> FakeQuery:
         return self.q
+
+
+class FakeDBConId(FakeDB):
+    """`flush` le pone id a lo agregado, como haría la BD al insertar."""
+
+    def flush(self) -> None:
+        for obj in self.agregados:
+            if getattr(obj, "id", None) is None:
+                obj.id = uuid.uuid4()
+
+
+class FakeDBConGet(FakeDB):
+    """Devuelve el lote programado y anota qué se borró."""
+
+    def __init__(self, lote: object) -> None:
+        super().__init__()
+        self.lote = lote
+        self.borrados: list[object] = []
+
+    def get(self, *_args, **_kwargs) -> object:
+        return self.lote
+
+    def delete(self, obj: object) -> None:
+        self.borrados.append(obj)
 
 
 def _pasivo(*, ingreso_caja: bool, moneda: Moneda = Moneda.ARS) -> Pasivo:
@@ -210,3 +244,100 @@ def test_lo_que_no_se_entiende_se_rechaza() -> None:
     """Caer en `False` por default borraría un ingreso de caja que sí existió."""
     with pytest.raises(ValueError):
         dispatcher._parse_bool_val("mas o menos")
+
+
+# ── Dólares prestados: la caja no alcanza, hace falta el stock ───────────────
+
+def test_los_dolares_prestados_exigen_su_cotizacion() -> None:
+    """La caja USD y lo que se puede vender son cosas distintas: la venta consume
+    lotes con su costo. Sin cotización no hay lote, y el error aparecería recién
+    el día que quiera venderlos —cuando ya nadie se acuerda a cuánto estaba—."""
+    with pytest.raises(ValidationError):
+        svc_pasivos._exigir_cotizacion_usd(Moneda.USD, None)
+    with pytest.raises(ValidationError):
+        svc_pasivos._exigir_cotizacion_usd(Moneda.USD, Decimal("0"))
+
+
+def test_en_pesos_no_se_pide_ninguna_cotizacion() -> None:
+    """Los pesos no tienen stock que alimentar: pedir una cotización sería
+    fricción pura en la carga que más se usa."""
+    svc_pasivos._exigir_cotizacion_usd(Moneda.ARS, None)  # no levanta
+
+
+def test_el_lote_entra_al_costo_declarado_y_sin_tocar_la_caja() -> None:
+    """El lote se inserta directo, no como compra: la caja USD ya la mueve el
+    INGRESO_PASIVO, y una compra además restaría pesos que nunca salieron."""
+    db = FakeDBConId()
+    pasivo = _pasivo(ingreso_caja=True, moneda=Moneda.USD)
+    pasivo.cotizacion_ingreso_usd = Decimal("1250.00")
+
+    lote = svc_pasivos._crear_lote_usd(db, pasivo)
+
+    assert lote is not None
+    assert lote.tipo == MovimientoEfectivoTipo.COMPRA
+    assert lote.monto == lote.usd_restante == pasivo.monto  # intacto
+    assert lote.cotizacion_aplicada == Decimal("1250.00")
+    assert lote.ganancia == Decimal("0.00")
+    # `es_ajuste` es la marca de "stock que entró sin una compra detrás": la
+    # comparte con la apertura y los ajustes, y es lo que evita que se le asiente
+    # caja al editarlo o que figure como una compra que nunca ocurrió.
+    assert lote.es_ajuste is True
+    assert pasivo.lote_id == lote.id
+
+
+def test_un_prestamo_en_pesos_no_crea_lote() -> None:
+    db = FakeDBConId()
+    assert svc_pasivos._crear_lote_usd(db, _pasivo(ingreso_caja=True, moneda=Moneda.ARS)) is None
+
+
+def test_no_se_toca_la_deuda_si_esos_dolares_ya_se_vendieron() -> None:
+    """Sacar el lote dejaría esas ventas sin el stock del que salieron y
+    reescribiría su ganancia ya reportada. Mismo criterio que los ajustes en USD."""
+    pasivo = _pasivo(ingreso_caja=True, moneda=Moneda.USD)
+    lote = MovimientoEfectivo(
+        id=uuid.uuid4(), tipo=MovimientoEfectivoTipo.COMPRA, moneda=Moneda.USD,
+        monto=Decimal("1000.00"), cotizacion_aplicada=Decimal("1250.00"),
+        ganancia=Decimal("0.00"), usd_restante=Decimal("400.00"),  # se vendieron 600
+    )
+    pasivo.lote_id = lote.id
+
+    db = FakeDBConGet(lote)
+    with pytest.raises(ConflictError):
+        svc_pasivos._borrar_lote_usd(db, pasivo)
+
+    # Y la anulación se frena por el mismo motivo, con su aviso al operador.
+    bloqueo, _ = svc_anulacion._validar_pasivo(FakeDBConGet(lote), pasivo)
+    assert bloqueo is not None and "ya fueron vendidos" in bloqueo
+
+
+def test_el_lote_intacto_se_puede_sacar() -> None:
+    """Si nadie vendió nada, corregir o anular la deuda se lleva su stock: esos
+    dólares no entraron nunca."""
+    pasivo = _pasivo(ingreso_caja=True, moneda=Moneda.USD)
+    lote = MovimientoEfectivo(
+        id=uuid.uuid4(), tipo=MovimientoEfectivoTipo.COMPRA, moneda=Moneda.USD,
+        monto=Decimal("1000.00"), cotizacion_aplicada=Decimal("1250.00"),
+        ganancia=Decimal("0.00"), usd_restante=Decimal("1000.00"),
+    )
+    pasivo.lote_id = lote.id
+
+    assert svc_anulacion._validar_pasivo(FakeDBConGet(lote), pasivo)[0] is None
+
+    db = FakeDBConGet(lote)
+    svc_pasivos._borrar_lote_usd(db, pasivo)
+    assert db.borrados == [lote]
+    assert pasivo.lote_id is None
+
+
+def test_una_deuda_sin_stock_se_anula_siempre() -> None:
+    """La deuda comercial de siempre no tiene lote: nada que validar."""
+    assert svc_anulacion._validar_pasivo(FakeDBConGet(None), _pasivo(ingreso_caja=False)) == (None, [])
+
+
+def test_el_prompt_pide_la_cotizacion_de_los_dolares() -> None:
+    """"Me prestó 1.000 dólares" sin cotización no se puede cargar, y el bot es
+    el único que puede pedirla a tiempo — después nadie se acuerda."""
+    seccion = _seccion_registrar_deuda()
+    assert "cotizacion_ingreso_usd" in seccion
+    assert "DÓLARES PRESTADOS: PEDÍ LA COTIZACIÓN" in seccion
+    assert "ACLARACION_REQUERIDA" in seccion

@@ -655,6 +655,13 @@ class Pasivo(AnulableMixin, Base):
             "NOT ingreso_caja OR fecha_ingreso IS NOT NULL",
             name="ck_pasivos_ingreso_caja_fecha",
         ),
+        # Dólares prestados sin costo declarado no pueden entrar al stock FIFO, y
+        # sin stock no se pueden vender: mejor frenar en la carga que descubrirlo
+        # el día que se intente venderlos.
+        sa.CheckConstraint(
+            "NOT (ingreso_caja AND moneda = 'USD') OR cotizacion_ingreso_usd IS NOT NULL",
+            name="ck_pasivos_ingreso_usd_cotizacion",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -687,6 +694,17 @@ class Pasivo(AnulableMixin, Base):
     # Día en que entró esa plata (local ART). Solo con `ingreso_caja`; es la fecha
     # de la línea de caja, guardada acá para poder resincronizarla si se edita.
     fecha_ingreso:     Mapped[date | None]    = mapped_column(sa.Date(), nullable=True)
+    # Solo si le prestaron DÓLARES: costo ($/USD) con el que entran al stock FIFO.
+    # La caja USD y el stock vendible son cosas distintas —la venta consume lotes—,
+    # así que sin esto los dólares figurarían en la caja y no se podrían vender.
+    cotizacion_ingreso_usd: Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 6), nullable=True)
+    # Lote FIFO que creó ese préstamo en dólares, para poder borrarlo si se corrige
+    # o se anula. SET NULL y no CASCADE: si el lote desaparece, la deuda sigue
+    # siendo un hecho histórico que hay que poder auditar.
+    lote_id:           Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), sa.ForeignKey("movimientos_efectivo.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     # De qué compra salió este pasivo: 'movimiento_efectivo' (dólares comprados a
     # deber) o 'cheque' (cheque comprado a deber). NULL = cargado a mano.

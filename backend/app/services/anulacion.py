@@ -291,7 +291,30 @@ def _validar(db: Session, entidad: str, obj) -> tuple[str | None, list[str]]:
         return _validar_fiado(obj)
     if entidad == "ajuste_caja":
         return _validar_ajuste(db, obj)
+    if entidad == "pasivo":
+        return _validar_pasivo(db, obj)
     return None, []
+
+
+def _validar_pasivo(db: Session, pasivo: Pasivo) -> tuple[str | None, list[str]]:
+    """Una deuda se anula siempre, salvo que le haya dado stock al FIFO.
+
+    Es el caso del préstamo recibido en dólares (§5): esos USD entraron al stock
+    con su costo, y si ya se vendieron —aunque sea en parte— sacarlos dejaría esas
+    ventas sin el lote del que salieron y reescribiría su ganancia ya reportada.
+    Mismo criterio que un ajuste en dólares.
+    """
+    if pasivo.lote_id is None:
+        return None, []
+    lote = db.get(MovimientoEfectivo, pasivo.lote_id)
+    if lote is not None and lote.usd_restante != lote.monto:
+        consumido = lote.monto - lote.usd_restante
+        return (
+            f"No se puede eliminar esta deuda: {consumido} de los {lote.monto} USD que "
+            "te prestaron ya fueron vendidos. Anulá primero esas ventas.",
+            [],
+        )
+    return None, [f"el stock de {lote.monto} USD que entró con ese préstamo"] if lote else []
 
 
 def _validar_ajuste(db: Session, ajuste: AjusteCaja) -> tuple[str | None, list[str]]:
@@ -546,7 +569,22 @@ def anular(
             if lote is not None:
                 db.delete(lote)
 
+        # Ídem con el préstamo recibido en dólares (§5): si la deuda no existió,
+        # esos dólares tampoco entraron al stock (ya validado sin ventas encima).
+        if entidad == "pasivo" and obj.lote_id is not None:
+            lote = db.get(MovimientoEfectivo, obj.lote_id)
+            obj.lote_id = None
+            if lote is not None:
+                db.delete(lote)
+
         _marcar(obj, operador_id, motivo)
+
+        # Sacar ese stock de la cadena obliga a recalcular las imputaciones FIFO.
+        if entidad == "pasivo" and obj.moneda == Moneda.USD and obj.ingreso_caja:
+            from app.services.movimientos import _reimputar_fifo
+
+            db.flush()
+            _reimputar_fifo(db)
 
         # Un ajuste en dólares aporta o consume stock: sacarlo de la cadena obliga
         # a recalcular, igual que una operación de divisas.

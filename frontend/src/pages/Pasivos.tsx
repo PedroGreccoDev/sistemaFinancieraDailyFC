@@ -48,9 +48,13 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
   // Le prestaron plata al negocio: además de la deuda, el efectivo entró al cajón.
   const [entroPlata, setEntroPlata] = useState(false)
   const [fechaIngreso, setFechaIngreso] = useState('')
+  // Solo si le prestaron dólares: costo con el que entran al stock vendible.
+  const [cotizacionIngreso, setCotizacionIngreso] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
+
+  const pideCotizacion = entroPlata && moneda === 'USD'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -66,7 +70,12 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
         observaciones: observaciones.trim() || null,
         // Sin la marca no viaja el campo: el backend lo lee como deuda que no
         // movió la caja, que es el caso normal.
-        ...(entroPlata ? { ingreso_caja: true, fecha_ingreso: fechaIngreso || null } : {}),
+        ...(entroPlata ? {
+          ingreso_caja: true,
+          fecha_ingreso: fechaIngreso || null,
+          // Sin esto los dólares figuran en la caja pero no se pueden vender.
+          ...(moneda === 'USD' ? { cotizacion_ingreso_usd: parseFloat(cotizacionIngreso) } : {}),
+        } : {}),
       })
       toast('success', entroPlata ? 'Deuda registrada y plata ingresada a caja' : 'Deuda registrada')
       onSuccess()
@@ -99,6 +108,13 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
               <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.3rem' }}>Suma {monto ? fmtMoneda(monto, moneda) : 'el monto'} a la caja {moneda} de ese día. Marcala solo si el efectivo entró de verdad.</p>
             </div>
           )}
+          {pideCotizacion && (
+            <div>
+              <label style={LABEL_STYLE}>¿A cuánto tomás el dólar? <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>($ por USD)</span></label>
+              <input type="number" step="0.01" min="0.01" value={cotizacionIngreso} onChange={(e) => setCotizacionIngreso(e.target.value)} required placeholder="1250.00" style={INPUT_STYLE} />
+              <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.3rem' }}>Es el costo con el que esos dólares entran al stock: contra eso se calcula la ganancia si los vendés. Sin esto no se pueden vender.</p>
+            </div>
+          )}
           <div><label style={LABEL_STYLE}>Vencimiento <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><input type="date" value={fechaVenc} onChange={(e) => setFechaVenc(e.target.value)} style={INPUT_STYLE} /></div>
           <div><label style={LABEL_STYLE}>Observaciones <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
@@ -123,6 +139,7 @@ function ModalEditarDeuda({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onCl
   const [observaciones, setObservaciones] = useState(pasivo.observaciones ?? '')
   const [entroPlata, setEntroPlata] = useState(pasivo.ingreso_caja)
   const [fechaIngreso, setFechaIngreso] = useState(pasivo.fecha_ingreso ?? '')
+  const [cotizacionIngreso, setCotizacionIngreso] = useState(pasivo.cotizacion_ingreso_usd ?? '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
@@ -146,7 +163,10 @@ function ModalEditarDeuda({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onCl
         // La línea de caja del alta se rehace sola en el backend; los pagos ya
         // hechos no se tocan, así que esto se puede corregir aunque haya pagos.
         ingreso_caja: entroPlata,
-        ...(entroPlata ? { fecha_ingreso: fechaIngreso || null } : {}),
+        ...(entroPlata ? {
+          fecha_ingreso: fechaIngreso || null,
+          ...(moneda === 'USD' ? { cotizacion_ingreso_usd: parseFloat(cotizacionIngreso) } : {}),
+        } : {}),
       })
       toast('success', 'Deuda actualizada')
       onSuccess()
@@ -177,6 +197,13 @@ function ModalEditarDeuda({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onCl
             <div>
               <label style={LABEL_STYLE}>Día que entró <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(vacío = el día del alta)</span></label>
               <input type="date" value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} style={INPUT_STYLE} />
+            </div>
+          )}
+          {entroPlata && moneda === 'USD' && (
+            <div>
+              <label style={LABEL_STYLE}>¿A cuánto tomás el dólar? <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>($ por USD)</span></label>
+              <input type="number" step="0.01" min="0.01" value={cotizacionIngreso} onChange={(e) => setCotizacionIngreso(e.target.value)} required style={INPUT_STYLE} />
+              <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.3rem' }}>Costo con el que esos dólares entran al stock. Si ya vendiste una parte, no se puede cambiar.</p>
             </div>
           )}
           {entroPlata !== pasivo.ingreso_caja && (

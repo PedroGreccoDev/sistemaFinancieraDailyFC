@@ -26,6 +26,11 @@ class PasivoCreate(BaseModel):
     ingreso_caja: bool = False
     # Día en que entró esa plata; solo con `ingreso_caja`. Null = el día de alta.
     fecha_ingreso: date | None = None
+    # Obligatoria si le prestaron DÓLARES: costo ($/USD) del lote de stock que se
+    # crea. Sin lote esos dólares no se pueden vender (la venta consume lotes FIFO).
+    cotizacion_ingreso_usd: Decimal | None = Field(
+        default=None, gt=0, max_digits=18, decimal_places=6
+    )
 
 
 class PasivoUpdate(BaseModel):
@@ -45,6 +50,9 @@ class PasivoUpdate(BaseModel):
     observaciones: str | None = None
     ingreso_caja: bool | None = None
     fecha_ingreso: date | None = None
+    cotizacion_ingreso_usd: Decimal | None = Field(
+        default=None, gt=0, max_digits=18, decimal_places=6
+    )
 
 
 class PasivoPagoRequest(BaseModel):
@@ -91,6 +99,8 @@ class PasivoRead(BaseModel):
     # alta asentó un INGRESO_PASIVO en `fecha_ingreso`.
     ingreso_caja: bool
     fecha_ingreso: date | None
+    # Costo ($/USD) del lote de stock, si el préstamo recibido fue en dólares.
+    cotizacion_ingreso_usd: Decimal | None
     created_at: datetime
     updated_at: datetime
 

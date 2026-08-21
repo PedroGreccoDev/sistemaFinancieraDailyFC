@@ -180,6 +180,8 @@ export interface Pasivo {
   ingreso_caja: boolean
   /** Día en que entró esa plata; solo con `ingreso_caja`. */
   fecha_ingreso: string | null
+  /** Costo ($/USD) del lote de stock, si el préstamo recibido fue en dólares. */
+  cotizacion_ingreso_usd: string | null
   created_at: string
   updated_at: string
 }

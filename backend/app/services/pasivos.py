@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -17,6 +17,8 @@ from app.db.models import (
     ManualOperationRequired,
     MedioPago,
     Moneda,
+    MovimientoEfectivo,
+    MovimientoEfectivoTipo,
     Pasivo,
     PasivoEstado,
 )
@@ -46,7 +48,10 @@ _CERO = Decimal("0.00")
 # alguno, esa línea se rehace (monto, moneda y fecha son la línea misma; acreedor y
 # concepto, su detalle).
 _CAMPOS_INGRESO = frozenset(
-    {"ingreso_caja", "fecha_ingreso", "monto", "moneda", "acreedor", "concepto"}
+    {
+        "ingreso_caja", "fecha_ingreso", "cotizacion_ingreso_usd",
+        "monto", "moneda", "acreedor", "concepto",
+    }
 )
 
 
@@ -64,10 +69,16 @@ def create_pasivo(
     Con `ingreso_caja` es el otro caso: **alguien le prestó plata al negocio**. La
     deuda nace igual, pero además el efectivo entró al cajón, así que el alta
     asienta el INGRESO `INGRESO_PASIVO` de `fecha_ingreso`. Sin eso el reporte del
-    día quedaría corto contra la plata real."""
+    día quedaría corto contra la plata real.
+
+    **Si le prestaron dólares, además hace falta el lote de stock**: la caja USD y
+    lo que se puede vender son cosas distintas (§4), así que el alta exige la
+    cotización con la que entran al FIFO."""
     fecha_ingreso = payload.fecha_ingreso
     if payload.ingreso_caja and fecha_ingreso is None:
         fecha_ingreso = fecha_local(created_at)
+    if payload.ingreso_caja:
+        _exigir_cotizacion_usd(payload.moneda, payload.cotizacion_ingreso_usd)
 
     pasivo = Pasivo(
         acreedor=payload.acreedor.strip(),
@@ -81,6 +92,11 @@ def create_pasivo(
         ingreso_caja=payload.ingreso_caja,
         # Se guarda solo si entró plata: una fecha suelta sin ingreso confunde.
         fecha_ingreso=fecha_ingreso if payload.ingreso_caja else None,
+        cotizacion_ingreso_usd=(
+            payload.cotizacion_ingreso_usd
+            if payload.ingreso_caja and payload.moneda == Moneda.USD
+            else None
+        ),
     )
     if created_at is not None:
         pasivo.created_at = created_at
@@ -89,9 +105,81 @@ def create_pasivo(
     # no lo tiene. El commit de abajo persiste deuda y línea de caja juntas.
     db.flush()
     _registrar_ingreso(db, pasivo)
+    _crear_lote_usd(db, pasivo)
     db.commit()
     db.refresh(pasivo)
     return pasivo
+
+
+def _exigir_cotizacion_usd(moneda: Moneda, cotizacion: Decimal | None) -> None:
+    """Dólares prestados sin costo declarado no pueden entrar al stock.
+
+    Y sin stock no se pueden vender: el error aparecería recién el día que se
+    intente venderlos, cuando ya no se sabe a cuánto estaba el dólar aquel día.
+    Mismo criterio que el saldo inicial en USD (§Apertura) y los ajustes (§Ajustes).
+    La cotización la dicta el operador; el sistema no la asume nunca."""
+    if moneda != Moneda.USD:
+        return
+    if cotizacion is None or cotizacion <= _CERO:
+        raise ValidationError(
+            "Decinos a cuánto valuás esos dólares ($/USD): es el costo con el que "
+            "entran al stock y contra el que se calcula la ganancia si los vendés."
+        )
+
+
+def _crear_lote_usd(db: Session, pasivo: Pasivo) -> MovimientoEfectivo | None:
+    """Crea (sin commit) el lote FIFO de unos dólares que le prestaron al negocio.
+
+    Se inserta directo, sin pasar por `create_movimiento`, para que **no asiente
+    caja**: la caja USD ya la mueve la línea `INGRESO_PASIVO`, y una compra además
+    restaría pesos que nunca salieron. Mismo criterio que el lote de apertura
+    (§Apertura) y el de un ajuste que suma dólares (§Ajustes de caja); comparte con
+    ellos la marca `es_ajuste`, que es la de "stock que entró sin una compra
+    detrás" —no aparece en el listado de divisas ni asienta caja al resincronizar—.
+
+    El costo es la cotización que declaró el operador: contra eso se calcula la
+    ganancia el día que los venda, igual que si los hubiera comprado."""
+    if not pasivo.ingreso_caja or pasivo.moneda != Moneda.USD:
+        return None
+    lote = MovimientoEfectivo(
+        tipo=MovimientoEfectivoTipo.COMPRA,
+        moneda=Moneda.USD,
+        monto=pasivo.monto,
+        cotizacion_aplicada=pasivo.cotizacion_ingreso_usd,
+        ganancia=_CERO,
+        usd_restante=pasivo.monto,  # lote intacto: nada consumido todavía
+        fecha_operacion=datetime.combine(
+            pasivo.fecha_ingreso or hoy_local(), time.min, tzinfo=UTC
+        ),
+        observaciones=f"Stock por préstamo recibido de {pasivo.acreedor}",
+        es_ajuste=True,
+    )
+    db.add(lote)
+    db.flush()
+    pasivo.lote_id = lote.id
+    return lote
+
+
+def _borrar_lote_usd(db: Session, pasivo: Pasivo) -> None:
+    """Saca de la cadena el lote de un préstamo en dólares (sin commit).
+
+    Se bloquea si ya se vendió algo de ese lote: quitarlo dejaría esas ventas sin
+    el stock del que salieron y reescribiría su ganancia ya reportada. Mismo
+    criterio que anular un ajuste en USD (§Ajustes de caja)."""
+    if pasivo.lote_id is None:
+        return
+    lote = db.get(MovimientoEfectivo, pasivo.lote_id)
+    # Se valida ANTES de tocar nada: si esto corta a mitad de camino, la deuda no
+    # puede quedar sin su vínculo al lote que sigue existiendo.
+    if lote is not None and lote.usd_restante != lote.monto:
+        consumido = lote.monto - lote.usd_restante
+        raise ConflictError(
+            f"No se puede cambiar esta deuda: {consumido} de los {lote.monto} USD que "
+            "te prestaron ya se vendieron. Anulá primero esas ventas."
+        )
+    pasivo.lote_id = None
+    if lote is not None:
+        db.delete(lote)
 
 
 def _registrar_ingreso(db: Session, pasivo: Pasivo) -> None:
@@ -117,11 +205,27 @@ def _resync_caja_ingreso(db: Session, pasivo: Pasivo) -> None:
     """Rehace la línea de caja del alta tras editar la deuda (sin commit).
 
     Barre **solo** la línea `INGRESO_PASIVO`: los `PAGO_PASIVO` de la misma
-    referencia son plata que salió de verdad y no se tocan."""
+    referencia son plata que salió de verdad y no se tocan.
+
+    Si el préstamo era en dólares, rehace también su lote de stock: el monto, la
+    moneda y la fecha son tanto la línea de caja como el lote."""
     svc_caja.borrar_por_referencia(
         db, "pasivo", pasivo.id, categoria=CajaCategoria.INGRESO_PASIVO
     )
     _registrar_ingreso(db, pasivo)
+
+    # El lote se rehace siempre que había uno o corresponde uno nuevo. Borrar antes
+    # de crear: la deuda es una sola y corregirla no debe acumular lotes.
+    tenia_lote = pasivo.lote_id is not None
+    _borrar_lote_usd(db, pasivo)
+    creado = _crear_lote_usd(db, pasivo)
+    if tenia_lote or creado is not None:
+        # El stock cambió: hay que reimputar la cadena, o las ventas posteriores
+        # quedarían apuntando a un lote que ya no existe.
+        from app.services.movimientos import _reimputar_fifo
+
+        db.flush()
+        _reimputar_fifo(db)
 
 
 def get_pasivo(db: Session, pasivo_id: uuid.UUID) -> Pasivo:
@@ -260,6 +364,8 @@ def editar_pasivo(
         pasivo.saldo_pendiente = data["monto"]
     if "fecha_ingreso" in data:
         pasivo.fecha_ingreso = data["fecha_ingreso"]
+    if "cotizacion_ingreso_usd" in data:
+        pasivo.cotizacion_ingreso_usd = data["cotizacion_ingreso_usd"]
     if "ingreso_caja" in data:
         pasivo.ingreso_caja = data["ingreso_caja"]
         if not pasivo.ingreso_caja:
@@ -268,6 +374,11 @@ def editar_pasivo(
     # cuando se cargó la deuda. Mejor eso que dejar la línea sin fecha.
     if pasivo.ingreso_caja and pasivo.fecha_ingreso is None:
         pasivo.fecha_ingreso = fecha_local(pasivo.created_at)
+    if pasivo.ingreso_caja:
+        _exigir_cotizacion_usd(pasivo.moneda, pasivo.cotizacion_ingreso_usd)
+    else:
+        # Sin ingreso no hay lote, y un costo colgado sin dólares confunde.
+        pasivo.cotizacion_ingreso_usd = None
 
     # Cualquiera de estos campos forma parte de la línea de caja del alta.
     if not _CAMPOS_INGRESO.isdisjoint(data):

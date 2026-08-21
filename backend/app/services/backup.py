@@ -87,8 +87,10 @@ _PA = [
     "origen_tipo", "origen_id",
     # Si con la deuda entró plata al cajón y qué día (§5). Sin esto, un ciclo
     # export→import convierte un préstamo recibido en deuda común y le borra el
-    # ingreso al reconstruir la caja.
-    "ingreso_caja", "fecha_ingreso",
+    # ingreso al reconstruir la caja. `lote_id` es el stock que entró si fue en
+    # dólares: sin él, anular la deuda no encuentra ese lote y quedan dólares
+    # vendibles que ya no existen.
+    "ingreso_caja", "fecha_ingreso", "cotizacion_ingreso_usd", "lote_id",
     "estado", "fecha_vencimiento", "fecha_cancelacion", "observaciones",
     "created_at", "updated_at", *_ANUL,
 ]
@@ -170,7 +172,7 @@ _DEC_COLS = frozenset({
     "monto", "monto_pagado", "credito", "total_a_cobrar", "ganancia",
     "porcentaje_compra", "porcentaje_venta", "cotizacion_aplicada",
     "monto_original", "saldo_pendiente", "usd_restante", "cotizacion_pago",
-    "cotizacion_usd", "cotizacion",
+    "cotizacion_usd", "cotizacion", "cotizacion_ingreso_usd",
     # Compras a deber y compensaciones (§Comprar sin abonar, §Compensación).
     "monto_abonado", "imputado_cliente", "imputado_pasivo", "excedente",
 })
@@ -261,7 +263,7 @@ _DATE_CH = frozenset({"fecha_emision", "fecha_pago"})
 _DATE_PR = frozenset({"fecha_inicio"})
 _DATE_CU = frozenset({"fecha_vencimiento", "fecha_cobro"})
 _DATE_FI = frozenset({"fecha_fiado"})
-_DATE_PA = frozenset({"fecha_vencimiento", "fecha_cancelacion"})
+_DATE_PA = frozenset({"fecha_vencimiento", "fecha_cancelacion", "fecha_ingreso"})
 _DATE_GA = frozenset({"fecha_operacion"})
 _TIME_GA = frozenset({"hora_operacion"})
 _DT_MO   = frozenset({"fecha_operacion"})
@@ -289,11 +291,13 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         raise ValueError(f"{len(errors)} error(es) de schema:\n{preview}{suffix}")
 
     try:
-        # `ajustes_caja` va primero: referencia a `movimientos_efectivo` por su lote.
+        # `ajustes_caja` y `pasivos` van antes que `movimientos_efectivo`: los dos
+        # referencian un lote suyo (el del ajuste en USD y el del préstamo recibido
+        # en dólares).
         for tbl in (
             "compensacion_imputaciones", "compensaciones",
             "ajustes_caja", "movimientos_caja", "cuotas", "fiados", "deudas_simples",
-            "movimientos_efectivo", "prestamos", "cheques", "pasivos",
+            "pasivos", "movimientos_efectivo", "prestamos", "cheques",
             "gastos_operativos", "clientes",
         ):
             db.execute(sa.text(f"DELETE FROM {tbl}"))  # noqa: S608
