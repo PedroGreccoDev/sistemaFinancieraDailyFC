@@ -18,6 +18,7 @@ from app.services import monitor
 from app.services.ia import motor as ia_motor
 from app.services.ia import whisper as ia_whisper
 from app.services.whatsapp import client as wa_client
+from app.services.whatsapp import confirmacion as wa_confirmacion
 from app.services.whatsapp import dispatcher as wa_dispatcher
 from app.services.whatsapp import parser as wa_parser
 from app.services.whatsapp import session as wa_session
@@ -244,14 +245,28 @@ async def _procesar_mensaje(
     # misma operación cargada cinco veces seguidas en los logs.
     aviso_pendiente = ""
     pending = wa_session.get_pending_intent(phone)
-    if pending is not None and msg.message_type == "text":
-        clasificacion = _clasificar_respuesta(text_content)
-        # La lista rápida no reconoció el modismo: que lo interprete el modelo.
-        if clasificacion is None:
-            logger.info("Respuesta no literal de %s — consultando al modelo: %r", phone, text_content)
-            clasificacion = await ia_motor.clasificar_confirmacion(
-                text_content, getattr(pending, "respuesta_usuario", "")
+    if pending is not None:
+        if msg.message_type == "image":
+            # Una foto no responde "sí" ni "no": es una operación nueva. Antes el
+            # flujo de confirmación solo miraba los mensajes de texto, así que la
+            # foto pasaba de largo y lo pendiente QUEDABA VIVO — el operador
+            # cargaba el cheque de la foto, decía "dale" pensando en ese, y
+            # terminaba confirmando la operación anterior.
+            logger.info(
+                "%s mandó una foto con algo pendiente (%s) — se descarta lo pendiente",
+                phone, pending.intent,
             )
+            clasificacion = "other"
+        else:
+            clasificacion = _clasificar_respuesta(text_content)
+            # La lista rápida no reconoció el modismo: que lo interprete el modelo.
+            if clasificacion is None:
+                logger.info(
+                    "Respuesta no literal de %s — consultando al modelo: %r", phone, text_content
+                )
+                clasificacion = await ia_motor.clasificar_confirmacion(
+                    text_content, getattr(pending, "respuesta_usuario", "")
+                )
 
         if clasificacion == "reject":
             logger.info("Operación cancelada por %s", phone)
@@ -313,6 +328,29 @@ async def _procesar_mensaje(
         media_mime_type=msg.media_mime_type if msg.message_type == "image" else "image/jpeg",
     )
     logger.info("Intent extraído: %s (phone=%s)", intent_result.intent, phone)
+
+    # El modelo ya decidió si hacía falta confirmar (regla 10 del prompt), pero
+    # esa es una instrucción y no una garantía. Acá se revisa el monto de verdad:
+    # una operación grande no se ejecuta sin que el operador la vea, aunque el
+    # modelo se haya olvidado de preguntar.
+    if not intent_result.confirmacion_requerida:
+        hace_falta, monto, moneda = wa_confirmacion.exige_confirmacion(
+            intent_result,
+            settings.confirmacion_umbral_ars,
+            settings.confirmacion_umbral_usd,
+        )
+        if hace_falta:
+            logger.warning(
+                "Confirmación forzada por monto (%s %s, intent=%s, phone=%s): "
+                "el modelo no la había pedido.",
+                f"{monto:,.2f}", moneda, intent_result.intent, phone,
+            )
+            intent_result.confirmacion_requerida = True
+            # El modelo escribió el mensaje creyendo que la operación se
+            # ejecutaba: describe lo hecho, no lo que va a hacer.
+            intent_result.respuesta_usuario = wa_confirmacion.con_pregunta(
+                intent_result.respuesta_usuario
+            )
 
     # ── 3f. Dispatch ─────────────────────────────────────────────────────────
     if intent_result.confirmacion_requerida:

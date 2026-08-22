@@ -1150,6 +1150,36 @@ avisa **por Telegram** diciendo **qué** se rompió.
   El aviso nombra la operación en castellano (`_NOMBRE_INTENT` en `webhook.py`): un intent de
   escritura nuevo se da de alta ahí, o el operador vería `MOVIMIENTO_EFECTIVO` por WhatsApp.
   Hay un test que compara ese catálogo contra los intents de escritura.
+
+  **Una foto tampoco responde la pregunta** (corregido 2026-08-21). El bloque solo miraba los
+  mensajes de texto, así que una foto pasaba de largo y lo pendiente **quedaba vivo**: el
+  operador cargaba el cheque de la foto, decía "dale" pensando en ese, y confirmaba el
+  anterior. Ahora una foto entra por `other`, igual que cualquier otra cosa que no sea un sí
+  o un no: descarta lo pendiente avisando y se procesa como la operación nueva que es.
+- **El umbral de confirmación lo impone el SISTEMA, no el modelo** _(régimen definido
+  2026-08-21)_. La regla 10 del prompt manda pedir confirmación arriba de **$700.000 ARS /
+  500 USD**, y el modelo la cumple casi siempre —y además redacta mejor el mensaje, porque
+  sabe describir lo que va a hacer—. Pero es una **instrucción, no una garantía**: el día que
+  la pasa por alto, una operación de tres millones entra sin que nadie la vea y sin dejar
+  rastro, porque el bot contesta "listo" y sigue. `services/whatsapp/confirmacion.py` mira el
+  monto **antes del dispatch** y fuerza la confirmación si hace falta. No reemplaza al prompt,
+  lo respalda; los umbrales son env vars (`CONFIRMACION_UMBRAL_ARS` / `_USD`).
+  - **El monto se busca con un barrido genérico**, recorriendo el `data` completo —incluidas
+    las listas de `cheques[]` y `ventas[]`— y quedándose con **el mayor**. Es a propósito que
+    no sea una regla por intent: uno nuevo quedaría sin proteger, en silencio, hasta que
+    alguien se acordara de darlo de alta. El precio es algún falso positivo, que cuesta un
+    "dale" y no plata mal cargada.
+  - **La moneda se hereda hacia abajo** (`{"moneda": "USD", "ventas": [{"monto": 900}]}` son
+    900 dólares) y cada una va contra su umbral: 900 no es grande en pesos, 900 dólares sí.
+  - **Lo que no es plata no cuenta**: `cotizacion` (1.250 $/USD no dice nada del tamaño),
+    `numero_cuota`, `cantidad_cuotas`, `porcentaje` y `monto_abonado` —que es una parte del
+    total ya contemplado y puede venir en la otra moneda—. Ojo con los `bool`: en Python son
+    subclase de `int` y un `True` colado sería un monto de 1 arrastrando la moneda equivocada.
+  - **Si el sistema fuerza la confirmación, el mensaje tiene que preguntar** (`con_pregunta`).
+    El modelo lo escribió creyendo que la operación se ejecutaba: describe lo hecho, no lo que
+    va a hacer, y sin la pregunta el operador no sabe que quedó algo esperando su "dale".
+  - **Una consulta nunca se fuerza.** No toca nada, y el ruido enseña a confirmar sin leer:
+    una confirmación que se aprieta sin mirar no protege absolutamente nada.
 - Los **pasivos** se pueden registrar desde el bot via `REGISTRAR_DEUDA` —incluida la plata que le prestan al negocio, con `ingreso_caja` (§5)—; la cancelación es solo desde el panel web.
 - Los **gastos operativos** sí son registrables desde el bot via intent `REGISTRAR_GASTO` (editables por concepto/hora/monto desde el chat).
 - Los **fiados** son operables desde el bot: `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
@@ -1354,6 +1384,13 @@ avisa **por Telegram** diciendo **qué** se rompió.
     confirmaciones deje lugar al razonamiento —un cap ajustado al veredicto vuelve vacío y
     eso le **cancela la operación** al operador— y que no se escale a un modelo idéntico al
     que ya se rindió.
+  - **`test_confirmacion_umbral.py`** — la detección del monto que dispara la confirmación
+    obligatoria (§Bot). Que el barrido encuentre la plata **donde sea que esté** —incluida la
+    anidada en `cheques[]` / `ventas[]`, quedándose con la mayor—, que la moneda se herede
+    hacia abajo y cada una vaya contra su umbral, y que no confunda con un monto a lo que no
+    lo es: la cotización, el número de cuota, un porcentaje, o un `bool` (que en Python es un
+    `int` y valdría 1). Cubre además que una consulta nunca se fuerce y que un intent
+    inventado quede protegido igual, que es el motivo de que el barrido sea genérico.
   - **`test_bot_confirmacion.py`** — el flujo de confirmación (§Bot: "un mensaje nunca se
     tira"). Los casos son **mensajes reales** de los logs del 2026-08-21, con la hora en que
     ocurrieron: una operación nueva mientras hay algo pendiente, una corrección, un "sí"

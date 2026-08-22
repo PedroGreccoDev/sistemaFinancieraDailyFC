@@ -75,9 +75,15 @@ def _con_pendiente(intent: str = "VENDER_CHEQUE") -> IntentResult:
     return pendiente
 
 
-def _procesar(texto: str) -> None:
-    msg = IncomingMessage(phone=TELEFONO, message_type="text", text=texto)
-    asyncio.run(webhook._procesar_mensaje(msg, SimpleNamespace()))
+_SETTINGS = SimpleNamespace(confirmacion_umbral_ars=700_000, confirmacion_umbral_usd=500)
+
+
+def _procesar(texto: str, tipo: str = "text") -> None:
+    msg = IncomingMessage(phone=TELEFONO, message_type=tipo, text=texto)
+    if tipo == "image":
+        msg.media_bytes = b"foto-falsa"
+        msg.media_mime_type = "image/jpeg"
+    asyncio.run(webhook._procesar_mensaje(msg, _SETTINGS))
 
 
 # ── Lo que ya andaba y tiene que seguir andando ────────────────────────
@@ -210,3 +216,76 @@ def test_el_clasificador_recibe_lo_que_el_bot_pregunto(banco, monkeypatch) -> No
 
     assert visto["texto"] == "Editar la compra a 3,5"
     assert visto["pendiente"] == pendiente.respuesta_usuario
+
+
+# ── La foto no puede saltear lo pendiente ──────────────────────────────
+
+def test_una_foto_no_confirma_ni_deja_colgada_la_operacion(banco, monkeypatch) -> None:
+    """Una foto no responde "sí" ni "no": es una operación nueva.
+
+    Antes el flujo de confirmación solo miraba los mensajes de texto, así que la
+    foto pasaba de largo y lo pendiente QUEDABA VIVO: el operador cargaba el
+    cheque de la foto, decía "dale" pensando en ese, y confirmaba el anterior."""
+    pendiente = _con_pendiente(intent="VENDER_CHEQUE")
+    de_la_foto = IntentResult(intent="REGISTRAR_CHEQUE", respuesta_usuario="Cargo el 8300")
+    _responde(monkeypatch, veredicto="confirm", intent=de_la_foto)
+
+    _procesar("", tipo="image")
+
+    assert pendiente not in banco.ejecutados, "la foto no puede confirmar lo anterior"
+    assert banco.ejecutados == [de_la_foto], "y el cheque de la foto sí se procesa"
+    assert wa_session.get_pending_intent(TELEFONO) is None, "no queda nada colgado"
+    assert "NO se cargó" in banco.enviados[0]
+
+
+# ── El umbral lo impone el sistema, no el modelo ───────────────────────
+
+def test_una_operacion_grande_se_confirma_aunque_el_modelo_no_lo_pida(banco, monkeypatch) -> None:
+    """La regla 10 del prompt es una instrucción, no una garantía. El día que el
+    modelo la pasa por alto, una operación de tres millones entraría sin que
+    nadie la vea y sin dejar rastro: el bot contesta "listo" y sigue."""
+    grande = IntentResult(
+        intent="VENDER_CHEQUE",
+        data={"ventas": [{"nro_cheque": "4500", "monto": 3_000_000}]},
+        confirmacion_requerida=False,
+        respuesta_usuario="Vendo el 4500",
+    )
+    _responde(monkeypatch, veredicto="other", intent=grande)
+
+    _procesar("vendí el 4500 al 3%")
+
+    assert banco.ejecutados == [], "no se ejecuta: primero tiene que confirmarla"
+    assert wa_session.get_pending_intent(TELEFONO) is grande
+    assert "¿Confirmás?" in banco.enviados[0], "y el mensaje tiene que pedir respuesta"
+
+
+def test_una_operacion_chica_no_molesta(banco, monkeypatch) -> None:
+    """Preguntar por todo es igual de malo: el operador aprende a apretar "dale"
+    sin leer, y ahí la confirmación deja de proteger nada."""
+    chica = IntentResult(
+        intent="REGISTRAR_GASTO",
+        data={"monto": 8_000, "concepto": "nafta"},
+        confirmacion_requerida=False,
+        respuesta_usuario="Anoté la nafta",
+    )
+    _responde(monkeypatch, veredicto="other", intent=chica)
+
+    _procesar("cargá 8 mil de nafta")
+
+    assert banco.ejecutados == [chica]
+
+
+def test_dolares_se_miden_con_su_propio_umbral(banco, monkeypatch) -> None:
+    """900 no es un número grande en pesos, pero 900 dólares sí."""
+    usd = IntentResult(
+        intent="MOVIMIENTO_EFECTIVO",
+        data={"tipo": "compra", "moneda": "USD", "monto": 900, "cotizacion_aplicada": 1250},
+        confirmacion_requerida=False,
+        respuesta_usuario="Compré 900 USD a 1250",
+    )
+    _responde(monkeypatch, veredicto="other", intent=usd)
+
+    _procesar("compré 900 dólares a 1250")
+
+    assert banco.ejecutados == [], "900 USD supera el umbral en dólares"
+    assert "¿Confirmás?" in banco.enviados[0]

@@ -68,6 +68,14 @@ class Settings(BaseSettings):
     # respuesta (ver `_TOPE_CONFIRMACION` en services/ia/openai_engine.py).
     openai_effort_confirmacion: str = Field(default="minimal")
 
+    # ── Confirmación obligatoria ───────────────────────────────────────────
+    # Arriba de estos montos el sistema EXIGE confirmación aunque el modelo no
+    # la haya pedido (ver services/whatsapp/confirmacion.py). El prompt tiene la
+    # misma regla; esto es la red por debajo, para el día que el modelo la pase
+    # por alto y una operación grande entre sin que nadie la vea.
+    confirmacion_umbral_ars: float = Field(default=700_000)
+    confirmacion_umbral_usd: float = Field(default=500)
+
     # WAHA (WhatsApp HTTP API — gateway no oficial, engine NOWEB)
     waha_api_url: str = Field(default="http://localhost:3000")
     waha_api_key: str = Field(default="")
