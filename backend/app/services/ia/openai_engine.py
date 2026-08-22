@@ -41,6 +41,8 @@ from app.services.ia.contrato import (
     _VALID_IMAGE_MIME_TYPES,
     _parse_json_object,
     interpretar_veredicto,
+    mensaje_clasificacion,
+    ESQUEMA_VEREDICTO,
     contexto_fecha,
 )
 
@@ -204,65 +206,109 @@ async def _extraer_con_modelo(
         return None
 
 
-async def clasificar_confirmacion(text: str) -> str:
-    """Clasifica la respuesta del operador a un pedido de confirmación.
+async def _pedir_veredicto(modelo: str, contenido: str, tope: int) -> tuple[str, Any]:
+    """Una pasada del clasificador. Devuelve (veredicto, respuesta cruda).
 
-    Fallback para cuando la lista rápida local no reconoce el modismo. Va con el
-    modelo más barato: decidir si "dale" es un sí es una tarea trivial.
+    El veredicto viene vacío si el modelo no produjo texto. El esquema
+    (`ESQUEMA_VEREDICTO`, `strict`) restringe la generación al enum, así que la
+    respuesta no puede ser una palabra inventada: o es uno de los cuatro, o no
+    hay respuesta.
+    """
+    kwargs: dict[str, Any] = {
+        "model": modelo,
+        "max_completion_tokens": tope,
+        "response_format": {"type": "json_schema", "json_schema": ESQUEMA_VEREDICTO},
+        "messages": [
+            {"role": "system", "content": _CONFIRM_CLASSIFIER_PROMPT},
+            {"role": "user", "content": contenido},
+        ],
+    }
+    # Vacío = no mandar el parámetro, igual que en la extracción: un modelo sin
+    # razonamiento rechaza `reasoning_effort`.
+    effort = get_settings().openai_effort_confirmacion
+    if effort:
+        kwargs["reasoning_effort"] = effort
 
-    **El tope tiene que darle lugar al razonamiento, no al veredicto.** La
-    respuesta es una palabra, pero `max_completion_tokens` cubre razonamiento +
-    respuesta juntos: un modelo que razona se come un cap chico pensando y
-    devuelve `content` vacío, sin error. Con el cap en 16 el clasificador
-    contestaba "no entendí" a todo lo que no estuviera en la lista rápida, y
-    cada confirmación con palabras propias ("confirmá esos 3") le cancelaba la
-    operación al operador.
+    response = await _get_client().chat.completions.create(**kwargs)
+    return interpretar_veredicto(_texto_de(response)), response
 
-    Devuelve uno de `contrato.VEREDICTOS`, interpretado por la función
-    compartida: los dos motores tienen que leer el veredicto igual.
+
+async def clasificar_confirmacion(text: str, operacion_pendiente: str = "") -> str:
+    """Decide qué hizo el operador con el pedido de confirmación.
+
+    Recibe **también la operación pendiente** —lo que el bot le preguntó—, porque
+    sin eso el clasificador juzga a ciegas: "3,5" puede ser una corrección del
+    porcentaje que está en pantalla o un dato de otra cosa, y la frase sola no
+    alcanza para saberlo.
+
+    **Un veredicto vacío no es un veredicto, es una falla**, y acá se trata como
+    tal: se reintenta con más tope y, si vuelve a pasar, se avisa por Telegram.
+    Antes se tragaba en silencio y el operador solo veía cómo se le cancelaba una
+    operación sin motivo. El tope cubre razonamiento + respuesta juntos, así que
+    quedarse corto es la forma típica de volver vacío.
 
     Returns:
-        'confirm', 'confirm_plus', 'reject' u 'other' (este último también ante
-        cualquier error: ante la duda, el mensaje se procesa como uno nuevo en
-        vez de darse por confirmado).
+        'confirm', 'confirm_plus', 'reject' u 'other'. Ante cualquier falla,
+        'other': el mensaje se procesa como uno nuevo en vez de darse por
+        confirmado — nunca se ejecuta una operación que no se confirmó.
     """
     text = (text or "").strip()
     if not text:
         return "other"
 
     _, _, modelo = _modelos()
+    contenido = mensaje_clasificacion(operacion_pendiente, text)
     try:
-        client = _get_client()
-        kwargs: dict[str, Any] = {
-            "model": modelo,
-            "max_completion_tokens": _TOPE_CONFIRMACION,
-            "messages": [
-                {"role": "system", "content": _CONFIRM_CLASSIFIER_PROMPT},
-                {"role": "user", "content": text},
-            ],
-        }
-        # Vacío = no mandar el parámetro, igual que en la extracción: un modelo
-        # sin razonamiento rechaza `reasoning_effort`.
-        effort = get_settings().openai_effort_confirmacion
-        if effort:
-            kwargs["reasoning_effort"] = effort
+        veredicto, respuesta = await _pedir_veredicto(modelo, contenido, _TOPE_CONFIRMACION)
+        if veredicto:
+            return veredicto
 
-        response = await client.chat.completions.create(**kwargs)
+        # Segundo intento con el doble de tope. Si la primera se quedó corta
+        # razonando, esta llega; si el problema es otro, lo sabemos enseguida.
+        logger.warning(
+            "El clasificador (%s) no devolvió veredicto, reintentando con más tope. Uso: %s",
+            modelo,
+            getattr(respuesta, "usage", None),
+        )
+        veredicto, respuesta = await _pedir_veredicto(modelo, contenido, _TOPE_CONFIRMACION * 2)
+        if veredicto:
+            return veredicto
 
-        veredicto = _texto_de(response)
-        if not veredicto:
-            # Sin este log la falla es invisible: el operador ve su operación
-            # cancelada y en los logs no queda nada que lo explique.
-            logger.warning(
-                "El clasificador (%s) no devolvió veredicto. Uso: %s",
-                modelo,
-                getattr(response, "usage", None),
-            )
-            return "other"
-        return interpretar_veredicto(veredicto)
+        await _alertar_sin_veredicto(modelo, text, getattr(respuesta, "usage", None))
+        return "other"
     except Exception as exc:
         logger.error("Error clasificando confirmación con OpenAI: %s", exc)
         return "other"
+
+
+async def _alertar_sin_veredicto(modelo: str, texto: str, uso: Any) -> None:
+    """Avisa por Telegram que el clasificador se quedó mudo dos veces seguidas.
+
+    Es la falla que ya costó un día de trabajo: no rompe nada visible —el bot
+    contesta— pero le cancela operaciones al operador sin dejar rastro. Que
+    aparezca en el chat de alertas es la diferencia entre enterarse hoy y
+    enterarse cuando alguien se queja.
+
+    El import va adentro para no atar el motor de IA al monitor: es una
+    dependencia de aviso, no de funcionamiento, y no puede impedir que el
+    clasificador cargue.
+    """
+    logger.error("El clasificador (%s) no devolvió veredicto ni con el tope doble.", modelo)
+    try:
+        from app.services import monitor
+
+        await monitor.alertar_error(
+            clave="clasificador-sin-veredicto",
+            titulo="El clasificador de confirmaciones no contesta",
+            detalle=(
+                f"Modelo: {modelo}\nUso: {uso}\n\n"
+                "Dos intentos sin veredicto. El bot está procesando esas respuestas "
+                "como mensajes nuevos, así que NO ejecuta lo pendiente: el operador "
+                "tiene que volver a confirmar. Revisar tope y modelo de confirmación."
+            ),
+        )
+    except Exception:  # una alerta que falla no puede tumbar una operación
+        logger.debug("No se pudo alertar por el clasificador mudo.", exc_info=True)
 
 
 async def extraer_intencion(

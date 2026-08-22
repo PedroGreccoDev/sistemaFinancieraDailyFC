@@ -85,7 +85,7 @@ def test_la_confirmacion_va_por_el_motor_de_texto(monkeypatch) -> None:
     aunque la operación pendiente haya entrado por una foto."""
     _settings(monkeypatch, texto="openai", ocr="anthropic")
 
-    async def _confirm(text):
+    async def _confirm(text, operacion_pendiente=""):
         return "confirm"
 
     monkeypatch.setattr(openai_engine, "clasificar_confirmacion", _confirm)
@@ -285,11 +285,13 @@ def test_confirm_plus_no_se_lee_como_confirm() -> None:
     assert contrato.interpretar_veredicto("confirm") == "confirm"
 
 
-def test_un_veredicto_que_no_se_entiende_cae_en_other() -> None:
-    """Ante la duda, el mensaje se procesa como uno nuevo. Lo contrario —darlo
-    por confirmado— carga una operación que el operador no confirmó."""
+def test_lo_que_no_se_entiende_no_es_un_veredicto(monkeypatch) -> None:
+    """Devuelve "" y NO "other": quien llama tiene que poder distinguir "el
+    modelo no contestó" —que se reintenta y se alerta— de "el modelo dijo que
+    era otra cosa". Confundirlos es lo que hacía que un clasificador mudo le
+    cancelara operaciones al operador sin que nadie se enterara."""
     for basura in ("", "   ", "no sé", "sí?", None):
-        assert contrato.interpretar_veredicto(basura) == "other"
+        assert contrato.interpretar_veredicto(basura) == ""
 
 
 def test_los_dos_motores_interpretan_el_veredicto_igual() -> None:
@@ -332,3 +334,95 @@ def test_el_default_es_barato_primero_y_capaz_despues(monkeypatch) -> None:
     assert s.openai_model_texto == "gpt-5-mini"
     assert s.openai_model_capaz == "gpt-5"
     assert s.openai_model_texto != s.openai_model_capaz, "sin dos modelos distintos no hay escalada"
+
+
+# ── Que no existan veredictos vacíos ───────────────────────────────────
+
+def _cliente_por_turnos(monkeypatch, respuestas: list[str | None]):
+    """Cliente falso que devuelve una respuesta distinta en cada llamada."""
+    llamadas: list[dict] = []
+
+    async def _create(**kwargs):
+        llamadas.append(kwargs)
+        i = min(len(llamadas) - 1, len(respuestas) - 1)
+        return _RespuestaFalsa(respuestas[i])
+
+    monkeypatch.setattr(
+        openai_engine,
+        "_get_client",
+        lambda: SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create))),
+    )
+    monkeypatch.setattr(
+        openai_engine,
+        "get_settings",
+        lambda: SimpleNamespace(openai_effort_confirmacion="minimal"),
+    )
+    monkeypatch.setattr(openai_engine, "_modelos", lambda: ("m-capaz", "m-texto", "m-confirm"))
+    return llamadas
+
+
+def test_un_veredicto_vacio_se_reintenta_con_mas_tope(monkeypatch) -> None:
+    """Quedarse sin tope razonando es la forma típica de volver vacío, y el
+    segundo intento con el doble alcanza. Antes se daba por perdido a la
+    primera y el operador veía su operación cancelada."""
+    llamadas = _cliente_por_turnos(monkeypatch, ["", "confirm"])
+    assert asyncio.run(openai_engine.clasificar_confirmacion("dale toda")) == "confirm"
+    assert len(llamadas) == 2, "tiene que reintentar"
+    assert llamadas[1]["max_completion_tokens"] > llamadas[0]["max_completion_tokens"]
+
+
+def test_dos_vacios_seguidos_avisan_por_telegram(monkeypatch) -> None:
+    """La falla que costó un día de trabajo no rompe nada visible: el bot
+    contesta, pero le cancela operaciones al operador sin dejar rastro. Tiene
+    que llegar al chat de alertas."""
+    _cliente_por_turnos(monkeypatch, ["", ""])
+    avisos: list[str] = []
+
+    async def _alertar(clave, titulo, detalle):
+        avisos.append(clave)
+
+    import app.services.monitor as monitor
+
+    monkeypatch.setattr(monitor, "alertar_error", _alertar)
+    assert asyncio.run(openai_engine.clasificar_confirmacion("dale toda")) == "other"
+    assert avisos == ["clasificador-sin-veredicto"]
+
+
+def test_el_modelo_solo_puede_elegir_entre_los_cuatro(monkeypatch) -> None:
+    """Con el esquema `strict` el proveedor restringe la generación al enum: no
+    hay forma de que conteste una palabra inventada."""
+    llamadas = _cliente_por_turnos(monkeypatch, ["confirm"])
+    asyncio.run(openai_engine.clasificar_confirmacion("dale"))
+    esquema = llamadas[0]["response_format"]["json_schema"]
+    assert esquema["strict"] is True
+    assert esquema["schema"]["properties"]["veredicto"]["enum"] == list(contrato.VEREDICTOS)
+
+
+# ── Que juzgue la situación, no la frase suelta ────────────────────────
+
+def test_el_clasificador_ve_la_operacion_pendiente(monkeypatch) -> None:
+    """Sin la operación a la vista, "3,5" es indistinguible de un dato nuevo.
+    Con la pregunta delante se ve que está corrigiendo el porcentaje."""
+    llamadas = _cliente_por_turnos(monkeypatch, ["other"])
+    asyncio.run(
+        openai_engine.clasificar_confirmacion(
+            "Editar la compra a 3,5", "Cargo el cheque 9000 del ICBC al 5%. ¿Confirmás?"
+        )
+    )
+    enviado = llamadas[0]["messages"][-1]["content"]
+    assert "9000" in enviado and "al 5%" in enviado, "tiene que ir la operación pendiente"
+    assert "Editar la compra a 3,5" in enviado, "y la respuesta del operador"
+
+
+def test_sin_operacion_pendiente_igual_clasifica(monkeypatch) -> None:
+    """Que no se haya registrado la pregunta no puede dejar al bot sin decidir."""
+    _cliente_por_turnos(monkeypatch, ["confirm"])
+    assert asyncio.run(openai_engine.clasificar_confirmacion("dale")) == "confirm"
+
+
+def test_los_dos_motores_piden_la_operacion_pendiente() -> None:
+    """Si un motor no la recibiera, cambiar de proveedor cambiaría la calidad de
+    las decisiones sin que nada falle."""
+    for modulo in (claude, openai_engine, motor):
+        params = inspect.signature(modulo.clasificar_confirmacion).parameters
+        assert "operacion_pendiente" in params, modulo.__name__

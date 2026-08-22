@@ -58,7 +58,7 @@ def banco(monkeypatch) -> _Banco:
 def _responde(monkeypatch, *, veredicto: str, intent: IntentResult) -> None:
     """El modelo contesta esto, sin llamar a ninguna API."""
 
-    async def _clasificar(text):
+    async def _clasificar(text, operacion_pendiente=""):
         return veredicto
 
     async def _extraer(text, image_bytes, history, media_mime_type="image/jpeg"):
@@ -180,3 +180,33 @@ def test_toda_operacion_de_escritura_tiene_nombre_en_castellano() -> None:
     }
     faltan = sorted(de_escritura - set(webhook._NOMBRE_INTENT))
     assert not faltan, f"sin nombre en castellano: {faltan}"
+
+
+def test_el_clasificador_recibe_lo_que_el_bot_pregunto(banco, monkeypatch) -> None:
+    """El webhook tiene que pasarle la operación pendiente al clasificador. Sin
+    eso juzga la frase sola: un dato suelto puede ser una corrección de lo que
+    está en pantalla o el comienzo de otra operación, y esa diferencia decide si
+    se carga plata o no."""
+    visto: dict = {}
+
+    async def _clasificar(text, operacion_pendiente=""):
+        visto["texto"] = text
+        visto["pendiente"] = operacion_pendiente
+        return "other"
+
+    async def _extraer(text, image_bytes, history, media_mime_type="image/jpeg"):
+        return IntentResult(intent="CONSULTA", respuesta_usuario="ok")
+
+    pendiente = IntentResult(
+        intent="REGISTRAR_CHEQUE",
+        confirmacion_requerida=True,
+        respuesta_usuario="Cargo el cheque 9000 del ICBC al 5%. ¿Confirmás?",
+    )
+    wa_session.set_pending_intent(TELEFONO, pendiente)
+    monkeypatch.setattr(webhook.ia_motor, "clasificar_confirmacion", _clasificar)
+    monkeypatch.setattr(webhook.ia_motor, "extraer_intencion", _extraer)
+
+    _procesar("Editar la compra a 3,5")
+
+    assert visto["texto"] == "Editar la compra a 3,5"
+    assert visto["pendiente"] == pendiente.respuesta_usuario

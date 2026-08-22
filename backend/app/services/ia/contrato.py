@@ -677,30 +677,82 @@ def _parse_json_object(raw_text: str) -> dict[str, Any]:
 # Las cuatro respuestas posibles del clasificador, en el orden en que hay que
 # buscarlas dentro del texto del modelo: "confirm_plus" CONTIENE "confirm", así
 # que buscar el corto primero se lo comería siempre.
+# Las cuatro respuestas posibles del clasificador, en el orden en que hay que
+# buscarlas dentro del texto del modelo: "confirm_plus" CONTIENE "confirm", así
+# que buscar el corto primero se lo comería siempre.
 VEREDICTOS = ("confirm_plus", "confirm", "reject", "other")
+
+# Esquema que se le impone al modelo para que la respuesta NO PUEDA ser otra
+# cosa que uno de los cuatro veredictos. Con `strict`, el proveedor restringe la
+# generación al enum: se acabaron los "creo que confirma" y los vacíos por
+# formato. Es la diferencia entre pedir amablemente y no dejar alternativa.
+ESQUEMA_VEREDICTO = {
+    "name": "veredicto_confirmacion",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {"veredicto": {"type": "string", "enum": list(VEREDICTOS)}},
+        "required": ["veredicto"],
+        "additionalProperties": False,
+    },
+}
 
 
 def interpretar_veredicto(texto: str) -> str:
-    """Normaliza la palabra que devolvió el clasificador a uno de `VEREDICTOS`.
+    """Normaliza lo que devolvió el clasificador a uno de `VEREDICTOS`.
+
+    Tolera las dos formas: el JSON del esquema (`{"veredicto": "confirm"}`) y la
+    palabra suelta, porque no todos los proveedores soportan el enum forzado.
 
     Vive acá y no en cada motor porque es la contracara del prompt de abajo: si
-    un motor lo interpretara distinto, el mismo "dale" haría cosas distintas
-    según qué proveedor esté atendiendo, y la diferencia recién se vería con el
-    operador mirando cómo se le cancela una operación.
+    un motor lo leyera distinto, el mismo "dale" haría cosas distintas según qué
+    proveedor esté atendiendo, y la diferencia recién se vería con el operador
+    mirando cómo se le cancela una operación.
+
+    Devuelve "" si no hay nada reconocible. **El vacío es una falla que hay que
+    tratar** (reintentar y avisar), no un veredicto: quien llama no puede
+    confundir "el modelo no contestó" con "el modelo dijo que era otra cosa".
     """
     limpio = (texto or "").strip().lower()
+    if not limpio:
+        return ""
     for veredicto in VEREDICTOS:
         if veredicto in limpio:
             return veredicto
-    return "other"
+    return ""
+
+
+def mensaje_clasificacion(operacion_pendiente: str, respuesta: str) -> str:
+    """Arma lo que ve el clasificador: la pregunta del bot y la respuesta.
+
+    **Sin la operación a la vista, el clasificador juzga a ciegas.** "3,5" puede
+    ser una corrección del porcentaje de la compra que está esperando confirmar
+    o un dato de una operación nueva, y leer la frase sola no alcanza para
+    saberlo. Con la pregunta delante, decide sobre la situación real y no sobre
+    el texto suelto.
+    """
+    pregunta = (operacion_pendiente or "").strip() or "(no se registró qué preguntó el bot)"
+    return (
+        "LO QUE EL BOT LE PREGUNTÓ AL OPERADOR:\n"
+        f"{pregunta}\n\n"
+        "LO QUE EL OPERADOR CONTESTÓ:\n"
+        f"{(respuesta or '').strip()}"
+    )
 
 
 _CONFIRM_CLASSIFIER_PROMPT = """
 Sos un clasificador. El operador de un sistema financiero argentino respondió a un
-pedido de confirmación de una operación (el bot le preguntó "¿Confirmar?").
+pedido de confirmación de una operación. Vas a recibir DOS cosas: lo que el bot le
+preguntó (la operación que está esperando confirmarse) y lo que el operador contestó.
 
 Tu tarea: decidir QUÉ hizo el operador con esa pregunta, interpretando jerga y
 modismos rioplatenses.
+
+**Juzgá la intención, no las palabras.** Lo que importa es qué quiere que pase con
+la operación que tiene delante, no si usó una palabra de una lista. "Está bien así"
+confirma; "pará que el monto no es ese" no. Leé la respuesta CONTRA la operación
+pendiente: un número suelto o un dato suelto casi siempre está corrigiendo alguno
+de los datos que el bot acaba de mostrarle.
 
 Ejemplos de confirmación: "dale", "de una", "obvio", "tal cual", "mandale",
 "metele", "joya", "de diez", "y dale", "afirmativo", "sí obvio", "está perfecto",
@@ -708,7 +760,7 @@ Ejemplos de confirmación: "dale", "de una", "obvio", "tal cual", "mandale",
 Ejemplos de rechazo: "ni en pedo", "ni a palos", "ni ahí", "olvidate", "dejá",
 "frená", "pará", "mejor no", "borralo", "negativo", "minga", "nones", "naa".
 
-Respondé con UNA sola palabra, sin puntuación ni nada más:
+Respondé SOLO con el veredicto, que es uno de estos cuatro:
 - "confirm" si confirma la operación y nada más.
 - "confirm_plus" si confirma la operación Y ADEMÁS pide o pregunta otra cosa.
   Ej: "sí, y decime cuánto queda debiendo", "dale, ahora cargá el otro".

@@ -249,7 +249,9 @@ async def _procesar_mensaje(
         # La lista rápida no reconoció el modismo: que lo interprete el modelo.
         if clasificacion is None:
             logger.info("Respuesta no literal de %s — consultando al modelo: %r", phone, text_content)
-            clasificacion = await ia_motor.clasificar_confirmacion(text_content)
+            clasificacion = await ia_motor.clasificar_confirmacion(
+                text_content, getattr(pending, "respuesta_usuario", "")
+            )
 
         if clasificacion == "reject":
             logger.info("Operación cancelada por %s", phone)

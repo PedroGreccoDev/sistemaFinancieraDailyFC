@@ -81,9 +81,14 @@ async def extraer_intencion(
     return await motor.extraer_intencion(text, image_bytes, history, media_mime_type)
 
 
-async def clasificar_confirmacion(text: str) -> str:
-    """Clasifica un "dale" / "no" con el motor del camino de texto.
+async def clasificar_confirmacion(text: str, operacion_pendiente: str = "") -> str:
+    """Clasifica la respuesta a un pedido de confirmación, con el motor de texto.
 
     Va con el de texto porque es lo que es: interpretar una respuesta escrita.
+
+    `operacion_pendiente` es lo que el bot le preguntó al operador. Sin eso el
+    clasificador juzga la frase sola y no la situación: un dato suelto puede ser
+    una corrección de lo que está en pantalla o el comienzo de otra operación, y
+    esa diferencia decide si se carga plata o no.
     """
-    return await motor_texto().clasificar_confirmacion(text)
+    return await motor_texto().clasificar_confirmacion(text, operacion_pendiente)

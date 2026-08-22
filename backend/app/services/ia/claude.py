@@ -20,6 +20,7 @@ from app.services.ia.contrato import (  # noqa: F401  (re-exportados a propósit
     _VALID_IMAGE_MIME_TYPES,
     _parse_json_object,
     interpretar_veredicto,
+    mensaje_clasificacion,
     contexto_fecha,
 )
 
@@ -95,45 +96,89 @@ def _loguear_uso_cache(response: Any, model: str) -> None:
 
 
 
-async def clasificar_confirmacion(text: str) -> str:
-    """Clasifica la respuesta del operador a un pedido de confirmación.
+_TOPE_CONFIRMACION = 16
 
-    Pensado como fallback cuando la lista rápida local no reconoce el modismo.
-    Usa Haiku (barato y veloz) porque es una tarea de clasificación trivial.
 
-    Devuelve uno de `contrato.VEREDICTOS`. La interpretación de la palabra que
-    contesta el modelo es compartida (`interpretar_veredicto`): si cada motor la
-    leyera a su manera, el mismo "dale" haría cosas distintas según qué
-    proveedor esté atendiendo.
+async def _pedir_veredicto(contenido: str, tope: int) -> tuple[str, Any]:
+    """Una pasada del clasificador. Devuelve (veredicto, respuesta cruda)."""
+    response = await _get_client().messages.create(
+        model=_MODEL_CONFIRMACION,
+        max_tokens=tope,
+        system=_CONFIRM_CLASSIFIER_PROMPT,
+        messages=[{"role": "user", "content": contenido}],
+    )
+    return interpretar_veredicto(_texto_de(response)), response
+
+
+async def clasificar_confirmacion(text: str, operacion_pendiente: str = "") -> str:
+    """Decide qué hizo el operador con el pedido de confirmación.
+
+    Recibe **también la operación pendiente** —lo que el bot le preguntó—, porque
+    sin eso el clasificador juzga a ciegas: "3,5" puede ser una corrección del
+    porcentaje que está en pantalla o un dato de otra cosa, y la frase sola no
+    alcanza para saberlo.
+
+    **Un veredicto vacío no es un veredicto, es una falla**: se reintenta con más
+    tope y, si vuelve a pasar, se avisa por Telegram. Haiku no razona, así que
+    acá el tope alcanza de sobra — pero el camino de recuperación es el mismo en
+    los dos motores, para que cambiar de proveedor no cambie qué pasa cuando algo
+    sale mal.
 
     Returns:
-        'confirm', 'confirm_plus', 'reject' u 'other' (este último también ante
-        cualquier error: ante la duda, el mensaje se procesa como uno nuevo en
-        vez de darse por confirmado).
+        'confirm', 'confirm_plus', 'reject' u 'other'. Ante cualquier falla,
+        'other': el mensaje se procesa como uno nuevo en vez de darse por
+        confirmado — nunca se ejecuta una operación que no se confirmó.
     """
     text = (text or "").strip()
     if not text:
         return "other"
 
+    contenido = mensaje_clasificacion(operacion_pendiente, text)
     try:
-        client = _get_client()
-        response = await client.messages.create(
-            model=_MODEL_CONFIRMACION,
-            # Haiku no razona, así que el tope es solo para el veredicto — pero
-            # "confirm_plus" son varios tokens y quedarse corto devuelve vacío,
-            # que acá significa cancelarle la operación al operador.
-            max_tokens=16,
-            system=_CONFIRM_CLASSIFIER_PROMPT,
-            messages=[{"role": "user", "content": text}],
+        veredicto, _ = await _pedir_veredicto(contenido, _TOPE_CONFIRMACION)
+        if veredicto:
+            return veredicto
+
+        logger.warning(
+            "El clasificador (%s) no devolvió veredicto, reintentando con más tope.",
+            _MODEL_CONFIRMACION,
         )
-        veredicto = _texto_de(response)
-        if not veredicto:
-            logger.warning("El clasificador (%s) no devolvió veredicto.", _MODEL_CONFIRMACION)
-            return "other"
-        return interpretar_veredicto(veredicto)
+        veredicto, respuesta = await _pedir_veredicto(contenido, _TOPE_CONFIRMACION * 4)
+        if veredicto:
+            return veredicto
+
+        await _alertar_sin_veredicto(getattr(respuesta, "usage", None))
+        return "other"
     except Exception as exc:
         logger.error("Error clasificando confirmación con Claude: %s", exc)
         return "other"
+
+
+async def _alertar_sin_veredicto(uso: Any) -> None:
+    """Avisa por Telegram que el clasificador se quedó mudo dos veces seguidas.
+
+    No rompe nada visible —el bot contesta— pero le cancela operaciones al
+    operador sin dejar rastro. El import va adentro para no atar el motor de IA
+    al monitor: es una dependencia de aviso, no de funcionamiento.
+    """
+    logger.error(
+        "El clasificador (%s) no devolvió veredicto ni con el tope ampliado.", _MODEL_CONFIRMACION
+    )
+    try:
+        from app.services import monitor
+
+        await monitor.alertar_error(
+            clave="clasificador-sin-veredicto",
+            titulo="El clasificador de confirmaciones no contesta",
+            detalle=(
+                f"Modelo: {_MODEL_CONFIRMACION}\nUso: {uso}\n\n"
+                "Dos intentos sin veredicto. El bot está procesando esas respuestas "
+                "como mensajes nuevos, así que NO ejecuta lo pendiente: el operador "
+                "tiene que volver a confirmar. Revisar tope y modelo de confirmación."
+            ),
+        )
+    except Exception:  # una alerta que falla no puede tumbar una operación
+        logger.debug("No se pudo alertar por el clasificador mudo.", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
