@@ -19,6 +19,7 @@ from app.services.ia.contrato import (  # noqa: F401  (re-exportados a propósit
     _SYSTEM_PROMPT,
     _VALID_IMAGE_MIME_TYPES,
     _parse_json_object,
+    interpretar_veredicto,
     contexto_fecha,
 )
 
@@ -95,35 +96,44 @@ def _loguear_uso_cache(response: Any, model: str) -> None:
 
 
 async def clasificar_confirmacion(text: str) -> str:
-    """Clasifica una respuesta corta del operador a un pedido de confirmación.
+    """Clasifica la respuesta del operador a un pedido de confirmación.
 
     Pensado como fallback cuando la lista rápida local no reconoce el modismo.
     Usa Haiku (barato y veloz) porque es una tarea de clasificación trivial.
 
+    Devuelve uno de `contrato.VEREDICTOS`. La interpretación de la palabra que
+    contesta el modelo es compartida (`interpretar_veredicto`): si cada motor la
+    leyera a su manera, el mismo "dale" haría cosas distintas según qué
+    proveedor esté atendiendo.
+
     Returns:
-        'confirm', 'reject' o 'unclear' (este último también ante cualquier error).
+        'confirm', 'confirm_plus', 'reject' u 'other' (este último también ante
+        cualquier error: ante la duda, el mensaje se procesa como uno nuevo en
+        vez de darse por confirmado).
     """
     text = (text or "").strip()
     if not text:
-        return "unclear"
+        return "other"
 
     try:
         client = _get_client()
         response = await client.messages.create(
             model=_MODEL_CONFIRMACION,
-            max_tokens=8,
+            # Haiku no razona, así que el tope es solo para el veredicto — pero
+            # "confirm_plus" son varios tokens y quedarse corto devuelve vacío,
+            # que acá significa cancelarle la operación al operador.
+            max_tokens=16,
             system=_CONFIRM_CLASSIFIER_PROMPT,
             messages=[{"role": "user", "content": text}],
         )
-        veredicto = _texto_de(response).lower()
-        if "confirm" in veredicto:
-            return "confirm"
-        if "reject" in veredicto:
-            return "reject"
-        return "unclear"
+        veredicto = _texto_de(response)
+        if not veredicto:
+            logger.warning("El clasificador (%s) no devolvió veredicto.", _MODEL_CONFIRMACION)
+            return "other"
+        return interpretar_veredicto(veredicto)
     except Exception as exc:
         logger.error("Error clasificando confirmación con Claude: %s", exc)
-        return "unclear"
+        return "other"
 
 
 # ---------------------------------------------------------------------------

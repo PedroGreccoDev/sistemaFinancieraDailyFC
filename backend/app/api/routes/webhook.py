@@ -108,6 +108,39 @@ def _clasificar_respuesta(text: str) -> str | None:
     return None
 
 
+# Cómo se nombra cada intent cuando hay que decirle al operador qué quedó sin
+# cargar. En castellano y en minúscula porque va dentro de una frase.
+_NOMBRE_INTENT = {
+    "REGISTRAR_CHEQUE": "la carga del cheque",
+    "VENDER_CHEQUE": "la venta del cheque",
+    "FIAR_CHEQUE": "el fiado del cheque",
+    "COBRAR_CHEQUE": "el cobro del cheque",
+    "RECHAZAR_CHEQUE": "el rechazo del cheque",
+    "NUEVO_PRESTAMO": "el préstamo",
+    "COBRAR_CUOTA": "el cobro de la cuota",
+    "COBRAR_FIADO_EFECTIVO": "el cobro del fiado",
+    "COBRAR_FIADO_CON_CHEQUE": "el cobro del fiado con cheque",
+    "COBRAR_DEUDA_CLIENTE": "el cobro al cliente",
+    "COMPENSAR_DEUDA": "la compensación",
+    "REGISTRAR_DEUDA": "la deuda",
+    "REGISTRAR_DEUDA_CLIENTE": "la deuda del cliente",
+    "MOVIMIENTO_EFECTIVO": "la operación de dólares",
+    "REGISTRAR_GASTO": "el gasto",
+    "EDITAR_OPERACION": "la corrección",
+    "REVERTIR_OPERACION": "la reversión",
+}
+
+
+def _describir(intent_result: Any) -> str:
+    """Nombre corto de una operación pendiente, para avisar que no se cargó.
+
+    Un intent sin entrada en la tabla cae en algo genérico en vez de mostrarle
+    al operador el nombre interno en mayúsculas: que aparezca un intent nuevo
+    sin dar de alta acá no puede convertir el aviso en jerga de programador.
+    """
+    return _NOMBRE_INTENT.get(getattr(intent_result, "intent", ""), "la operación anterior")
+
+
 @router.post("/whatsapp")
 async def recibir_mensaje(request: Request, background_tasks: BackgroundTasks) -> JSONResponse:
     """Endpoint que recibe los webhooks de WAHA.
@@ -201,38 +234,63 @@ async def _procesar_mensaje(
         return  # Mensaje vacío sin imagen — ignorar
 
     # ── 3c. Flujo de confirmación ─────────────────────────────────────────────
-    # Si había un intent esperando confirmación, resolver antes de llamar a Claude
+    # Si había un intent esperando confirmación, resolver antes de llamar al modelo.
+    #
+    # La regla de acá es que **un mensaje nunca se tira**. El operador escribe
+    # como habla: confirma y de paso pregunta, corrige un dato sobre la marcha, o
+    # directamente arranca con la operación siguiente sin contestar la anterior.
+    # Antes cualquiera de esas tres cosas cancelaba lo pendiente Y descartaba el
+    # mensaje nuevo, así que había que repetir todo — de ahí las ráfagas de la
+    # misma operación cargada cinco veces seguidas en los logs.
+    aviso_pendiente = ""
     pending = wa_session.get_pending_intent(phone)
     if pending is not None and msg.message_type == "text":
         clasificacion = _clasificar_respuesta(text_content)
-        # La lista rápida no reconoció el modismo: que el modelo lo interprete antes de cancelar
+        # La lista rápida no reconoció el modismo: que lo interprete el modelo.
         if clasificacion is None:
-            logger.info("Confirmación ambigua de %s — consultando al modelo: %r", phone, text_content)
-            veredicto = await ia_motor.clasificar_confirmacion(text_content)
-            clasificacion = veredicto if veredicto in ("confirm", "reject") else None
-        if clasificacion == "confirm":
-            logger.info("Operación confirmada por %s (intent=%s)", phone, pending.intent)
-            pending_foto = wa_session.get_pending_foto(phone)
-            wa_session.clear_pending_intent(phone)
-            wa_session.add_user_message(phone, text_content)
-            await _ejecutar_y_responder(
-                phone=phone, intent_result=pending, msg_at=msg.timestamp, foto=pending_foto
-            )
-            return
+            logger.info("Respuesta no literal de %s — consultando al modelo: %r", phone, text_content)
+            clasificacion = await ia_motor.clasificar_confirmacion(text_content)
+
         if clasificacion == "reject":
             logger.info("Operación cancelada por %s", phone)
             wa_session.clear_pending_intent(phone)
             wa_session.clear_session(phone)
             await wa_client.send_text(phone, "✅ Operación cancelada.")
             return
-        # Respuesta ambigua: cancela el pending y avisa al operador antes de procesar el mensaje
-        logger.info("Respuesta ambigua de %s — descartando pending intent", phone)
-        wa_session.clear_pending_intent(phone)
-        await wa_client.send_text(
-            phone,
-            "⚠️ No entendí tu respuesta. La operación anterior fue cancelada. Registrala de nuevo si querés.",
-        )
-        return
+
+        if clasificacion in ("confirm", "confirm_plus"):
+            logger.info(
+                "Operación confirmada por %s (intent=%s, veredicto=%s)",
+                phone, pending.intent, clasificacion,
+            )
+            pending_foto = wa_session.get_pending_foto(phone)
+            wa_session.clear_pending_intent(phone)
+            if clasificacion == "confirm":
+                wa_session.add_user_message(phone, text_content)
+            await _ejecutar_y_responder(
+                phone=phone, intent_result=pending, msg_at=msg.timestamp, foto=pending_foto
+            )
+            if clasificacion == "confirm":
+                return
+            # "confirm_plus": confirmó Y pidió algo más ("dale, y decime cuánto
+            # queda debiendo"). Lo pendiente ya se ejecutó; el mensaje sigue de
+            # largo por el flujo normal para que se atienda lo que falta. El
+            # historial conserva la respuesta de la operación, así que el modelo
+            # tiene con qué resolver un "y eso cuánto me deja".
+            logger.info("Además de confirmar, %s pidió algo más — sigue el flujo normal", phone)
+        else:
+            # No contestó la pregunta: mandó otra cosa. Lo pendiente NO se carga
+            # —nunca se confirmó—, pero el mensaje se procesa igual en vez de
+            # tirarse. El aviso viaja pegado a la respuesta para que el operador
+            # sepa, en el mismo mensaje, que aquello quedó sin cargar.
+            logger.info(
+                "%s no respondió a la confirmación (intent pendiente=%s) — se procesa como mensaje nuevo",
+                phone, pending.intent,
+            )
+            wa_session.clear_pending_intent(phone)
+            aviso_pendiente = (
+                f"⚠️ No confirmaste lo anterior ({_describir(pending)}), así que NO se cargó.\n\n"
+            )
 
     # ── 3d. Historial de sesión ──────────────────────────────────────────────
     history = wa_session.get_history(phone)
@@ -259,11 +317,15 @@ async def _procesar_mensaje(
         wa_session.set_pending_intent(phone, intent_result)
         wa_session.set_pending_foto(phone, foto)
         wa_session.add_assistant_message(phone, intent_result.respuesta_usuario)
-        await wa_client.send_text(phone, intent_result.respuesta_usuario)
+        await wa_client.send_text(phone, aviso_pendiente + intent_result.respuesta_usuario)
         return
 
     await _ejecutar_y_responder(
-        phone=phone, intent_result=intent_result, msg_at=msg.timestamp, foto=foto
+        phone=phone,
+        intent_result=intent_result,
+        msg_at=msg.timestamp,
+        foto=foto,
+        aviso=aviso_pendiente,
     )
 
 
@@ -272,8 +334,16 @@ async def _ejecutar_y_responder(
     intent_result: ia_motor.IntentResult,
     msg_at: datetime | None = None,
     foto: tuple[bytes, str] | None = None,
+    aviso: str = "",
 ) -> None:
-    """Ejecuta el dispatch en BD y envía la respuesta al operador."""
+    """Ejecuta el dispatch en BD y envía la respuesta al operador.
+
+    `aviso` se antepone a lo que se le manda. Lo usa el flujo de confirmación
+    para contar, en el MISMO mensaje, que la operación anterior quedó sin
+    cargar: mandarlo aparte obliga al operador a atar dos mensajes seguidos, y
+    el que importa —el que dice que algo no se cargó— es el que se pierde de
+    vista cuando abajo ya hay otro.
+    """
     db = SessionLocal()
     try:
         limpiar_sesion, respuesta = wa_dispatcher.dispatch(
@@ -286,14 +356,15 @@ async def _ejecutar_y_responder(
         wa_session.set_pending_intent(phone, intent_result)
         wa_session.set_pending_foto(phone, foto)
         wa_session.add_assistant_message(phone, exc.mensaje)
-        await wa_client.send_text(phone, exc.mensaje)
+        await wa_client.send_text(phone, aviso + exc.mensaje)
         return
     finally:
         db.close()
 
     if limpiar_sesion:
         wa_session.clear_session(phone)
-    # Siempre guardar la respuesta real en historial (no solo el respuesta_usuario de Claude).
-    # Esto permite que consultas (cartera, cliente) queden visibles para el siguiente turno.
+    # Siempre guardar la respuesta real en historial (no solo el respuesta_usuario del
+    # modelo). Esto permite que consultas (cartera, cliente) queden visibles para el
+    # siguiente turno.
     wa_session.add_assistant_message(phone, respuesta)
-    await wa_client.send_text(phone, respuesta)
+    await wa_client.send_text(phone, aviso + respuesta)

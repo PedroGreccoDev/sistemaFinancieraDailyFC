@@ -223,12 +223,12 @@ def test_un_esfuerzo_vacio_no_manda_el_parametro(monkeypatch) -> None:
     assert "reasoning_effort" not in visto
 
 
-def test_un_veredicto_vacio_queda_en_unclear_y_se_loguea(monkeypatch, caplog) -> None:
-    """Si el modelo no contesta, el operador ve su operación cancelada: que al
-    menos quede en los logs por qué."""
+def test_un_veredicto_vacio_cae_en_other_y_se_loguea(monkeypatch, caplog) -> None:
+    """Si el modelo no contesta, el mensaje se procesa como uno nuevo en vez de
+    darse por confirmado — y queda en los logs por qué."""
     _cliente_falso(monkeypatch, "")
     with caplog.at_level("WARNING"):
-        assert asyncio.run(openai_engine.clasificar_confirmacion("confirmá esos 3")) == "unclear"
+        assert asyncio.run(openai_engine.clasificar_confirmacion("confirmá esos 3")) == "other"
     assert "no devolvió veredicto" in caplog.text
 
 
@@ -247,13 +247,13 @@ def _sin_red(monkeypatch, modelos: tuple[str, str, str], efforts: tuple[str, str
     monkeypatch.setattr(
         openai_engine,
         "get_settings",
-        lambda: SimpleNamespace(openai_effort_ocr=efforts[0], openai_effort_texto=efforts[1]),
+        lambda: SimpleNamespace(openai_effort_capaz=efforts[0], openai_effort_texto=efforts[1]),
     )
     return llamados
 
 
 def test_no_escala_al_mismo_modelo(monkeypatch, caplog) -> None:
-    """`OPENAI_MODEL_TEXTO` sin definir cae en el mismo default que el de OCR:
+    """Igualar los dos modelos en Railway alcanza para caer acá:
     escalar ahí es hacer esperar al operador una segunda vez para preguntarle lo
     mismo al mismo modelo."""
     llamados = _sin_red(monkeypatch, ("gpt-5", "gpt-5", "gpt-5-mini"), ("low", "low"))
@@ -263,7 +263,7 @@ def test_no_escala_al_mismo_modelo(monkeypatch, caplog) -> None:
     assert "No se escala" in caplog.text
 
 
-def test_escala_cuando_el_de_OCR_es_otro_modelo(monkeypatch) -> None:
+def test_escala_cuando_el_capaz_es_otro_modelo(monkeypatch) -> None:
     llamados = _sin_red(monkeypatch, ("gpt-5", "gpt-5-mini", "gpt-5-mini"), ("medium", "low"))
     asyncio.run(openai_engine.extraer_intencion("cobré 100 lucas", None, []))
     assert llamados == ["gpt-5-mini", "gpt-5"]
@@ -274,3 +274,61 @@ def test_escala_si_cambia_el_esfuerzo_aunque_sea_el_mismo_modelo(monkeypatch) ->
     llamados = _sin_red(monkeypatch, ("gpt-5", "gpt-5", "gpt-5-mini"), ("high", "low"))
     asyncio.run(openai_engine.extraer_intencion("cobré 100 lucas", None, []))
     assert llamados == ["gpt-5", "gpt-5"]
+
+
+# ── Los cuatro veredictos ──────────────────────────────────────────────
+
+def test_confirm_plus_no_se_lee_como_confirm() -> None:
+    """"confirm_plus" CONTIENE "confirm": buscar el corto primero se lo comería
+    siempre, y el pedido extra del operador se perdería en silencio."""
+    assert contrato.interpretar_veredicto("confirm_plus") == "confirm_plus"
+    assert contrato.interpretar_veredicto("confirm") == "confirm"
+
+
+def test_un_veredicto_que_no_se_entiende_cae_en_other() -> None:
+    """Ante la duda, el mensaje se procesa como uno nuevo. Lo contrario —darlo
+    por confirmado— carga una operación que el operador no confirmó."""
+    for basura in ("", "   ", "no sé", "sí?", None):
+        assert contrato.interpretar_veredicto(basura) == "other"
+
+
+def test_los_dos_motores_interpretan_el_veredicto_igual() -> None:
+    """Si cada motor lo leyera a su manera, el mismo "dale" haría cosas
+    distintas según qué proveedor esté atendiendo."""
+    for modulo in (claude, openai_engine):
+        assert modulo.interpretar_veredicto is contrato.interpretar_veredicto
+
+
+def test_el_prompt_del_clasificador_ensena_los_cuatro_veredictos() -> None:
+    """El catálogo del prompt y el que sabe interpretar el código son el mismo:
+    una categoría que el prompt enseña y el código no reconoce cae en "other"
+    sin que falle nada."""
+    for veredicto in contrato.VEREDICTOS:
+        assert f'"{veredicto}"' in contrato._CONFIRM_CLASSIFIER_PROMPT, veredicto
+
+
+def test_el_prompt_prohibe_confirmar_una_correccion() -> None:
+    """Confirmar algo que el operador estaba corrigiendo carga plata mal; el
+    camino inverso solo le hace repetir el pedido."""
+    prompt = contrato._CONFIRM_CLASSIFIER_PROMPT.lower()
+    assert "corrige" in prompt and "nunca" in prompt
+
+
+def test_el_default_es_barato_primero_y_capaz_despues(monkeypatch) -> None:
+    """El régimen que pidió el dueño (2026-08-21) vive en los defaults, no en
+    una env var suelta: un deploy sin variables ya rutea como corresponde.
+
+    Texto arranca en el modelo chico y escala al capaz solo si se rinde. Si los
+    dos volvieran a ser iguales no fallaría nada — el bot se saltea la escalada
+    y sigue andando —, solo que el segundo intento dejaría de existir sin que
+    nadie se entere."""
+    from app.core.config import Settings
+
+    # Aislado del entorno a propósito: se custodia el DEFAULT del código, no lo
+    # que tenga cargado la máquina donde corre el test.
+    for var in ("OPENAI_MODEL_TEXTO", "OPENAI_MODEL_CAPAZ"):
+        monkeypatch.delenv(var, raising=False)
+    s = Settings(_env_file=None)
+    assert s.openai_model_texto == "gpt-5-mini"
+    assert s.openai_model_capaz == "gpt-5"
+    assert s.openai_model_texto != s.openai_model_capaz, "sin dos modelos distintos no hay escalada"

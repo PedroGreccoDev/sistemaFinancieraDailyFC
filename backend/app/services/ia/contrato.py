@@ -674,21 +674,51 @@ def _parse_json_object(raw_text: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Clasificador de confirmación (modismos argentinos)
 # ---------------------------------------------------------------------------
+# Las cuatro respuestas posibles del clasificador, en el orden en que hay que
+# buscarlas dentro del texto del modelo: "confirm_plus" CONTIENE "confirm", así
+# que buscar el corto primero se lo comería siempre.
+VEREDICTOS = ("confirm_plus", "confirm", "reject", "other")
+
+
+def interpretar_veredicto(texto: str) -> str:
+    """Normaliza la palabra que devolvió el clasificador a uno de `VEREDICTOS`.
+
+    Vive acá y no en cada motor porque es la contracara del prompt de abajo: si
+    un motor lo interpretara distinto, el mismo "dale" haría cosas distintas
+    según qué proveedor esté atendiendo, y la diferencia recién se vería con el
+    operador mirando cómo se le cancela una operación.
+    """
+    limpio = (texto or "").strip().lower()
+    for veredicto in VEREDICTOS:
+        if veredicto in limpio:
+            return veredicto
+    return "other"
+
+
 _CONFIRM_CLASSIFIER_PROMPT = """
 Sos un clasificador. El operador de un sistema financiero argentino respondió a un
 pedido de confirmación de una operación (el bot le preguntó "¿Confirmar?").
 
-Tu tarea: decidir si la respuesta es una CONFIRMACIÓN (sí, dale, adelante) o un
-RECHAZO (no, cancelar, frená), interpretando jerga y modismos rioplatenses.
+Tu tarea: decidir QUÉ hizo el operador con esa pregunta, interpretando jerga y
+modismos rioplatenses.
 
 Ejemplos de confirmación: "dale", "de una", "obvio", "tal cual", "mandale",
 "metele", "joya", "de diez", "y dale", "afirmativo", "sí obvio", "está perfecto",
-"sale", "andá", "hacelo", "listo el pollo".
+"sale", "andá", "hacelo", "listo el pollo", "confirma esos 3".
 Ejemplos de rechazo: "ni en pedo", "ni a palos", "ni ahí", "olvidate", "dejá",
 "frená", "pará", "mejor no", "borralo", "negativo", "minga", "nones", "naa".
 
 Respondé con UNA sola palabra, sin puntuación ni nada más:
-- "confirm" si es confirmación.
-- "reject" si es rechazo.
-- "unclear" si es ambiguo, una pregunta, o no se entiende como sí/no.
+- "confirm" si confirma la operación y nada más.
+- "confirm_plus" si confirma la operación Y ADEMÁS pide o pregunta otra cosa.
+  Ej: "sí, y decime cuánto queda debiendo", "dale, ahora cargá el otro".
+- "reject" si rechaza o cancela la operación.
+- "other" si el mensaje NO es una respuesta a la pregunta: es otra operación,
+  una consulta suelta, o una corrección de algún dato de la operación.
+  Ej: "vendí el 6457 al 5%", "cuánto le debo a Eula", "editá la compra a 3,5".
+
+REGLA CRÍTICA: si el mensaje CORRIGE, CAMBIA o CUESTIONA algún dato de la
+operación —el monto, el porcentaje, el cliente, la fecha— es "other", NUNCA
+"confirm_plus". Confirmar algo que el operador estaba corrigiendo carga plata mal
+en el sistema; mandarlo a "other" solo le hace repetir el pedido.
 """.strip()

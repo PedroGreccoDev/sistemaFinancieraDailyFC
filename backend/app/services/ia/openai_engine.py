@@ -40,6 +40,7 @@ from app.services.ia.contrato import (
     _SYSTEM_PROMPT,
     _VALID_IMAGE_MIME_TYPES,
     _parse_json_object,
+    interpretar_veredicto,
     contexto_fecha,
 )
 
@@ -63,14 +64,14 @@ def _get_client() -> AsyncOpenAI:
 
 
 def _modelos() -> tuple[str, str, str]:
-    """(modelo OCR, modelo texto, modelo confirmación) desde la config.
+    """(modelo capaz, modelo texto, modelo confirmación) desde la config.
 
     Van por env var y no hardcodeados como en `claude.py` a propósito: esto es
     un motor en evaluación, y probar otro modelo tiene que ser cambiar una
     variable en Railway, no un deploy.
     """
     s = get_settings()
-    return s.openai_model_ocr, s.openai_model_texto, s.openai_model_confirmacion
+    return s.openai_model_capaz, s.openai_model_texto, s.openai_model_confirmacion
 
 
 def _loguear_uso_cache(response: Any, model: str) -> None:
@@ -204,7 +205,7 @@ async def _extraer_con_modelo(
 
 
 async def clasificar_confirmacion(text: str) -> str:
-    """Clasifica una respuesta corta del operador a un pedido de confirmación.
+    """Clasifica la respuesta del operador a un pedido de confirmación.
 
     Fallback para cuando la lista rápida local no reconoce el modismo. Va con el
     modelo más barato: decidir si "dale" es un sí es una tarea trivial.
@@ -212,19 +213,22 @@ async def clasificar_confirmacion(text: str) -> str:
     **El tope tiene que darle lugar al razonamiento, no al veredicto.** La
     respuesta es una palabra, pero `max_completion_tokens` cubre razonamiento +
     respuesta juntos: un modelo que razona se come un cap chico pensando y
-    devuelve `content` vacío, sin error. Acá eso no es una falla visible — sale
-    por `unclear`, y `unclear` le **cancela la operación** al operador
-    (`webhook.py`). Con el cap en 16 el clasificador contestaba "no entendí" a
-    todo lo que no estuviera en la lista rápida, y cada confirmación con
-    palabras propias ("confirmá esos 3") mandaba a redictar la operación
-    entera.
+    devuelve `content` vacío, sin error. Con el cap en 16 el clasificador
+    contestaba "no entendí" a todo lo que no estuviera en la lista rápida, y
+    cada confirmación con palabras propias ("confirmá esos 3") le cancelaba la
+    operación al operador.
+
+    Devuelve uno de `contrato.VEREDICTOS`, interpretado por la función
+    compartida: los dos motores tienen que leer el veredicto igual.
 
     Returns:
-        'confirm', 'reject' o 'unclear' (este último también ante cualquier error).
+        'confirm', 'confirm_plus', 'reject' u 'other' (este último también ante
+        cualquier error: ante la duda, el mensaje se procesa como uno nuevo en
+        vez de darse por confirmado).
     """
     text = (text or "").strip()
     if not text:
-        return "unclear"
+        return "other"
 
     _, _, modelo = _modelos()
     try:
@@ -245,25 +249,20 @@ async def clasificar_confirmacion(text: str) -> str:
 
         response = await client.chat.completions.create(**kwargs)
 
-        veredicto = _texto_de(response).lower()
+        veredicto = _texto_de(response)
         if not veredicto:
-            # Sin este log la falla es invisible: el operador ve "no entendí tu
-            # respuesta, la operación fue cancelada" y en los logs no queda
-            # nada que lo explique.
+            # Sin este log la falla es invisible: el operador ve su operación
+            # cancelada y en los logs no queda nada que lo explique.
             logger.warning(
-                "El clasificador (%s) no devolvió veredicto — se cancela la operación pendiente. Uso: %s",
+                "El clasificador (%s) no devolvió veredicto. Uso: %s",
                 modelo,
                 getattr(response, "usage", None),
             )
-            return "unclear"
-        if "confirm" in veredicto:
-            return "confirm"
-        if "reject" in veredicto:
-            return "reject"
-        return "unclear"
+            return "other"
+        return interpretar_veredicto(veredicto)
     except Exception as exc:
         logger.error("Error clasificando confirmación con OpenAI: %s", exc)
-        return "unclear"
+        return "other"
 
 
 async def extraer_intencion(
@@ -280,7 +279,7 @@ async def extraer_intencion(
     dura o `DESCONOCIDO`.
     """
     settings = get_settings()
-    modelo_ocr, modelo_texto, _ = _modelos()
+    modelo_capaz, modelo_texto, _ = _modelos()
 
     user_content = _contenido_usuario(text, image_bytes, media_mime_type)
     messages: list[dict[str, Any]] = [*history, {"role": "user", "content": user_content}]
@@ -290,10 +289,10 @@ async def extraer_intencion(
         respuesta_usuario="⚠️ No pude interpretar el mensaje. ¿Podés repetirlo con más detalle?",
     )
 
-    # ── Camino OCR: foto de cheque(s) ────────────────────────────────────────
+    # ── Camino OCR: foto de cheque(s) — va al modelo capaz, sin escalada ─────
     if image_bytes is not None:
         resultado = await _extraer_con_modelo(
-            modelo_ocr, settings.openai_effort_ocr, messages
+            modelo_capaz, settings.openai_effort_capaz, messages
         )
         return resultado or _NO_INTERPRETADO
 
@@ -311,13 +310,14 @@ async def extraer_intencion(
 
     # Escalar al mismo modelo con el mismo esfuerzo es pagar otra espera para
     # volver a preguntarle lo mismo a quien ya se rindió, con el operador
-    # mirando el "escribiendo...". No es hipotético: `OPENAI_MODEL_TEXTO` sin
-    # definir cae en el mismo default que el de OCR, y ahí la escalada duplica
-    # la latencia de todos los DESCONOCIDO sin una sola chance de acertar.
-    if modelo_ocr == modelo_texto and settings.openai_effort_ocr == settings.openai_effort_texto:
+    # mirando el "escribiendo...". Con los defaults de hoy no pasa (texto es
+    # `gpt-5-mini` y el capaz es `gpt-5`), pero alcanza con igualar dos env vars
+    # en Railway para volver a caer acá, y desde afuera se ve como "el bot se
+    # puso lento" y nada más.
+    if modelo_capaz == modelo_texto and settings.openai_effort_capaz == settings.openai_effort_texto:
         logger.warning(
-            "No se escala: texto y OCR son el mismo modelo (%s, esfuerzo %r). "
-            "Configurá OPENAI_MODEL_TEXTO con uno más barato para que la escalada sirva.",
+            "No se escala: el modelo de texto y el capaz son el mismo (%s, esfuerzo %r). "
+            "Poné OPENAI_MODEL_TEXTO con uno más barato para que la escalada sirva.",
             modelo_texto,
             settings.openai_effort_texto,
         )
@@ -325,9 +325,9 @@ async def extraer_intencion(
 
     logger.info(
         "Escalando a %s (el camino de texto devolvió %s)",
-        modelo_ocr,
+        modelo_capaz,
         "una falla dura" if resultado is None else "DESCONOCIDO",
     )
-    escalado = await _extraer_con_modelo(modelo_ocr, settings.openai_effort_ocr, messages)
+    escalado = await _extraer_con_modelo(modelo_capaz, settings.openai_effort_capaz, messages)
 
     return escalado or resultado or _NO_INTERPRETADO

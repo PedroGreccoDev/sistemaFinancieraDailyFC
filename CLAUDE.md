@@ -1046,11 +1046,24 @@ avisa **por Telegram** diciendo **qué** se rompió.
     `_CONFIRM_WORDS` ("confirmá esos 3") mandaba a redictar la operación entera, sin un solo
     error en los logs. Ahora el tope es 512, el esfuerzo va por `OPENAI_EFFORT_CONFIRMACION`
     (default `minimal`) y un veredicto vacío se loguea.
-  - **La escalada del camino de texto exige que el modelo de OCR sea otro.** Si
-    `OPENAI_MODEL_TEXTO` y `OPENAI_MODEL_OCR` quedan iguales —el caso por defecto: los dos
-    caen en `gpt-5`—, escalar es hacer esperar al operador una segunda vez para preguntarle
-    lo mismo al mismo modelo. Se detecta y se saltea con un `WARNING` que dice qué
-    configurar.
+  - **El ruteo de OpenAI, en limpio** _(régimen definido por el dueño 2026-08-21)_: el
+    texto arranca en **`gpt-5-mini`** y escala a **`gpt-5`** solo si el chico se rinde; las
+    fotos siguen en Claude. Eso vive en los **defaults de `config.py`**, no en una env var
+    suelta: un deploy sin variables ya rutea como corresponde, y las variables quedan para
+    experimentar. `test_motor_ia.py` custodia que los dos modelos sigan siendo distintos —
+    si se igualan no falla nada, el bot se saltea la escalada y sigue andando, solo que el
+    segundo intento deja de existir sin que nadie se entere.
+  - **`OPENAI_MODEL_CAPAZ`, antes `OPENAI_MODEL_OCR`** (renombrado 2026-08-21). Esa ranura
+    es **el modelo más capaz configurado** y sirve para dos cosas: leer las fotos *si el OCR
+    estuviera en OpenAI*, y ser el segundo intento del camino de texto. Con el OCR en Claude
+    —que es como corre— no lee ninguna foto: el nombre viejo describía el único uso que no
+    tenía. Los dos papeles además no piden lo mismo (el de fotos necesita visión, el de
+    escalada no), así que si algún día hay que separarlos, se parten en dos variables.
+  - **La escalada exige dos modelos distintos.** Si `OPENAI_MODEL_TEXTO` y
+    `OPENAI_MODEL_CAPAZ` quedaran iguales, escalar es hacer esperar al operador una segunda
+    vez para preguntarle lo mismo al mismo modelo. Se detecta y se saltea con un `WARNING`
+    que dice qué configurar. Pasó en producción el 2026-08-21, con las dos sin definir
+    cayendo en `gpt-5`.
   - **El chequeo de salud sabe qué key hace falta.** `chequear_configuracion` (§10) marca
     `CAIDO` por la key del proveedor **que está atendiendo**: con el bot en OpenAI, la que lo
     deja mudo es `OPENAI_API_KEY` y no la de Claude. Exigir siempre la de Anthropic pondría
@@ -1104,6 +1117,39 @@ avisa **por Telegram** diciendo **qué** se rompió.
   no "cerrado por defecto"; el chequeo `configuracion` de §Monitoreo lo marca DEGRADADO.
 - Flujo: mensaje → parser → (audio: Whisper) → Claude → dispatcher → BD → respuesta WA.
 - La sesión de Claude **se limpia tras cada transacción exitosa** (Regla de Limpieza).
+- **Un mensaje nunca se tira** _(régimen definido 2026-08-21)_. Cuando hay una operación
+  esperando confirmación y el operador contesta algo que no es un "dale" pelado, el bot
+  **no cancela y descarta**: resuelve las dos cosas. El clasificador
+  (`clasificar_confirmacion`) devuelve una de cuatro (`contrato.VEREDICTOS`):
+  - `confirm` → se ejecuta lo pendiente. Es el camino de siempre.
+  - `reject` → se cancela, sin ejecutar nada.
+  - `confirm_plus` → confirmó **y además** pidió otra cosa ("dale, y decime cuánto queda
+    debiendo"): se ejecuta lo pendiente **y** el mensaje sigue por el flujo normal para que
+    se atienda lo que falta. El historial conserva la respuesta de la operación, así que el
+    modelo tiene con qué resolver un "y eso cuánto me deja".
+  - `other` → no contestó la pregunta: mandó otra operación, una consulta o una corrección.
+    Lo pendiente **no se carga** —nunca se confirmó— pero el mensaje **se procesa igual**, y
+    el aviso de que aquello quedó sin cargar viaja **pegado a la respuesta** (`aviso` en
+    `_ejecutar_y_responder`). En un mensaje aparte, el que dice que algo no se cargó es el
+    que se pierde de vista.
+
+  **La regla crítica está en el prompt: una corrección es `other`, nunca `confirm_plus`.**
+  Confirmar lo que el operador estaba corrigiendo carga plata mal en el sistema; mandarlo a
+  `other` solo le hace repetir el pedido. El error no es simétrico y por eso el prompt lo
+  dice explícito.
+
+  **Por qué importa:** hasta ese día las tres situaciones terminaban en "⚠️ No entendí tu
+  respuesta. La operación anterior fue cancelada" **y el mensaje nuevo se descartaba** —había
+  un `return` que nunca lo procesaba—. El bot estaba diseñado para alguien que contesta `dale`
+  y nada más; el operador escribe como habla, y cada vez que lo hacía el bot lo castigaba con
+  una cancelación. En los logs se ve la misma venta reintentada seis veces en tres minutos.
+  Siete frases reales de ese día (`Confirma esos 3`, `Editar la compra a 3,5`, `Vendí cheques
+  6457 y 6387 al 5%`, `Si, decime cuánto queda debiendo`…) son hoy los casos de
+  `test_bot_confirmacion.py`.
+
+  El aviso nombra la operación en castellano (`_NOMBRE_INTENT` en `webhook.py`): un intent de
+  escritura nuevo se da de alta ahí, o el operador vería `MOVIMIENTO_EFECTIVO` por WhatsApp.
+  Hay un test que compara ese catálogo contra los intents de escritura.
 - Los **pasivos** se pueden registrar desde el bot via `REGISTRAR_DEUDA` —incluida la plata que le prestan al negocio, con `ingreso_caja` (§5)—; la cancelación es solo desde el panel web.
 - Los **gastos operativos** sí son registrables desde el bot via intent `REGISTRAR_GASTO` (editables por concepto/hora/monto desde el chat).
 - Los **fiados** son operables desde el bot: `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
@@ -1308,6 +1354,15 @@ avisa **por Telegram** diciendo **qué** se rompió.
     confirmaciones deje lugar al razonamiento —un cap ajustado al veredicto vuelve vacío y
     eso le **cancela la operación** al operador— y que no se escale a un modelo idéntico al
     que ya se rindió.
+  - **`test_bot_confirmacion.py`** — el flujo de confirmación (§Bot: "un mensaje nunca se
+    tira"). Los casos son **mensajes reales** de los logs del 2026-08-21, con la hora en que
+    ocurrieron: una operación nueva mientras hay algo pendiente, una corrección, un "sí"
+    con un pedido pegado y una consulta suelta. Custodia que lo pendiente no se ejecute
+    cuando el operador lo estaba corrigiendo, que el mensaje nuevo se procese igual, que el
+    aviso viaje en el MISMO mensaje que la respuesta —también cuando lo nuevo pide
+    confirmación— y que las 17 operaciones de escritura tengan nombre en castellano en
+    `_NOMBRE_INTENT`. Ejercita el pipeline entero del webhook con el modelo, el dispatcher
+    y la base reemplazados por registros en memoria.
   - **`test_bot_consultas.py`** — el intent genérico `CONSULTA` (§Bot): que el catálogo de
     tipos del prompt y el de la tabla `_CONSULTAS` sean **el mismo en las dos direcciones**
     (un tipo enseñado sin handler no falla en ningún lado, solo no anda), que los tres

@@ -46,17 +46,23 @@ class Settings(BaseSettings):
     # no cambia de motor solo, y volver atrás es cambiar una variable.
     ia_provider_texto: str = Field(default="anthropic")
     ia_provider_ocr: str = Field(default="anthropic")
-
     # Modelos de OpenAI, por env var y no hardcodeados como los de Claude: esto
     # es un motor en evaluación y probar otro modelo tiene que ser cambiar una
-    # variable en Railway, no un deploy.
-    openai_model_ocr: str = Field(default="gpt-5")
-    openai_model_texto: str = Field(default="gpt-5")
+    # variable en Railway, no un deploy. Los defaults son el régimen querido, no
+    # un mínimo: un deploy sin variables ya rutea como corresponde.
+    #
+    # "CAPAZ" y no "OCR" (renombrado 2026-08-21): esta ranura es **el modelo más
+    # capaz configurado**, y se usa para dos cosas — leer las fotos, si el OCR
+    # estuviera en OpenAI, y ser el segundo intento del camino de texto. Se
+    # llamaba `OPENAI_MODEL_OCR` y el nombre mentía: con el OCR en Claude (que es
+    # como corre hoy) no lee ninguna foto, solo recibe las escaladas del texto.
+    openai_model_texto: str = Field(default="gpt-5-mini")
+    openai_model_capaz: str = Field(default="gpt-5")
     openai_model_confirmacion: str = Field(default="gpt-5-mini")
     # Esfuerzo de razonamiento ("minimal"|"low"|"medium"|"high"). Vacío = no se
     # manda el parámetro, para poder probar un modelo que no lo soporte.
-    openai_effort_ocr: str = Field(default="medium")
     openai_effort_texto: str = Field(default="low")
+    openai_effort_capaz: str = Field(default="medium")
     # El clasificador de confirmaciones: "minimal" porque decidir si "dale" es
     # un sí no necesita pensarse, y lo que se razone sale del mismo tope que la
     # respuesta (ver `_TOPE_CONFIRMACION` en services/ia/openai_engine.py).
