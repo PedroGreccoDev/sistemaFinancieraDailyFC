@@ -10,8 +10,12 @@ import { apiFetch } from './client'
 export interface ConfiguracionApertura {
   /** Hasta este día inclusive, los cheques cargados son cartera preexistente. */
   fecha_corte_carga_inicial: string | null
+  /** Billetes en mano al arrancar (las columnas viejas son el EFECTIVO). */
   saldo_inicial_ars: string | null
   saldo_inicial_usd: string | null
+  /** Lo que había depositado en la cuenta. */
+  saldo_inicial_ars_transf: string | null
+  saldo_inicial_usd_transf: string | null
   /** $/USD promedio al que se consiguió el stock inicial de dólares. */
   cotizacion_usd_inicial: string | null
   /** Día al que corresponde el efectivo, no el día en que se cargó. */
@@ -40,8 +44,12 @@ export const definirFechaCorte = (payload: {
   })
 
 export const definirSaldoInicial = (payload: {
+  /** Billetes en mano. */
   saldo_ars: number
   saldo_usd: number
+  /** Lo depositado en la cuenta. Opcionales: valen cero si no se mandan. */
+  saldo_ars_transf?: number
+  saldo_usd_transf?: number
   /** Obligatoria si saldo_usd > 0: sin ella los dólares no se pueden vender. */
   cotizacion_usd?: number | null
   fecha: string

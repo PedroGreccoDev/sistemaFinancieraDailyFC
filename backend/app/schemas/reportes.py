@@ -21,8 +21,25 @@ class CajaLinea(BaseModel):
     monto: Decimal
     detalle: str | None
     ganancia: Decimal | None  # solo VENTA_USD
-    medio_pago: str | None  # solo PAGO_PASIVO: EFECTIVO | TRANSFERENCIA
+    medio_pago: str  # por cuál de las dos cajas pasó: EFECTIVO | TRANSFERENCIA
     cotizacion: Decimal | None  # $/USD si el pago cruzó monedas
+
+
+class CajaPorMedio(BaseModel):
+    """Una de las dos cajas paralelas de una moneda (§Caja paralela).
+
+    El efectivo se cuadra contra los billetes del cajón y la transferencia contra
+    el resumen del banco, así que cada una lleva sus propios totales y su propio
+    saldo. Sumarlas da los totales de la moneda, pero es la suma la que no se
+    puede contar contra nada.
+    """
+
+    medio: str
+    ingresos_total: Decimal
+    egresos_total: Decimal
+    neto: Decimal
+    saldo_apertura: Decimal = Decimal("0.00")
+    saldo_cierre: Decimal = Decimal("0.00")
 
 
 class CajaMoneda(BaseModel):
@@ -39,6 +56,11 @@ class CajaMoneda(BaseModel):
     neto: Decimal
     saldo_apertura: Decimal = Decimal("0.00")
     saldo_cierre: Decimal = Decimal("0.00")
+    # Las dos cajas por separado. Los totales de arriba son su suma: sirven para
+    # leer el flujo del negocio, pero **el cierre del día se hace contra estos**
+    # —contando billetes de un lado y mirando el banco del otro—.
+    efectivo: CajaPorMedio | None = None
+    transferencia: CajaPorMedio | None = None
     lineas: list[CajaLinea]
 
 
@@ -75,7 +97,9 @@ class MovimientoUnificadoRead(BaseModel):
     descripcion: str
     monto: Decimal
     ganancia: Decimal | None  # solo VENTA_USD
-    medio_pago: str | None  # solo PAGO_PASIVO: EFECTIVO | TRANSFERENCIA
+    # Null solo en los eventos sin efectivo (un cheque que entra a cartera):
+    # no pasaron por ninguna de las dos cajas.
+    medio_pago: str | None
     cotizacion: Decimal | None  # $/USD si el pago cruzó monedas
     referencia_tipo: str | None
     referencia_id: UUID | None

@@ -125,6 +125,8 @@ _NOMBRE_INTENT = {
     "COMPENSAR_DEUDA": "la compensación",
     "REGISTRAR_DEUDA": "la deuda",
     "REGISTRAR_DEUDA_CLIENTE": "la deuda del cliente",
+    "PAGAR_PASIVO": "el pago de la deuda",
+    "TRASPASO_CAJA": "el movimiento entre cajas",
     "MOVIMIENTO_EFECTIVO": "la operación de dólares",
     "REGISTRAR_GASTO": "el gasto",
     "EDITAR_OPERACION": "la corrección",

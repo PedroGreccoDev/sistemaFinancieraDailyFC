@@ -49,6 +49,11 @@ class FakeDB:
     def add(self, obj: object) -> None:
         self.agregados.append(obj)
 
+    def get(self, _modelo, _pk):
+        """Sin configuración de apertura no hay corte, así que todo es operación
+        normal. Lo consulta `es_anterior_al_corte` (§Reset de caja)."""
+        return None
+
 
 class FakeQuery:
     """Query encadenable que cuenta los filtros y si se llamó a `delete`."""

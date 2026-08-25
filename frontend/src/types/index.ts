@@ -85,6 +85,22 @@ export interface CajaLinea {
   cotizacion: string | null
 }
 
+/**
+ * Una de las dos cajas paralelas de una moneda.
+ *
+ * El efectivo se cuadra contando billetes y la transferencia mirando el banco:
+ * son realidades distintas, así que cada una lleva su propio saldo. La suma
+ * sirve para leer el flujo del negocio, pero no se puede contar contra nada.
+ */
+export interface CajaPorMedio {
+  medio: MedioPago
+  ingresos_total: string
+  egresos_total: string
+  neto: string
+  saldo_apertura: string
+  saldo_cierre: string
+}
+
 export interface CajaMoneda {
   moneda: string
   ingresos_total: string
@@ -95,6 +111,9 @@ export interface CajaMoneda {
   saldo_apertura: string
   /** Lo que queda al cerrar: apertura + neto. */
   saldo_cierre: string
+  /** Las dos cajas por separado. El cierre del día se hace contra estas. */
+  efectivo?: CajaPorMedio | null
+  transferencia?: CajaPorMedio | null
   lineas: CajaLinea[]
 }
 
@@ -123,7 +142,7 @@ export interface CuotaCobradaHistorialItem {
 // cheques a cartera), venga del bot o del panel. Lo sirve GET /reportes/movimientos.
 export type MovimientoGrupo =
   | 'COBROS' | 'CHEQUES' | 'DIVISAS' | 'GASTOS' | 'OTORGAMIENTOS' | 'PASIVOS'
-  | 'APERTURA' | 'AJUSTES' | 'OTROS'
+  | 'APERTURA' | 'AJUSTES' | 'TRASPASOS' | 'OTROS'
 export type MovimientoFlujo = 'INGRESO' | 'EGRESO' | 'NEUTRO'
 
 export interface MovimientoUnificado {
@@ -273,4 +292,31 @@ export interface DolarBlue {
   compra: number
   venta: number
   fechaActualizacion: string
+}
+
+
+// ── Traspaso entre cajas (§Las dos cajas) ────────────────────────────────
+/**
+ * Plata que pasa de una caja a la otra: un depósito o una extracción.
+ *
+ * No cambia lo que el negocio tiene —la misma plata cambia de bolsillo— pero sí
+ * mueve los dos saldos, en sentidos opuestos.
+ */
+export interface Traspaso {
+  id: string
+  fecha: string
+  moneda: Moneda
+  monto: string
+  origen: MedioPago
+  destino: MedioPago
+  detalle: string | null
+}
+
+export interface TraspasoCreate {
+  monto: string
+  moneda: Moneda
+  origen: MedioPago
+  destino: MedioPago
+  fecha?: string | null
+  detalle?: string | null
 }

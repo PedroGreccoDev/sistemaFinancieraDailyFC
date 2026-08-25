@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { AjusteCaja, AjusteCajaMotivo, Moneda } from '../types'
+import type { AjusteCaja, AjusteCajaMotivo, MedioPago, Moneda } from '../types'
 
 export interface AjusteCajaCreate {
   fecha: string
@@ -8,6 +8,8 @@ export interface AjusteCajaCreate {
   tipo: 'INGRESO' | 'EGRESO'
   motivo: AjusteCajaMotivo
   monto: number
+  /** Cuál de las dos cajas se corrige. Efectivo si no se manda. */
+  medio_pago?: MedioPago
   /** Obligatoria cuando el ajuste SUMA dólares: costo ($/USD) del lote FIFO. */
   cotizacion_usd?: number | null
   descripcion?: string | null

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.db.models import Moneda, MovimientoEfectivoTipo
+from app.db.models import MedioPago, Moneda, MovimientoEfectivoTipo
 
 
 class MovimientoEfectivoCreate(BaseModel):
@@ -27,6 +27,12 @@ class MovimientoEfectivoCreate(BaseModel):
     monto_abonado: Decimal | None = Field(
         default=None, ge=0, max_digits=18, decimal_places=2
     )
+    # Una operación de divisas mueve **dos** cajas, y no tienen por qué ser la
+    # misma: se paga por transferencia y se reciben los billetes en mano, o al
+    # revés. `medio_pago` es la pata en pesos; `medio_usd`, la de los dólares
+    # (§Caja paralela).
+    medio_pago: MedioPago = MedioPago.EFECTIVO
+    medio_usd: MedioPago = MedioPago.EFECTIVO
 
     @model_validator(mode="after")
     def validate_monto_abonado(self) -> "MovimientoEfectivoCreate":

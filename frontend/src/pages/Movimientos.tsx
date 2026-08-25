@@ -7,12 +7,14 @@ import { fmtUSD, fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { SkeletonRows } from '../components/Skeleton'
-import type { MovimientoEfectivo, MovimientoUnificado, MovimientoGrupo, MovimientoFlujo } from '../types'
+import type { MedioPago, MovimientoEfectivo, MovimientoFlujo, MovimientoGrupo, MovimientoUnificado } from '../types'
 import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
 import ModalEliminar from '../components/ModalEliminar'
 import ModalAjusteCaja from '../components/ModalAjusteCaja'
+import ModalTraspaso from '../components/ModalTraspaso'
 import ClienteSelect from '../components/ClienteSelect'
+import SelectorMedioPago from '../components/SelectorMedioPago'
 
 type GrupoFiltro = 'TODOS' | MovimientoGrupo
 type FlujoFiltro = 'TODOS' | MovimientoFlujo
@@ -42,6 +44,10 @@ function ModalNuevaDivisa({ onClose, onSuccess }: { onClose: () => void; onSucce
   const [observaciones, setObservaciones] = useState('')
   const [aDeber, setADeber] = useState(false)
   const [montoAbonado, setMontoAbonado] = useState('')
+  // Las dos patas por separado: los pesos pueden ir por transferencia y los
+  // billetes cambiar de mano, que es el caso más común de la calle.
+  const [medioPesos, setMedioPesos] = useState<MedioPago>('EFECTIVO')
+  const [medioUsd, setMedioUsd] = useState<MedioPago>('EFECTIVO')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
@@ -73,6 +79,8 @@ function ModalNuevaDivisa({ onClose, onSuccess }: { onClose: () => void; onSucce
         cotizacion_aplicada: cotizNum,
         cliente_id: clienteId || null,
         observaciones: observaciones.trim() || null,
+        medio_pago: medioPesos,
+        medio_usd: medioUsd,
         // Sin la marca no viaja el campo: el backend lo lee como compra pagada.
         ...(debiendo ? { monto_abonado: abonadoNum } : {}),
       })
@@ -106,6 +114,23 @@ function ModalNuevaDivisa({ onClose, onSuccess }: { onClose: () => void; onSucce
             <div><label style={LABEL_STYLE}>Cantidad USD</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required autoFocus placeholder="0.00" style={INPUT_STYLE} /></div>
             <div><label style={LABEL_STYLE}>Cotización ($/USD)</label><input type="number" step="0.000001" min="0.000001" value={cotiz} onChange={(e) => setCotiz(e.target.value)} required placeholder="0.00" style={INPUT_STYLE} /></div>
           </div>
+          {/* Dos controles y no uno: la operación toca las dos cajas, y en una
+              compra podés transferir los pesos y recibir los billetes en mano.
+              Un solo medio para las dos patas mandaría los dólares a la caja
+              equivocada sin que nada avise. */}
+          {abonadoNum > 0 && (
+            <SelectorMedioPago
+              valor={medioPesos}
+              onChange={setMedioPesos}
+              label={esCompra ? '¿Cómo pagaste los pesos?' : '¿Cómo te pagaron los pesos?'}
+            />
+          )}
+          <SelectorMedioPago
+            valor={medioUsd}
+            onChange={setMedioUsd}
+            label={esCompra ? '¿Cómo recibiste los dólares?' : '¿Cómo entregaste los dólares?'}
+            ayuda="Los dólares casi siempre son billetes; marcá transferencia solo si se movieron por cuenta."
+          />
           {pesos > 0 && (
             <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.6rem 0.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontFamily: FM, fontSize: '0.78rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -237,6 +262,9 @@ const GRUPO_CONFIG: Record<MovimientoGrupo, { label: string; color: string; bg: 
   PASIVOS:       { label: 'Pasivos',       color: '#f87171', bg: 'rgba(248,113,113,0.13)', initial: 'P' },
   APERTURA:      { label: 'Apertura',      color: '#facc15', bg: 'rgba(250,204,21,0.13)',  initial: 'A' },
   AJUSTES:       { label: 'Ajustes',       color: '#2dd4bf', bg: 'rgba(45,212,191,0.13)',  initial: '±' },
+  // Depósitos y extracciones: la plata cambia de caja sin entrar ni salir, así
+  // que sus dos líneas se cancelan solas en el neto del día (§Las dos cajas).
+  TRASPASOS:     { label: 'Entre cajas',   color: '#818cf8', bg: 'rgba(129,140,248,0.13)', initial: '⇄' },
   OTROS:         { label: 'Otros',         color: '#94a3b8', bg: 'rgba(148,163,184,0.13)', initial: '•' },
 }
 
@@ -246,6 +274,7 @@ const cfgGrupo = (g: MovimientoGrupo) => GRUPO_CONFIG[g] ?? GRUPO_CONFIG.OTROS
 
 // Etiqueta corta de cada categoría, para la línea secundaria de detalle.
 const CATEGORIA_LABEL: Record<string, string> = {
+  TRASPASO_CAJA:         'Entre cajas',
   COBRO_CUOTA:           'Cobro de cuota',
   COBRO_FIADO:           'Cobro de fiado',
   COBRO_DEUDA:           'Cobro de deuda',
@@ -305,6 +334,8 @@ export default function Movimientos() {
   const [editarDivisaId, setEditarDivisaId] = useState<string | null>(null)
   const [eliminarDivisaId, setEliminarDivisaId] = useState<string | null>(null)
   const [ajustandoCaja, setAjustandoCaja] = useState(false)
+  // Depósitos y extracciones: la plata cambia de caja sin entrar ni salir.
+  const [traspasando, setTraspasando] = useState(false)
   const [nuevaDivisa, setNuevaDivisa] = useState(false)
   const [eliminarAjusteId, setEliminarAjusteId] = useState<string | null>(null)
   const queryClient = useQueryClient()
@@ -460,6 +491,13 @@ export default function Movimientos() {
             style={{ ...btnSolid('primary'), padding: '0.45rem 0.9rem', fontSize: '0.78rem', whiteSpace: 'nowrap' }}
           >
             + Operación USD
+          </button>
+          <button
+            type="button"
+            onClick={() => setTraspasando(true)}
+            style={{ ...btnBordered('neutral'), padding: '0.45rem 0.9rem', fontSize: '0.78rem', whiteSpace: 'nowrap' }}
+          >
+            ⇄ Entre cajas
           </button>
           <button
             type="button"
@@ -704,6 +742,12 @@ export default function Movimientos() {
         <ModalAjusteCaja
           onClose={() => setAjustandoCaja(false)}
           onSuccess={handleAjusteCaja}
+        />
+      )}
+      {traspasando && (
+        <ModalTraspaso
+          onClose={() => setTraspasando(false)}
+          onSuccess={() => { setTraspasando(false); handleAjusteCaja() }}
         />
       )}
       {eliminarAjusteId && (

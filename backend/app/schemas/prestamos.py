@@ -6,7 +6,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.db.models import CuotaEstado, FrecuenciaCuotas, Moneda, PrestamoEstado
+from app.db.models import (
+    CuotaEstado,
+    FrecuenciaCuotas,
+    MedioPago,
+    Moneda,
+    PrestamoEstado,
+)
 from app.schemas.cheques import ChequeRead
 
 
@@ -17,6 +23,8 @@ class PrestamoBase(BaseModel):
     frecuencia: FrecuenciaCuotas
     total_a_cobrar: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     fecha_inicio: date | None = None
+    # Por cuál de las dos cajas paralelas pasó la plata (§Caja paralela).
+    medio_pago: MedioPago = MedioPago.EFECTIVO
 
     @model_validator(mode="after")
     def validate_total(self) -> PrestamoBase:
@@ -43,6 +51,7 @@ class PrestamoUpdate(BaseModel):
 
     credito: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=2)
     moneda: Moneda | None = None
+    medio_pago: MedioPago | None = None
     cuotas: int | None = Field(default=None, gt=0)
     frecuencia: FrecuenciaCuotas | None = None
     total_a_cobrar: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=2)
@@ -84,6 +93,8 @@ class PrestamoRead(BaseModel):
 
 class CuotaCobroRequest(BaseModel):
     fecha_cobro: date | None = None
+    # Por cuál de las dos cajas paralelas pasó la plata (§Caja paralela).
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     # A cuánto entran al stock vendible los dólares cobrados (§Stock de dólares).
     # Obligatoria cuando el préstamo es en USD: esa cuota hace entrar dólares y sin
     # costo declarado no se van a poder vender. En pesos no se usa.
@@ -103,6 +114,8 @@ class PrestamoPagoRequest(BaseModel):
 
     monto_pagado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     moneda_pago: Moneda
+    # Por cuál de las dos cajas paralelas pasó la plata (§Caja paralela).
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     # A cuánto entran al stock vendible los dólares cobrados (§Stock de dólares).
     # Obligatoria al cobrar en USD **un préstamo que también es en USD**: ahí no
@@ -133,6 +146,8 @@ class CuotaCobrarConChequeResponse(BaseModel):
 class CuotasLoteCobrarRequest(BaseModel):
     cuota_ids: list[UUID] = Field(min_length=1)
     fecha_cobro: date | None = None
+    # Por cuál de las dos cajas paralelas pasó la plata (§Caja paralela).
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     # Costo de entrada al stock de los dólares cobrados; ver CuotaCobroRequest.
     cotizacion_stock: Decimal | None = Field(
         default=None, gt=0, max_digits=18, decimal_places=6

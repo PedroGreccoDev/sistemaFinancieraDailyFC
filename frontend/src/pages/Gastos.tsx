@@ -6,10 +6,11 @@ import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconPlus } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
-import type { GastoOperativo, Moneda } from '../types'
+import type { GastoOperativo, MedioPago, Moneda } from '../types'
 import DateRangePicker from '../components/DateRangePicker'
 import DropdownFilter from '../components/DropdownFilter'
 import ModalEliminar from '../components/ModalEliminar'
+import SelectorMedioPago from '../components/SelectorMedioPago'
 
 type PresetFecha = 'HOY' | 'SEMANA' | 'MES' | 'PERSONALIZADO'
 
@@ -33,6 +34,9 @@ function ModalNuevoGasto({ onClose, onSuccess }: { onClose: () => void; onSucces
   const [concepto, setConcepto] = useState('')
   const [monto, setMonto] = useState('')
   const [moneda, setMoneda] = useState<Moneda>('ARS')
+  // De qué caja sale el gasto. La nafta y el almuerzo salen del cajón; el
+  // alquiler suele ir por transferencia.
+  const [medioPago, setMedioPago] = useState<MedioPago>('EFECTIVO')
   const [fechaOperacion, setFechaOperacion] = useState('')
   const [observaciones, setObservaciones] = useState('')
   const [loading, setLoading] = useState(false)
@@ -48,6 +52,7 @@ function ModalNuevoGasto({ onClose, onSuccess }: { onClose: () => void; onSucces
         concepto: concepto.trim(),
         monto: parseFloat(monto),
         moneda,
+        medio_pago: medioPago,
         fecha_operacion: fechaOperacion || null,
         observaciones: observaciones.trim() || null,
       })
@@ -70,6 +75,7 @@ function ModalNuevoGasto({ onClose, onSuccess }: { onClose: () => void; onSucces
             <div><label style={LABEL_STYLE}>Monto</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} /></div>
             <div><label style={LABEL_STYLE}>Moneda</label><select value={moneda} onChange={(e) => setMoneda(e.target.value as Moneda)} style={{ ...INPUT_STYLE, cursor: 'pointer' }}><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
           </div>
+          <SelectorMedioPago valor={medioPago} onChange={setMedioPago} label="¿Cómo lo pagaste?" />
           <div><label style={LABEL_STYLE}>Fecha <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional, hoy por defecto)</span></label><input type="date" value={fechaOperacion} onChange={(e) => setFechaOperacion(e.target.value)} style={INPUT_STYLE} /></div>
           <div><label style={LABEL_STYLE}>Observaciones <span style={{ textTransform: 'none', fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label><textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} rows={2} style={{ ...INPUT_STYLE, resize: 'none' }} /></div>
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}

@@ -14,6 +14,8 @@ class ConfiguracionAperturaRead(BaseModel):
     fecha_corte_carga_inicial: date | None = None
     saldo_inicial_ars: Decimal | None = None
     saldo_inicial_usd: Decimal | None = None
+    saldo_inicial_ars_transf: Decimal | None = None
+    saldo_inicial_usd_transf: Decimal | None = None
     cotizacion_usd_inicial: Decimal | None = None
     fecha_saldo_inicial: date | None = None
     definido_por: str | None = None
@@ -37,14 +39,21 @@ class FechaCorteResponse(BaseModel):
 
 
 class SaldoInicialRequest(BaseModel):
-    """Efectivo en mano al arrancar, con el día al que corresponde.
+    """Saldos al arrancar, con el día al que corresponden.
 
-    `fecha` es el día del efectivo, NO el día en que se carga: se puede tipear
+    Son cuatro, uno por caja: `saldo_ars`/`saldo_usd` son los **billetes en
+    mano** y los `_transf`, lo que había **depositado** (§Caja paralela). Los de
+    transferencia son opcionales y valen cero si no se mandan, para que arrancar
+    sin cuenta bancaria siga siendo dos números.
+
+    `fecha` es el día de esos saldos, NO el día en que se cargan: se puede tipear
     una semana después y el reporte igual cierra bien para atrás.
     """
 
     saldo_ars: Decimal = Field(ge=0)
     saldo_usd: Decimal = Field(ge=0)
+    saldo_ars_transf: Decimal = Field(default=Decimal("0"), ge=0)
+    saldo_usd_transf: Decimal = Field(default=Decimal("0"), ge=0)
     # $/USD promedio al que se consiguieron esos dólares. Obligatoria si
     # `saldo_usd > 0`: sin ella no se puede armar el lote, y sin lote los dólares
     # quedan en la caja pero no se pueden vender.

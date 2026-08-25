@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.models import DeudaSimpleEstado, Moneda
+from app.db.models import DeudaSimpleEstado, MedioPago, Moneda
 from app.schemas.cheques import ChequeRead
 # El vuelto de un cheque "de más" se resuelve igual que en pasivos (§5): o se
 # paga en efectivo, o el negocio queda debiendo. Se reusa el mismo tipo para que
@@ -24,6 +24,8 @@ class DeudaSimpleCreate(BaseModel):
     concepto: str = Field(min_length=1)
     monto: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     moneda: Moneda
+    # Por cuál de las dos cajas salió la plata que se le entregó (§Caja paralela).
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     fecha: date | None = None
     observaciones: str | None = None
 
@@ -51,6 +53,8 @@ class DeudaSimplePagoRequest(BaseModel):
 
     monto_cobrado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     moneda_pago: Moneda
+    # Por cuál de las dos cajas entró la plata (§Caja paralela).
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     # A cuánto entran al stock vendible los dólares cobrados (§Stock de dólares).
     # Obligatoria al cobrar en USD **una deuda que también es en USD**: ahí no hay
@@ -78,6 +82,8 @@ class DeudaSimpleCobroClienteCreate(BaseModel):
     moneda_deuda: Moneda
     monto_cobrado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     moneda_pago: Moneda
+    # Por cuál de las dos cajas entró la plata (§Caja paralela).
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     # Costo de entrada al stock de los dólares cobrados; ver DeudaSimplePagoRequest.
     cotizacion_stock: Decimal | None = Field(

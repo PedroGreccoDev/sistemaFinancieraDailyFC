@@ -46,6 +46,7 @@ from app.db.models import (
     DeudaSimpleEstado,
     Fiado,
     FiadoEstado,
+    MedioPago,
     Moneda,
     Prestamo,
     PrestamoEstado,
@@ -283,12 +284,17 @@ def _imputar(
     monto_caja: Decimal | None,
     moneda_pago: Moneda,
     cotizacion: Decimal | None,
+    medio_pago: MedioPago = MedioPago.EFECTIVO,
     cotizacion_stock: Decimal | None = None,
 ) -> RenglonImputado:
     """Delega la imputación al módulo dueño del renglón y arma su resultado.
 
     Cada módulo asienta su propia línea de caja (categoría y referencia propias)
-    y ninguno commitea: el commit lo da el cobro consolidado."""
+    y ninguno commitea: el commit lo da el cobro consolidado.
+
+    `medio_pago` baja igual a los tres: un cobro entra por una sola caja, y si un
+    renglón lo tomara por otra el mismo billete quedaría contado en los dos
+    saldos (§Caja paralela)."""
     if renglon.tipo == "fiado":
         cancelado = svc_fiados.imputar_cobro(
             db,
@@ -298,6 +304,7 @@ def _imputar(
             monto_caja=monto_caja,
             moneda_pago=moneda_pago,
             cotizacion=cotizacion,
+            medio_pago=medio_pago,
         )
         restante = renglon.obj.saldo_pendiente
     elif renglon.tipo == "deuda_simple":
@@ -310,6 +317,7 @@ def _imputar(
             monto_caja=monto_caja,
             moneda_pago=moneda_pago,
             cotizacion=cotizacion,
+            medio_pago=medio_pago,
             cotizacion_stock=cotizacion_stock,
         )
         restante = renglon.obj.saldo_pendiente
@@ -322,6 +330,7 @@ def _imputar(
             monto_caja=monto_caja,
             moneda_pago=moneda_pago,
             cotizacion=cotizacion,
+            medio_pago=medio_pago,
             cotizacion_stock=cotizacion_stock,
         )
         restante = saldo_prestamo(renglon.obj)
@@ -395,6 +404,7 @@ def cobrar_cliente(
                 fecha=fecha,
                 monto_caja=plata,
                 moneda_pago=payload.moneda_pago,
+                medio_pago=payload.medio_pago,
                 cotizacion=cotizacion,
                 cotizacion_stock=payload.cotizacion_stock,
             )

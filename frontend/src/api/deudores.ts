@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Cheque, Moneda } from '../types'
+import type { Cheque, MedioPago, Moneda } from '../types'
 import type { VueltoModo } from './deudas_simples'
 
 /**
@@ -45,6 +45,8 @@ export interface CobrarClientePayload {
   moneda_deuda: Moneda
   monto_cobrado: number
   moneda_pago: Moneda
+  /** Por cuál de las dos cajas pasa la plata. Efectivo si no se manda. */
+  medio_pago?: MedioPago
   // Requerida solo si moneda_pago difiere de moneda_deuda ($/USD).
   cotizacion?: number | null
   /** Costo ($/USD) con el que los dólares cobrados entran al stock vendible. */

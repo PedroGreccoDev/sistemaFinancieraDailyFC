@@ -148,6 +148,7 @@ def crear_ajuste(
             tipo=tipo,
             categoria=CajaCategoria.AJUSTE_CAJA,
             monto=monto,
+            medio_pago=payload.medio_pago,
             referencia_tipo=_REF,
             referencia_id=ajuste.id,
             detalle=_detalle(ajuste),

@@ -1,5 +1,5 @@
 import { apiFetch, API_BASE } from './client'
-import type { Cheque, Fiado } from '../types'
+import type { Cheque, Fiado, MedioPago } from '../types'
 
 /** URL directa a la foto del cheque (misma-origen: sirve para <img>, descarga y compartir). */
 export const chequeFotoUrl = (cheque_id: string): string =>
@@ -21,6 +21,8 @@ export interface ChequeCreatePayload {
   fecha_pago?: string | null
   porcentaje_compra: number
   cliente_origen_id?: string | null
+  /** Por cuál de las dos cajas salió lo abonado. Efectivo si no se manda. */
+  medio_pago?: MedioPago
   // Cuánto se abonó por el cheque. Omitir = se pagó todo (la compra normal).
   // Menos que el valor neto deja el resto a deber: no descuenta la caja y genera
   // la deuda con el vendedor, que pasa a ser obligatorio (§Comprar sin abonar).

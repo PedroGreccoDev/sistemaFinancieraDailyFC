@@ -18,6 +18,7 @@ from app.db.models import (
     FiadoEstado,
     InvalidChequeStateTransition,
     ManualOperationRequired,
+    MedioPago,
     Moneda,
 )
 from app.core.fechas import fecha_local, hoy_local
@@ -62,8 +63,12 @@ def create_cheque(
     foto: bytes | None = None,
     foto_mime: str | None = None,
 ) -> Cheque:
+    # `medio_pago` es de la caja, no del cheque: se saca del payload antes de
+    # construir el modelo o SQLAlchemy lo rechaza por columna inexistente.
+    datos = payload.model_dump()
+    medio_compra = datos.pop("medio_pago", MedioPago.EFECTIVO)
     cheque = Cheque(
-        **payload.model_dump(),
+        **datos,
         estado=ChequeEstado.EN_CARTERA,
         foto=foto,
         foto_mime=foto_mime,
@@ -91,6 +96,7 @@ def create_cheque(
             svc_caja.registrar(
                 db, fecha=fecha_local(created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
                 categoria=CajaCategoria.COMPRA_CHEQUE, monto=abonado,
+                medio_pago=medio_compra,
                 referencia_tipo="cheque", referencia_id=cheque.id,
                 detalle=detalle if a_deber <= 0 else f"{detalle} (pago parcial)",
             )
@@ -257,6 +263,7 @@ def transition_cheque(
             svc_caja.registrar(
                 db, fecha=fecha_local(event_at), moneda=Moneda.ARS, tipo=CajaTipo.INGRESO,
                 categoria=categoria, monto=ingreso,
+                medio_pago=payload.medio_pago,
                 referencia_tipo="cheque", referencia_id=cheque.id,
                 detalle=f"{accion} cheque Nº {cheque.nro_cheque}",
             )
@@ -276,7 +283,22 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
 
     Borra las líneas de caja del cheque y las vuelve a crear: egreso de compra
     siempre; ingreso de venta/cobro según el estado. Se usa tras editar
-    monto/%compra/%venta. No hace commit (lo hace el caller)."""
+    monto/%compra/%venta. No hace commit (lo hace el caller).
+
+    Los medios se leen **antes** de barrer: un cheque comprado por transferencia
+    y vendido en efectivo tiene cada pata en una caja distinta, y rehacerlas
+    todas en efectivo descuadraría las dos (§Caja paralela)."""
+    medio_compra = svc_caja.medio_de_referencia(
+        db, "cheque", cheque.id, CajaCategoria.COMPRA_CHEQUE
+    )
+    medio_venta = svc_caja.medio_de_referencia(
+        db,
+        "cheque",
+        cheque.id,
+        CajaCategoria.VENTA_CHEQUE
+        if cheque.estado == ChequeEstado.VENDIDO
+        else CajaCategoria.COBRO_CHEQUE,
+    )
     svc_caja.borrar_por_referencia(db, "cheque", cheque.id)
     pagado = (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(Decimal("0.01"))
     # El egreso es por lo que se abonó, no por el valor neto: un cheque comprado a
@@ -292,6 +314,7 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
         svc_caja.registrar(
             db, fecha=fecha_local(cheque.created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
             categoria=CajaCategoria.COMPRA_CHEQUE, monto=abonado,
+            medio_pago=medio_compra,
             referencia_tipo="cheque", referencia_id=cheque.id,
             detalle=f"Compra cheque Nº {cheque.nro_cheque}{banco_txt}{parcial}",
         )
@@ -301,6 +324,7 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
             svc_caja.registrar(
                 db, fecha=fecha_local(cheque.ultimo_evento_manual_at), moneda=Moneda.ARS,
                 tipo=CajaTipo.INGRESO, categoria=CajaCategoria.VENTA_CHEQUE, monto=ingreso,
+                medio_pago=medio_venta,
                 referencia_tipo="cheque", referencia_id=cheque.id,
                 detalle=f"Venta cheque Nº {cheque.nro_cheque}",
             )
@@ -309,6 +333,7 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
             db, fecha=fecha_local(cheque.ultimo_evento_manual_at), moneda=Moneda.ARS,
             tipo=CajaTipo.INGRESO, categoria=CajaCategoria.COBRO_CHEQUE,
             monto=cheque.monto.quantize(Decimal("0.01")),
+            medio_pago=medio_venta,
             referencia_tipo="cheque", referencia_id=cheque.id,
             detalle=f"Cobro cheque Nº {cheque.nro_cheque}",
         )

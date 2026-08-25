@@ -18,7 +18,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.db.models import Moneda
+from app.db.models import MedioPago, Moneda
 from app.schemas.cheques import ChequeRead
 # El vuelto de un cheque "de más" se resuelve igual que en pasivos (§5) y que en
 # el cobro por cliente de deudas libres (§2.b): mismo tipo, mismo vocabulario.
@@ -61,6 +61,9 @@ class CobroClienteCreate(BaseModel):
     moneda_deuda: Moneda
     monto_cobrado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     moneda_pago: Moneda
+    # Por cuál de las dos cajas entró la plata (§Caja paralela). El cobro es uno
+    # solo aunque toque varios renglones: todos se asientan por el mismo medio.
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     # A cuánto entran al stock vendible los dólares cobrados (§Stock de dólares).
     # Obligatoria al cobrar en USD contra deudas que también son en USD: ahí no hay

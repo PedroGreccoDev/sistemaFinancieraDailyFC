@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.models import FiadoEstado, Moneda
+from app.db.models import FiadoEstado, MedioPago, Moneda
 
 
 class FiadoRead(BaseModel):
@@ -35,6 +35,8 @@ class FiadoCobrarEfectivoRequest(BaseModel):
     monto_cobrado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     operador_id: str = Field(min_length=1, max_length=80)
     moneda_pago: Moneda = Moneda.ARS
+    # Por cuál de las dos cajas entró la plata (§Caja paralela).
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
 
 

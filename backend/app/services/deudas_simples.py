@@ -16,6 +16,7 @@ from app.db.models import (
     Cliente,
     DeudaSimple,
     DeudaSimpleEstado,
+    MedioPago,
     Moneda,
 )
 from app.core.fechas import hoy_local
@@ -32,6 +33,7 @@ from app.schemas.deudas_simples import (
     DeudaSimpleRead,
     DeudaSimpleUpdate,
 )
+from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
 from app.services import pasivos as svc_pasivos
 from app.services import stock_usd as svc_stock
@@ -193,6 +195,7 @@ def imputar_cobro(
     fecha: date,
     monto_caja: Decimal | None,
     moneda_pago: Moneda,
+    medio_pago: MedioPago,
     cotizacion: Decimal | None,
     cotizacion_stock: Decimal | None = None,
 ) -> bool:
@@ -241,6 +244,7 @@ def imputar_cobro(
         tipo=CajaTipo.INGRESO,
         categoria=CajaCategoria.COBRO_DEUDA,
         monto=monto_caja,
+        medio_pago=medio_pago,
         referencia_tipo=_REF_COBRO,
         referencia_id=deuda.id,
         detalle=detalle,
@@ -278,8 +282,18 @@ def list_deudas_simples(
     return list(db.scalars(query.order_by(DeudaSimple.created_at.desc())))
 
 
-def _registrar_egreso_origen(db: Session, deuda: DeudaSimple, cliente_nombre: str) -> None:
-    """Asienta el EGRESO de caja del alta de la deuda (salió la plata)."""
+def _registrar_egreso_origen(
+    db: Session,
+    deuda: DeudaSimple,
+    cliente_nombre: str,
+    medio: MedioPago = MedioPago.EFECTIVO,
+) -> None:
+    """Asienta el EGRESO de caja del alta de la deuda (salió la plata).
+
+    Una deuda anterior al corte no lo asienta: esa plata se entregó antes de la
+    línea y el saldo de arranque ya la tiene descontada (§Reset de caja)."""
+    if svc_apertura.es_anterior_al_corte(db, deuda.fecha):
+        return
     svc_caja.registrar(
         db,
         fecha=deuda.fecha,
@@ -287,6 +301,7 @@ def _registrar_egreso_origen(db: Session, deuda: DeudaSimple, cliente_nombre: st
         tipo=CajaTipo.EGRESO,
         categoria=CajaCategoria.OTORGAMIENTO_DEUDA,
         monto=deuda.monto,
+        medio_pago=medio,
         referencia_tipo=_REF_ORIGEN,
         referencia_id=deuda.id,
         detalle=f"Deuda de {cliente_nombre} - {deuda.concepto}",
@@ -313,7 +328,7 @@ def create_deuda_simple(db: Session, payload: DeudaSimpleCreate) -> DeudaSimple:
     try:
         db.add(deuda)
         db.flush()
-        _registrar_egreso_origen(db, deuda, cliente.nombre)
+        _registrar_egreso_origen(db, deuda, cliente.nombre, payload.medio_pago)
         _resync_stock_origen(db, deuda, cliente.nombre)
         db.commit()
         db.refresh(deuda)
@@ -362,9 +377,13 @@ def editar_deuda_simple(
 
     try:
         # Rehacer solo el egreso de origen (monto/moneda/fecha pueden haber cambiado).
+        # El medio se conserva: corregir el monto no debe cambiar de caja.
+        medio = svc_caja.medio_de_referencia(
+            db, _REF_ORIGEN, deuda.id, CajaCategoria.OTORGAMIENTO_DEUDA
+        )
         svc_caja.borrar_por_referencia(db, _REF_ORIGEN, deuda.id)
         cliente_nombre = deuda.cliente.nombre if deuda.cliente else "—"
-        _registrar_egreso_origen(db, deuda, cliente_nombre)
+        _registrar_egreso_origen(db, deuda, cliente_nombre, medio)
         _resync_stock_origen(db, deuda, cliente_nombre)
         db.commit()
         db.refresh(deuda)
@@ -409,6 +428,7 @@ def cobrar_deuda_simple(
         monto_caja=payload.monto_cobrado,
         moneda_pago=payload.moneda_pago,
         cotizacion=payload.cotizacion if es_cross else None,
+        medio_pago=payload.medio_pago,
         cotizacion_stock=payload.cotizacion_stock,
     )
 
@@ -494,6 +514,7 @@ def cobrar_deudas_cliente(
             monto_caja=plata,
             moneda_pago=payload.moneda_pago,
             cotizacion=payload.cotizacion if es_cross else None,
+            medio_pago=payload.medio_pago,
             cotizacion_stock=payload.cotizacion_stock,
         ):
             canceladas += 1
@@ -635,6 +656,10 @@ def cobrar_deudas_cliente_con_cheque(
             monto_caja=None,  # el cheque no mueve caja: entra a cartera
             moneda_pago=Moneda.ARS,
             cotizacion=payload.cotizacion if es_cross else None,
+            # Sin plata de por medio el medio da igual, pero el parámetro es
+            # obligatorio a propósito (§Caja paralela): que ninguna línea nueva
+            # pueda quedarse sin caja por olvido.
+            medio_pago=MedioPago.EFECTIVO,
         ):
             canceladas += 1
         afectadas.append(deuda)

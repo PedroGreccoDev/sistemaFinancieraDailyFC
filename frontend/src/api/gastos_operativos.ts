@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { GastoOperativo, Moneda } from '../types'
+import type { GastoOperativo, MedioPago, Moneda } from '../types'
 
 export const getGastos = (): Promise<GastoOperativo[]> =>
   apiFetch<GastoOperativo[]>('/gastos-operativos')
@@ -8,6 +8,8 @@ export interface GastoCreate {
   concepto: string
   monto: number
   moneda?: Moneda
+  /** Por cuál de las dos cajas sale. Efectivo si no se manda. */
+  medio_pago?: MedioPago
   fecha_operacion?: string | null
   hora_operacion?: string | null
   observaciones?: string | null

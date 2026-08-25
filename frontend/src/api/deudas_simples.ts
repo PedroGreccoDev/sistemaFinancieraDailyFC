@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Cheque, DeudaSimple, DeudaSimpleEstado, Moneda } from '../types'
+import type { Cheque, DeudaSimple, DeudaSimpleEstado, MedioPago, Moneda } from '../types'
 
 export interface DeudaSimpleCreatePayload {
   cliente_id: string
@@ -32,6 +32,8 @@ export const editarDeudaSimple = (id: string, payload: DeudaSimpleUpdatePayload)
 export interface CobrarDeudaSimplePayload {
   monto_cobrado: number
   moneda_pago: Moneda
+  /** Por cuál de las dos cajas pasa la plata. Efectivo si no se manda. */
+  medio_pago?: MedioPago
   // Requerida solo si moneda_pago difiere de la moneda de la deuda ($/USD).
   cotizacion?: number | null
   /** Costo ($/USD) con el que los dólares cobrados entran al stock vendible. */
@@ -58,6 +60,8 @@ export interface CobrarDeudasClientePayload {
   moneda_deuda: Moneda
   monto_cobrado: number
   moneda_pago: Moneda
+  /** Por cuál de las dos cajas pasa la plata. Efectivo si no se manda. */
+  medio_pago?: MedioPago
   // Requerida solo si moneda_pago difiere de moneda_deuda ($/USD).
   cotizacion?: number | null
   /** Costo ($/USD) con el que los dólares cobrados entran al stock vendible. */

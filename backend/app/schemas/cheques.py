@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.db.models import ChequeEstado
+from app.db.models import ChequeEstado, MedioPago
 from app.schemas.fiados import FiadoRead
 
 
@@ -25,6 +25,9 @@ class ChequeCreate(BaseModel):
     monto_abonado: Decimal | None = Field(
         default=None, ge=0, max_digits=18, decimal_places=2
     )
+    # Por cuál de las dos cajas salió lo abonado (§Caja paralela). No es columna
+    # del cheque: solo viaja hasta la línea de caja de la compra.
+    medio_pago: MedioPago = MedioPago.EFECTIVO
 
     @model_validator(mode="after")
     def validate_fechas(self) -> "ChequeCreate":
@@ -91,6 +94,8 @@ class ChequeManualTransition(BaseModel):
         default=None, ge=0, le=100, max_digits=7, decimal_places=4
     )
     cliente_destino_id: UUID | None = None
+    # Por cuál de las dos cajas entró lo cobrado al vender o cobrar el cheque.
+    medio_pago: MedioPago = MedioPago.EFECTIVO
 
 
 class ChequeFiarRequest(BaseModel):

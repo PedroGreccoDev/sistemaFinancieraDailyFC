@@ -38,8 +38,13 @@ export default function AperturaSistema() {
   const [fechaCorte, setFechaCorte] = useState('')
   const [guardandoCorte, setGuardandoCorte] = useState(false)
 
+  // Cuatro saldos: cada moneda por sus dos cajas. El efectivo se cuenta
+  // contando billetes y la transferencia mirando el banco — son realidades
+  // distintas, así que se cargan por separado.
   const [saldoArs, setSaldoArs] = useState('')
   const [saldoUsd, setSaldoUsd] = useState('')
+  const [saldoArsTransf, setSaldoArsTransf] = useState('')
+  const [saldoUsdTransf, setSaldoUsdTransf] = useState('')
   // Costo promedio de los dólares en mano: sin él quedarían en la caja pero no se
   // podrían vender, porque la venta consume lotes de compra con su costo.
   const [cotizUsd, setCotizUsd] = useState('')
@@ -87,6 +92,8 @@ export default function AperturaSistema() {
       await definirSaldoInicial({
         saldo_ars: parseFloat(saldoArs) || 0,
         saldo_usd: parseFloat(saldoUsd) || 0,
+        saldo_ars_transf: parseFloat(saldoArsTransf) || 0,
+        saldo_usd_transf: parseFloat(saldoUsdTransf) || 0,
         cotizacion_usd: usdNum > 0 ? parseFloat(cotizUsd) || null : null,
         fecha: fechaSaldo,
         operador_id: user?.username ?? 'panel',
@@ -110,11 +117,14 @@ export default function AperturaSistema() {
   const corteDefinido = !!cfg?.fecha_corte_carga_inicial
   const saldoDefinido = cfg?.saldo_definido === true
 
-  const usdNum = parseFloat(saldoUsd) || 0
-  // Con dólares en mano, la cotización de costo es obligatoria: sin ella el lote
-  // no se crea y no se podrían vender.
+  // Los dólares de las dos cajas comparten el lote de costo: son los mismos
+  // dólares, estén en el cajón o depositados.
+  const usdNum = (parseFloat(saldoUsd) || 0) + (parseFloat(saldoUsdTransf) || 0)
+  // Con dólares, la cotización de costo es obligatoria: sin ella el lote no se
+  // crea y no se podrían vender.
   const faltaCotiz = usdNum > 0 && (parseFloat(cotizUsd) || 0) <= 0
-  const puedeCargar = !!fechaSaldo && (!!saldoArs || !!saldoUsd) && !faltaCotiz
+  const algunSaldo = !!saldoArs || !!saldoUsd || !!saldoArsTransf || !!saldoUsdTransf
+  const puedeCargar = !!fechaSaldo && algunSaldo && !faltaCotiz
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -171,7 +181,7 @@ export default function AperturaSistema() {
       <div style={{ ...CARD, padding: '1.25rem 1.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.5rem' }}>
           <h3 style={{ fontFamily: FN, fontSize: '1.25rem', letterSpacing: '0.06em', color: 'var(--text-1)' }}>
-            2 · Efectivo con el que arrancaron
+            2 · Con cuánta plata arrancaron
           </h3>
           {saldoDefinido
             ? <span style={chip('success')}>CARGADO</span>
@@ -179,11 +189,16 @@ export default function AperturaSistema() {
         </div>
 
         <p style={{ ...HELP, marginBottom: '0.875rem' }}>
-          La plata que había en el cajón el día que empezaron a usar el sistema, en pesos
-          y en dólares. Sin esto la caja arranca en cero y da negativa, porque se
+          La plata que había el día que empezaron a usar el sistema, separada en{' '}
+          <strong>cuatro</strong>: lo que había en billetes y lo que había en la cuenta,
+          por cada moneda. Sin esto la caja arranca en cero y da negativa, porque se
           registran las salidas pero nunca se registró lo que había.
           <br />
-          La <strong>fecha es la del efectivo</strong>, no la de hoy: podés cargarlo días
+          Van por separado porque <strong>se cuentan contra cosas distintas</strong>: los
+          billetes se cuentan a mano y la cuenta se mira en el banco. Sumarlos daría un
+          número que no se puede comparar con nada.
+          <br />
+          La <strong>fecha es la de esa plata</strong>, no la de hoy: podés cargarlo días
           después y los reportes viejos igual quedan bien.
         </p>
 
@@ -192,24 +207,52 @@ export default function AperturaSistema() {
             <p style={{ ...HELP, color: 'var(--text-1)' }}>
               Cargado por <strong>{cfg!.definido_por}</strong> · {fmtDate(cfg!.fecha_saldo_inicial)}
               <br />
-              {fmtARS(cfg!.saldo_inicial_ars ?? '0')} · {fmtUSD(cfg!.saldo_inicial_usd ?? '0')}
-              {cfg!.cotizacion_usd_inicial && <> (a ${cfg!.cotizacion_usd_inicial} promedio)</>}
+              Billetes: {fmtARS(cfg!.saldo_inicial_ars ?? '0')} · {fmtUSD(cfg!.saldo_inicial_usd ?? '0')}
+              <br />
+              En la cuenta: {fmtARS(cfg!.saldo_inicial_ars_transf ?? '0')} · {fmtUSD(cfg!.saldo_inicial_usd_transf ?? '0')}
+              {cfg!.cotizacion_usd_inicial && <> · dólares a ${cfg!.cotizacion_usd_inicial} promedio</>}
             </p>
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))', gap: '0.75rem' }}>
+        {/* Las dos cajas, una debajo de la otra: el operador cuenta billetes
+            primero y después mira el banco, y así el formulario sigue ese orden. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
           <div>
-            <label style={LABEL_STYLE}>Efectivo en pesos</label>
-            <input type="number" step="0.01" min="0" value={saldoArs} onChange={(e) => setSaldoArs(e.target.value)} placeholder="0,00" style={INPUT_STYLE} />
+            <p style={{ ...LABEL_STYLE, marginBottom: '0.45rem', color: 'var(--text-2)' }}>
+              💵 En billetes (el cajón)
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))', gap: '0.75rem' }}>
+              <div>
+                <label style={LABEL_STYLE}>Pesos</label>
+                <input type="number" step="0.01" min="0" value={saldoArs} onChange={(e) => setSaldoArs(e.target.value)} placeholder="0,00" style={INPUT_STYLE} />
+              </div>
+              <div>
+                <label style={LABEL_STYLE}>Dólares</label>
+                <input type="number" step="0.01" min="0" value={saldoUsd} onChange={(e) => setSaldoUsd(e.target.value)} placeholder="0,00" style={INPUT_STYLE} />
+              </div>
+            </div>
           </div>
+
           <div>
-            <label style={LABEL_STYLE}>Efectivo en dólares</label>
-            <input type="number" step="0.01" min="0" value={saldoUsd} onChange={(e) => setSaldoUsd(e.target.value)} placeholder="0,00" style={INPUT_STYLE} />
+            <p style={{ ...LABEL_STYLE, marginBottom: '0.45rem', color: 'var(--text-2)' }}>
+              🏦 En la cuenta (transferencias)
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))', gap: '0.75rem' }}>
+              <div>
+                <label style={LABEL_STYLE}>Pesos</label>
+                <input type="number" step="0.01" min="0" value={saldoArsTransf} onChange={(e) => setSaldoArsTransf(e.target.value)} placeholder="0,00" style={INPUT_STYLE} />
+              </div>
+              <div>
+                <label style={LABEL_STYLE}>Dólares</label>
+                <input type="number" step="0.01" min="0" value={saldoUsdTransf} onChange={(e) => setSaldoUsdTransf(e.target.value)} placeholder="0,00" style={INPUT_STYLE} />
+              </div>
+            </div>
           </div>
+
           <div>
-            <label style={LABEL_STYLE}>Fecha del efectivo</label>
-            <input type="date" value={fechaSaldo} max={todayISO()} onChange={(e) => setFechaSaldo(e.target.value)} style={INPUT_STYLE} />
+            <label style={LABEL_STYLE}>Fecha de esos saldos</label>
+            <input type="date" value={fechaSaldo} max={todayISO()} onChange={(e) => setFechaSaldo(e.target.value)} style={{ ...INPUT_STYLE, maxWidth: '14rem' }} />
           </div>
         </div>
 
@@ -241,11 +284,14 @@ export default function AperturaSistema() {
         ) : (
           <div style={{ marginTop: '0.875rem', background: 'color-mix(in srgb, var(--warning) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)', borderRadius: 'var(--r-md)', padding: '0.875rem 1rem' }}>
             <p style={{ ...HELP, color: 'var(--text-1)', marginBottom: '0.75rem' }}>
-              Vas a fijar la caja de apertura en{' '}
-              <strong>{fmtARS(parseFloat(saldoArs) || 0)}</strong> y{' '}
-              <strong>{fmtUSD(usdNum)}</strong>
-              {usdNum > 0 && <> (comprados a <strong>${cotizUsd}</strong> promedio)</>}, con fecha{' '}
-              <strong>{fmtDate(fechaSaldo)}</strong>.
+              Vas a fijar la caja de apertura con fecha <strong>{fmtDate(fechaSaldo)}</strong>:
+              <br />
+              💵 En billetes: <strong>{fmtARS(parseFloat(saldoArs) || 0)}</strong> y{' '}
+              <strong>{fmtUSD(parseFloat(saldoUsd) || 0)}</strong>
+              <br />
+              🏦 En la cuenta: <strong>{fmtARS(parseFloat(saldoArsTransf) || 0)}</strong> y{' '}
+              <strong>{fmtUSD(parseFloat(saldoUsdTransf) || 0)}</strong>
+              {usdNum > 0 && <><br />Dólares tomados a <strong>${cotizUsd}</strong> promedio.</>}
               {saldoDefinido && ' Esto reemplaza el saldo cargado antes.'}
               <br />
               Revisá los números antes de confirmar: de acá sale el saldo de toda la caja.

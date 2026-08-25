@@ -15,6 +15,7 @@ from app.db.models import (
     ConfiguracionApertura,
     Cuota,
     CuotaEstado,
+    MedioPago,
     Moneda,
     MovimientoCaja,
     Pasivo,
@@ -24,6 +25,7 @@ from app.db.models import (
 from app.schemas.reportes import (
     CajaLinea,
     CajaMoneda,
+    CajaPorMedio,
     CuotaCobradaHistorialItem,
     MovimientoUnificadoRead,
     ReporteCajaRead,
@@ -40,8 +42,8 @@ def _money(value: object) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"))
 
 
-def _saldo_hasta(db: Session, desde: date) -> dict[Moneda, Decimal]:
-    """Saldo acumulado por moneda ANTES de `desde` (el saldo de apertura).
+def _saldo_hasta(db: Session, desde: date) -> dict[tuple[Moneda, MedioPago], Decimal]:
+    """Saldo acumulado por moneda y caja ANTES de `desde` (el saldo de apertura).
 
     **El saldo inicial es un punto de corte, no un sumando.** Cuando el efectivo
     de arranque se cargó en una fecha `F`, el conteo empieza ahí: solo se suman
@@ -64,6 +66,7 @@ def _saldo_hasta(db: Session, desde: date) -> dict[Moneda, Decimal]:
     filas = db.execute(
         select(
             MovimientoCaja.moneda,
+            MovimientoCaja.medio_pago,
             func.coalesce(
                 func.sum(
                     case(
@@ -75,9 +78,11 @@ def _saldo_hasta(db: Session, desde: date) -> dict[Moneda, Decimal]:
             ),
         )
         .where(*condiciones)
-        .group_by(MovimientoCaja.moneda)
+        .group_by(MovimientoCaja.moneda, MovimientoCaja.medio_pago)
     ).all()
-    return {moneda: _money(total) for moneda, total in filas}
+    # Se agrupa por moneda **y medio**: los dos libros arrancan cada período con
+    # su propio saldo, y una apertura común no se podría repartir después.
+    return {(moneda, medio): _money(total) for moneda, medio, total in filas}
 
 
 def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
@@ -106,7 +111,30 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
     #   apertura + ingresos − egresos = saldo de cierre
     # y un día de solo compras se lee negativo en el neto (correcto: salió plata)
     # sin que el saldo aparezca en rojo.
-    apertura_por_moneda = _saldo_hasta(db, desde)
+    apertura_por_caja = _saldo_hasta(db, desde)
+
+    def _por_medio(
+        moneda: Moneda, medio: MedioPago, propios: list, inicial: list
+    ) -> CajaPorMedio:
+        """Los números de UNA de las dos cajas de la moneda (§Caja paralela)."""
+        mios = [m for m in propios if m.medio_pago == medio]
+        ingresos = sum(
+            (m.monto for m in mios if m.tipo == CajaTipo.INGRESO), Decimal("0.00")
+        )
+        egresos = sum(
+            (m.monto for m in mios if m.tipo == CajaTipo.EGRESO), Decimal("0.00")
+        )
+        apertura = apertura_por_caja.get((moneda, medio), Decimal("0.00")) + sum(
+            (m.monto for m in inicial if m.medio_pago == medio), Decimal("0.00")
+        )
+        return CajaPorMedio(
+            medio=medio.value,
+            ingresos_total=_money(ingresos),
+            egresos_total=_money(egresos),
+            neto=_money(ingresos - egresos),
+            saldo_apertura=_money(apertura),
+            saldo_cierre=_money(apertura + ingresos - egresos),
+        )
 
     def _caja(moneda: Moneda) -> CajaMoneda:
         del_periodo = [m for m in movimientos if m.moneda == moneda]
@@ -123,9 +151,13 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
         egresos = sum(
             (m.monto for m in propios if m.tipo == CajaTipo.EGRESO), Decimal("0.00")
         )
-        apertura = apertura_por_moneda.get(moneda, Decimal("0.00")) + sum(
-            (m.monto for m in inicial), Decimal("0.00")
-        )
+        apertura = sum(
+            (
+                apertura_por_caja.get((moneda, medio), Decimal("0.00"))
+                for medio in MedioPago
+            ),
+            Decimal("0.00"),
+        ) + sum((m.monto for m in inicial), Decimal("0.00"))
         lineas = [
             CajaLinea(
                 fecha=m.fecha,
@@ -134,7 +166,7 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
                 monto=_money(m.monto),
                 detalle=m.detalle,
                 ganancia=None if m.ganancia is None else _money(m.ganancia),
-                medio_pago=None if m.medio_pago is None else m.medio_pago.value,
+                medio_pago=m.medio_pago.value,
                 cotizacion=None if m.cotizacion is None else m.cotizacion,
             )
             for m in propios
@@ -146,6 +178,8 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
             neto=_money(ingresos - egresos),
             saldo_apertura=_money(apertura),
             saldo_cierre=_money(apertura + ingresos - egresos),
+            efectivo=_por_medio(moneda, MedioPago.EFECTIVO, propios, inicial),
+            transferencia=_por_medio(moneda, MedioPago.TRANSFERENCIA, propios, inicial),
             lineas=lineas,
         )
 
@@ -188,6 +222,10 @@ _GRUPO_POR_CATEGORIA: dict[CajaCategoria, str] = {
     CajaCategoria.PAGO_PASIVO:           "PASIVOS",
     CajaCategoria.VUELTO_PASIVO:         "PASIVOS",
     CajaCategoria.AJUSTE_CAJA:           "AJUSTES",
+    # Un depósito o una extracción: sus dos líneas se cancelan en el neto, pero
+    # cada una mueve su caja. Sin grupo propio caerían en OTROS y no habría cómo
+    # filtrarlas (§Las dos cajas).
+    CajaCategoria.TRASPASO_CAJA:         "TRASPASOS",
 }
 
 # Fallback de descripción cuando la línea de caja no trae `detalle`.
@@ -208,6 +246,7 @@ _LABEL_CATEGORIA: dict[CajaCategoria, str] = {
     CajaCategoria.PAGO_PASIVO:           "Pago de deuda (pasivo)",
     CajaCategoria.VUELTO_PASIVO:         "Vuelto de pasivo",
     CajaCategoria.AJUSTE_CAJA:           "Ajuste de caja",
+    CajaCategoria.TRASPASO_CAJA:         "Movimiento entre cajas",
 }
 
 _LABEL_ESTADO_CHEQUE: dict[ChequeEstado, str] = {
@@ -259,7 +298,7 @@ def get_movimientos_unificados(
                 descripcion=descripcion,
                 monto=_money(m.monto),
                 ganancia=None if m.ganancia is None else _money(m.ganancia),
-                medio_pago=None if m.medio_pago is None else m.medio_pago.value,
+                medio_pago=m.medio_pago.value,
                 cotizacion=None if m.cotizacion is None else m.cotizacion,
                 referencia_tipo=m.referencia_tipo,
                 referencia_id=m.referencia_id,

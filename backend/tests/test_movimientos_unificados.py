@@ -43,7 +43,9 @@ def _caja(
     moneda: Moneda = Moneda.ARS,
     detalle: str | None = None,
     ganancia: str | None = None,
-    medio_pago: MedioPago | None = None,
+    # Toda línea del libro cae en una de las dos cajas: el medio es NOT NULL desde
+    # la migración `0026` (§Caja paralela). El default refleja ese invariante.
+    medio_pago: MedioPago = MedioPago.EFECTIVO,
     cotizacion: str | None = None,
     referencia_tipo: str | None = None,
 ) -> MovimientoCaja:

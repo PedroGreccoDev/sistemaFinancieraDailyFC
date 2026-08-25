@@ -47,11 +47,13 @@ def definir_fecha_corte(payload: FechaCorteRequest, db: DbSession) -> FechaCorte
 def definir_saldo_inicial(
     payload: SaldoInicialRequest, db: DbSession
 ) -> ConfiguracionAperturaRead:
-    """Carga el efectivo de arranque, por moneda. Por única vez."""
+    """Carga los saldos de arranque: por moneda y por caja. Por única vez."""
     return service.definir_saldo_inicial(
         db,
         saldo_ars=payload.saldo_ars,
         saldo_usd=payload.saldo_usd,
+        saldo_ars_transf=payload.saldo_ars_transf,
+        saldo_usd_transf=payload.saldo_usd_transf,
         cotizacion_usd=payload.cotizacion_usd,
         fecha=payload.fecha,
         operador_id=payload.operador_id,

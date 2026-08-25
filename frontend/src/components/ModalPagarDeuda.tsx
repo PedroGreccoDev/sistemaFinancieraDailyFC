@@ -12,7 +12,8 @@ import { cobrarCliente, cobrarClienteConCheque } from '../api/deudores'
 import { fmtARS, fmtUSD } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
-import type { Moneda } from '../types'
+import type { MedioPago, Moneda } from '../types'
+import SelectorMedioPago from './SelectorMedioPago'
 
 const FM = "'Manrope', sans-serif"
 const FN = "'Bebas Neue', sans-serif"
@@ -54,6 +55,9 @@ function fmtMoneda(monto: string | number, moneda: Moneda): string {
 export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: DeudaItem; onClose: () => void; onSuccess: () => void }) {
   const [monto, setMonto] = useState('')
   const [monedaPago, setMonedaPago] = useState<Moneda>(deuda.moneda)
+  // Por cuál de las dos cajas entra la plata. Efectivo por defecto: es el
+  // caso normal, así que el que no mira este control cobra bien igual.
+  const [medioPago, setMedioPago] = useState<MedioPago>('EFECTIVO')
   const [cotizacion, setCotizacion] = useState('')
   // A cuánto entran al stock los dólares cobrados. Solo hace falta cuando se
   // cobra en USD una deuda que TAMBIÉN es en USD: ahí no hay cotización de la
@@ -219,6 +223,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
         await pagarPrestamo(deuda.id, {
           monto_pagado: montoNum,
           moneda_pago: monedaPago,
+          medio_pago: medioPago,
           cotizacion: cross ? cotizNum : null,
           cotizacion_stock: cotizacionStock,
         })
@@ -226,6 +231,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
         await cobrarDeudaSimple(deuda.id, {
           monto_cobrado: montoNum,
           moneda_pago: monedaPago,
+          medio_pago: medioPago,
           cotizacion: cross ? cotizNum : null,
           cotizacion_stock: cotizacionStock,
         })
@@ -237,6 +243,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           moneda_deuda: deuda.moneda,
           monto_cobrado: montoNum,
           moneda_pago: monedaPago,
+          medio_pago: medioPago,
           cotizacion: cross ? cotizNum : null,
           cotizacion_stock: cotizacionStock,
         })
@@ -257,6 +264,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           moneda_deuda: deuda.moneda,
           monto_cobrado: montoNum,
           moneda_pago: monedaPago,
+          medio_pago: medioPago,
           cotizacion: cross ? cotizNum : null,
           cotizacion_stock: cotizacionStock,
         })
@@ -272,6 +280,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
       } else {
         await cobrarEfectivo(deuda.id, montoNum, 'panel-web', {
           moneda_pago: monedaPago,
+          medio_pago: medioPago,
           cotizacion: cross ? cotizNum : null,
         })
       }
@@ -421,6 +430,15 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
             <label style={LABEL_STYLE}>Monto a pagar ({monedaPago})</label>
             <input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
           </div>
+
+          {/* Va pegado al monto porque son la misma decisión: cuánta plata y por
+              dónde. El cheque no lo lleva —no mueve efectivo, entra a cartera—. */}
+          <SelectorMedioPago
+            valor={medioPago}
+            onChange={setMedioPago}
+            label="¿Cómo te pagaron?"
+            ayuda="Entra a la caja que elijas. El efectivo se cuenta en el cajón y la transferencia se ve en el banco."
+          />
 
           {cross && (
             <div>

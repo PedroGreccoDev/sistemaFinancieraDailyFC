@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.fechas import hoy_local
-from app.db.models import CajaCategoria, CajaTipo, GastoOperativo, Moneda
+from app.db.models import CajaCategoria, CajaTipo, GastoOperativo, MedioPago, Moneda
 from app.schemas.gastos_operativos import GastoOperativoCreate, GastoOperativoUpdate
 from app.services import caja as svc_caja
 from app.services import stock_usd as svc_stock
@@ -63,6 +63,7 @@ def create_gasto(db: Session, payload: GastoOperativoCreate) -> GastoOperativo:
         tipo=CajaTipo.EGRESO,
         categoria=CajaCategoria.GASTO,
         monto=gasto.monto,
+        medio_pago=payload.medio_pago,
         referencia_tipo="gasto",
         referencia_id=gasto.id,
         detalle=gasto.concepto,
@@ -82,8 +83,17 @@ def list_gastos(db: Session) -> list[GastoOperativo]:
     return list(db.scalars(stmt).all())
 
 
-def _resync_caja_gasto(db: Session, gasto: GastoOperativo) -> None:
-    """Reconstruye la línea de caja (egreso) de un gasto tras editar monto/moneda/fecha."""
+def _resync_caja_gasto(
+    db: Session, gasto: GastoOperativo, medio: MedioPago | None = None
+) -> None:
+    """Reconstruye la línea de caja (egreso) de un gasto tras editar monto/moneda/fecha.
+
+    `medio` solo viene si la edición lo cambia. Si no, se conserva el que tenía:
+    corregir el monto de un gasto pagado por transferencia no debe devolverlo al
+    efectivo y descuadrar las dos cajas a la vez.
+    """
+    if medio is None:
+        medio = svc_caja.medio_de_referencia(db, "gasto", gasto.id, CajaCategoria.GASTO)
     svc_caja.borrar_por_referencia(db, "gasto", gasto.id)
     svc_caja.registrar(
         db,
@@ -92,6 +102,7 @@ def _resync_caja_gasto(db: Session, gasto: GastoOperativo) -> None:
         tipo=CajaTipo.EGRESO,
         categoria=CajaCategoria.GASTO,
         monto=gasto.monto,
+        medio_pago=medio,
         referencia_tipo="gasto",
         referencia_id=gasto.id,
         detalle=gasto.concepto,
@@ -122,7 +133,7 @@ def editar_gasto(
     if "observaciones" in data:
         gasto.observaciones = data["observaciones"]
 
-    _resync_caja_gasto(db, gasto)
+    _resync_caja_gasto(db, gasto, data.get("medio_pago"))
     _resync_stock_gasto(db, gasto)
     db.commit()
     db.refresh(gasto)

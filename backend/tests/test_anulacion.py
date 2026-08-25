@@ -224,7 +224,12 @@ def test_el_prompt_distingue_revertir_de_editar() -> None:
     assert "REVERTIR_OPERACION" in _SYSTEM_PROMPT
     assert "NO confundir con EDITAR_OPERACION" in _SYSTEM_PROMPT
     # La reversión es destructiva: el prompt debe exigir confirmación.
-    seccion = _SYSTEM_PROMPT.split("15. REVERTIR_OPERACION")[1].split("16.")[0]
+    # El corte va por el NOMBRE de la operación siguiente y no por su número: el
+    # prompt se renumera cada vez que se intercala una operación, y atarse al
+    # número hace fallar este test por un cambio que no tiene nada que ver.
+    seccion = _SYSTEM_PROMPT.split("REVERTIR_OPERACION", 1)[1].split(
+        "ACLARACION_REQUERIDA", 1
+    )[0]
     assert "confirmacion_requerida: true" in seccion
 
 

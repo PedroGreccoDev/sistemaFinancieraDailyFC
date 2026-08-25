@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -23,8 +24,10 @@ from app.db.models import (
     PasivoEstado,
 )
 from app.core.fechas import fecha_local, hoy_local
+from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
 from app.services.conversion import calcular_reduccion_saldo
+from app.services.prestamos import repartir_pago_en_cuotas
 from app.schemas.pasivos import (
     PasivoCancelarConChequeRequest,
     PasivoCreate,
@@ -43,6 +46,7 @@ from app.services.exceptions import (
 __all__ = ["calcular_reduccion_saldo"]
 
 _CERO = Decimal("0.00")
+_CENTAVO = Decimal("0.01")
 
 # Campos que forman parte de la línea `INGRESO_PASIVO` del alta: si la edición toca
 # alguno, esa línea se rehace (monto, moneda y fecha son la línea misma; acreedor y
@@ -104,7 +108,7 @@ def create_pasivo(
     # El ingreso necesita el id del pasivo para referenciarlo, y sin flush todavía
     # no lo tiene. El commit de abajo persiste deuda y línea de caja juntas.
     db.flush()
-    _registrar_ingreso(db, pasivo)
+    _registrar_ingreso(db, pasivo, payload.medio_pago)
     _crear_lote_usd(db, pasivo)
     db.commit()
     db.refresh(pasivo)
@@ -182,19 +186,31 @@ def _borrar_lote_usd(db: Session, pasivo: Pasivo) -> None:
         db.delete(lote)
 
 
-def _registrar_ingreso(db: Session, pasivo: Pasivo) -> None:
+def _registrar_ingreso(
+    db: Session, pasivo: Pasivo, medio: MedioPago = MedioPago.EFECTIVO
+) -> None:
     """Asienta (sin commit) el ingreso de la plata que se tomó prestada.
 
-    No hace nada si la deuda no trajo plata, que es el caso normal."""
+    No hace nada si la deuda no trajo plata, que es el caso normal. `medio` dice
+    por dónde entró: quien te presta suele transferir, pero el default sigue el
+    resto del sistema y es el operador quien lo dice (§Caja paralela).
+
+    Tampoco asienta nada si el ingreso es anterior al corte: esa plata entró
+    antes de la línea y el saldo de arranque ya la tiene adentro (§Reset de
+    caja)."""
     if not pasivo.ingreso_caja:
+        return
+    fecha_ingreso = pasivo.fecha_ingreso or hoy_local()
+    if svc_apertura.es_anterior_al_corte(db, fecha_ingreso):
         return
     svc_caja.registrar(
         db,
-        fecha=pasivo.fecha_ingreso or hoy_local(),
+        fecha=fecha_ingreso,
         moneda=pasivo.moneda,
         tipo=CajaTipo.INGRESO,
         categoria=CajaCategoria.INGRESO_PASIVO,
         monto=pasivo.monto,
+        medio_pago=medio,
         referencia_tipo="pasivo",
         referencia_id=pasivo.id,
         detalle=f"Préstamo recibido de {pasivo.acreedor} — {pasivo.concepto}",
@@ -209,10 +225,13 @@ def _resync_caja_ingreso(db: Session, pasivo: Pasivo) -> None:
 
     Si el préstamo era en dólares, rehace también su lote de stock: el monto, la
     moneda y la fecha son tanto la línea de caja como el lote."""
+    medio = svc_caja.medio_de_referencia(
+        db, "pasivo", pasivo.id, CajaCategoria.INGRESO_PASIVO
+    )
     svc_caja.borrar_por_referencia(
         db, "pasivo", pasivo.id, categoria=CajaCategoria.INGRESO_PASIVO
     )
-    _registrar_ingreso(db, pasivo)
+    _registrar_ingreso(db, pasivo, medio)
 
     # El lote se rehace siempre que había uno o corresponde uno nuevo. Borrar antes
     # de crear: la deuda es una sola y corregirla no debe acumular lotes.
@@ -535,6 +554,7 @@ def aplicar_vuelto_cheque(
     modo: str | None,
     diferencia: Decimal,
     fecha: date,
+    medio: MedioPago = MedioPago.EFECTIVO,
 ) -> None:
     """Resuelve el vuelto cuando un cheque cubre de más (diferencia > 0).
 
@@ -556,6 +576,7 @@ def aplicar_vuelto_cheque(
             tipo=CajaTipo.EGRESO,
             categoria=CajaCategoria.VUELTO_PASIVO,
             monto=diferencia,
+            medio_pago=medio,
             referencia_tipo="cheque",
             referencia_id=cheque.id,
             detalle=f"Vuelto en efectivo a {cliente_nombre} (cheque Nº {cheque.nro_cheque})",
@@ -572,3 +593,326 @@ def aplicar_vuelto_cheque(
                 estado=PasivoEstado.PENDIENTE,
             )
         )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Pago por acreedor (lo que usa el bot)
+# ────────────────────────────────────────────────────────────────────────────
+#
+# El panel paga una deuda puntual: el operador la ve en pantalla y la clickea,
+# así que manda el `pasivo_id`. Por WhatsApp no hay pantalla — el operador dice
+# un nombre ("le pagué 500 lucas a Cuello") y puede haberle quedado debiendo
+# tres veces. Estas dos funciones son la puerta por nombre: juntan las deudas
+# vivas con ese acreedor y reparten el pago de la más vieja a la más nueva,
+# igual que la compensación (§2.c).
+#
+# Por qué no es un `for` llamando a `pagar_pasivo`: esa función commitea. Con
+# tres deudas serían tres commits, y si el segundo falla el primero ya quedó
+# grabado — la deuda baja a medias y la caja del día queda con un egreso
+# huérfano. Acá el reparto entero es una sola transacción.
+
+
+@dataclass
+class PasivoImputado:
+    """Cuánto se le aplicó a una deuda concreta del acreedor."""
+
+    pasivo: Pasivo
+    imputado: Decimal   # en la moneda de la deuda
+    cancelo: bool
+
+
+@dataclass
+class PagoAcreedorResult:
+    acreedor: str
+    imputaciones: list[PasivoImputado]
+    saldo_restante: Decimal   # lo que le seguís debiendo en esa moneda
+    cancelados: int
+
+
+def cargar_pasivos_acreedor(
+    db: Session, acreedor: str, moneda: Moneda, *, bloquear: bool = False
+) -> list[Pasivo]:
+    """Las deudas vivas del negocio con un acreedor, de la más vieja a la más nueva.
+
+    El orden es por `created_at`: un pasivo no tiene fecha de origen propia más
+    allá de cuándo se cargó, y el vencimiento no sirve para esto —una deuda que
+    vence antes no es más vieja—. Es el mismo criterio de "primero lo más viejo"
+    que usa la imputación del lado del cliente (§2.c).
+
+    El match del nombre es **exacto** (case-insensitive): quién resuelve un
+    nombre parcial es quien llama —el bot, con su desambiguación— y acá elegir
+    de más significaría saldarle la deuda a otro.
+    """
+    stmt = (
+        select(Pasivo)
+        .where(
+            func.lower(Pasivo.acreedor) == acreedor.strip().lower(),
+            Pasivo.moneda == moneda,
+            Pasivo.estado == PasivoEstado.PENDIENTE,
+            Pasivo.saldo_pendiente > _CERO,
+            Pasivo.anulado_at.is_(None),
+        )
+        .order_by(Pasivo.created_at.asc())
+    )
+    if bloquear:
+        stmt = stmt.with_for_update()
+    return list(db.scalars(stmt))
+
+
+def _repartir_en_moneda_pago(
+    imputados: list[Decimal], reduccion_total: Decimal, monto_pagado: Decimal
+) -> list[Decimal]:
+    """Parte `monto_pagado` en proporción a lo que se imputó a cada deuda.
+
+    Cada deuda lleva su propia línea de caja (así la anulación de un pasivo se
+    lleva solo su parte, §Anulación), y esa línea va en la moneda con la que se
+    pagó. Cuando el pago cruza monedas, las partes no coinciden con lo imputado
+    y hay que prorratear.
+
+    El último renglón se calcula por diferencia en vez de por proporción: así la
+    suma de las partes da **exactamente** `monto_pagado` y la caja del día no
+    queda corta por un centavo de redondeo.
+    """
+    if reduccion_total <= _CERO:
+        return [_CERO for _ in imputados]
+
+    partes: list[Decimal] = []
+    asignado = _CERO
+    ultimo = len(imputados) - 1
+    for i, imputado in enumerate(imputados):
+        if i == ultimo:
+            parte = (monto_pagado - asignado).quantize(_CENTAVO)
+        else:
+            parte = (monto_pagado * imputado / reduccion_total).quantize(_CENTAVO)
+        partes.append(parte)
+        asignado = (asignado + parte).quantize(_CENTAVO)
+    return partes
+
+
+def pagar_a_acreedor(
+    db: Session,
+    *,
+    acreedor: str,
+    moneda_deuda: Moneda,
+    monto_pagado: Decimal,
+    moneda_pago: Moneda,
+    medio_pago: MedioPago,
+    cotizacion: Decimal | None = None,
+    fecha: date | None = None,
+) -> PagoAcreedorResult:
+    """Paga con dinero (efectivo o transferencia) las deudas vivas con un acreedor.
+
+    `monto_pagado` es lo que sale de caja, en `moneda_pago`; el saldo de las
+    deudas baja por el equivalente en `moneda_deuda` (vía `cotizacion` si el pago
+    cruza monedas). Se reparte de la deuda más vieja a la más nueva.
+
+    **Pagar de más no se acomoda solo**: si el pago supera todo lo que le debés,
+    la operación falla en vez de dejar un saldo a favor. Por WhatsApp el monto
+    viene dictado, y de más suele ser un dedazo o el acreedor equivocado; un
+    pasivo a favor inventado hay que ir a borrarlo a mano después (decisión del
+    dueño, 2026-08-24). `calcular_reduccion_saldo` tolera un centavo de redondeo
+    para que pagar "el total" justo cancele en vez de fallar.
+    """
+    acreedor = acreedor.strip()
+    pasivos = cargar_pasivos_acreedor(db, acreedor, moneda_deuda, bloquear=True)
+    if not pasivos:
+        raise NotFoundError(
+            f"No hay deudas pendientes con '{acreedor}' en {moneda_deuda.value}."
+        )
+
+    total = sum((p.saldo_pendiente for p in pasivos), _CERO).quantize(_CENTAVO)
+    # Valida la cotización cross-moneda y que el pago no supere el total.
+    reduccion = min(
+        calcular_reduccion_saldo(
+            moneda_deuda, total, moneda_pago, monto_pagado, cotizacion
+        ),
+        total,
+    ).quantize(_CENTAVO)
+    if reduccion <= _CERO:
+        # Un importe que redondeado a centavos no baja nada —o una cotización que
+        # lo pulveriza— no es un pago: se rechaza en vez de contestar "listo" sin
+        # haber tocado la deuda, que es peor que fallar.
+        raise ValidationError(
+            f"Ese importe no alcanza a bajar ni un centavo de la deuda con "
+            f"{pasivos[0].acreedor}. Revisá el monto."
+        )
+
+    es_cross = moneda_pago != moneda_deuda
+    fecha = fecha or hoy_local()
+
+    reparto = repartir_pago_en_cuotas([p.saldo_pendiente for p in pasivos], reduccion)
+    partes_caja = _repartir_en_moneda_pago(reparto, reduccion, monto_pagado)
+
+    imputaciones: list[PasivoImputado] = []
+    cancelados = 0
+    for pasivo, imputa, parte in zip(pasivos, reparto, partes_caja):
+        if imputa <= _CERO:
+            continue
+        pasivo.saldo_pendiente = (pasivo.saldo_pendiente - imputa).quantize(_CENTAVO)
+        cancelo = pasivo.saldo_pendiente <= _CERO
+        if cancelo:
+            pasivo.saldo_pendiente = _CERO
+            pasivo.estado = PasivoEstado.CANCELADA
+            pasivo.fecha_cancelacion = fecha
+            cancelados += 1
+        # La primera cotización cross-moneda queda como default editable, igual
+        # que en el pago del panel (§5).
+        if es_cross and pasivo.cotizacion_pago is None:
+            pasivo.cotizacion_pago = cotizacion
+
+        detalle = f"Pago deuda a {pasivo.acreedor}"
+        if es_cross:
+            detalle += f" ({imputa} {moneda_deuda.value} @ {cotizacion})"
+        # Una línea de caja **por deuda**: anular un pasivo barre la caja por su
+        # `referencia_id`, así que una sola línea contra el primero se llevaría
+        # también lo que se pagó de los otros (§Anulación).
+        svc_caja.registrar(
+            db,
+            fecha=fecha,
+            moneda=moneda_pago,
+            tipo=CajaTipo.EGRESO,
+            categoria=CajaCategoria.PAGO_PASIVO,
+            monto=parte,
+            referencia_tipo="pasivo",
+            referencia_id=pasivo.id,
+            detalle=detalle,
+            medio_pago=medio_pago,
+            cotizacion=cotizacion if es_cross else None,
+        )
+
+        if moneda_pago == Moneda.USD:
+            # Pagar en dólares los entrega: salen del stock vendible igual que
+            # salen de la caja (§Stock de dólares).
+            from app.services import stock_usd as svc_stock
+
+            svc_stock.egresar(
+                db,
+                monto=parte,
+                fecha=fecha,
+                origen_tipo="pasivo_pago",
+                origen_id=pasivo.id,
+                detalle=f"Dólares entregados — {detalle}",
+            )
+
+        imputaciones.append(PasivoImputado(pasivo=pasivo, imputado=imputa, cancelo=cancelo))
+
+    if moneda_pago == Moneda.USD:
+        from app.services.movimientos import _reimputar_fifo
+
+        db.flush()
+        _reimputar_fifo(db)
+
+    db.commit()
+    restante = (total - reduccion).quantize(_CENTAVO)
+    for imp in imputaciones:
+        db.refresh(imp.pasivo)
+    return PagoAcreedorResult(
+        acreedor=pasivos[0].acreedor,
+        imputaciones=imputaciones,
+        saldo_restante=restante,
+        cancelados=cancelados,
+    )
+
+
+def cancelar_a_acreedor_con_cheque(
+    db: Session,
+    *,
+    acreedor: str,
+    cheque: Cheque,
+    porcentaje_venta: Decimal,
+    operador_id: str,
+    motivo: str,
+    fecha: date | None = None,
+) -> PagoAcreedorResult:
+    """Entrega un cheque de cartera para saldar deudas con un acreedor.
+
+    El cheque vale su **neto** (nominal menos el porcentaje pactado) y con eso se
+    van llenando las deudas de la más vieja a la más nueva. No mueve efectivo: el
+    desembolso ya ocurrió cuando se compró el cheque, así que solo cambia de manos
+    el papel (§5).
+
+    Las deudas son las **en pesos**: un cheque es un instrumento en ARS y no hay
+    con qué convertirlo sin una cotización que nadie dictó.
+
+    **Si el cheque cubre de más, no se entrega**: el vuelto del panel deja elegir
+    entre pagar la diferencia o quedar debiendo, y por WhatsApp esa elección no
+    está — inventar una de las dos mueve plata o crea una deuda que el operador
+    no pidió. Se avisa y se resuelve en el panel (decisión del dueño, 2026-08-24).
+    """
+    acreedor = acreedor.strip()
+    if cheque.estado != ChequeEstado.EN_CARTERA:
+        raise ConflictError(
+            f"El cheque Nº {cheque.nro_cheque} no está en cartera "
+            f"(estado: {cheque.estado.value})."
+        )
+
+    pasivos = cargar_pasivos_acreedor(db, acreedor, Moneda.ARS, bloquear=True)
+    if not pasivos:
+        raise NotFoundError(f"No hay deudas pendientes en pesos con '{acreedor}'.")
+
+    valor_neto = (
+        cheque.monto * (Decimal("100") - porcentaje_venta) / Decimal("100")
+    ).quantize(_CENTAVO)
+    total = sum((p.saldo_pendiente for p in pasivos), _CERO).quantize(_CENTAVO)
+    if valor_neto - total > _CENTAVO:
+        raise ValidationError(
+            f"El cheque Nº {cheque.nro_cheque} vale ${valor_neto} netos y a "
+            f"{pasivos[0].acreedor} le debés ${total}: cubre de más. El vuelto "
+            "se resuelve desde el panel."
+        )
+
+    if valor_neto <= _CERO:
+        # Un cheque entregado al 100% no vale nada: saldaría cero y saldría de
+        # la cartera igual. Es plata que se pierde sin que nada avise.
+        raise ValidationError(
+            f"Con ese porcentaje el cheque Nº {cheque.nro_cheque} no vale nada: "
+            "revisá el descuento."
+        )
+
+    fecha = fecha or hoy_local()
+    reduccion = min(valor_neto, total).quantize(_CENTAVO)
+    reparto = repartir_pago_en_cuotas([p.saldo_pendiente for p in pasivos], reduccion)
+
+    try:
+        # Entregar el cheque lo saca de cartera. Pasa por el modelo y no por
+        # svc_cheques porque esta venta no cobra efectivo: el papel se va a
+        # cambio de una deuda, no de plata (§5).
+        cheque.transition_to(
+            ChequeEstado.VENDIDO,
+            operador_id=operador_id,
+            motivo=motivo,
+            porcentaje_venta=porcentaje_venta,
+        )
+
+        imputaciones: list[PasivoImputado] = []
+        cancelados = 0
+        for pasivo, imputa in zip(pasivos, reparto):
+            if imputa <= _CERO:
+                continue
+            pasivo.saldo_pendiente = (pasivo.saldo_pendiente - imputa).quantize(_CENTAVO)
+            cancelo = pasivo.saldo_pendiente <= _CERO
+            if cancelo:
+                pasivo.saldo_pendiente = _CERO
+                pasivo.estado = PasivoEstado.CANCELADA
+                pasivo.fecha_cancelacion = fecha
+                cancelados += 1
+            imputaciones.append(
+                PasivoImputado(pasivo=pasivo, imputado=imputa, cancelo=cancelo)
+            )
+
+        db.commit()
+    except (InvalidChequeStateTransition, ManualOperationRequired) as exc:
+        db.rollback()
+        raise ValidationError(str(exc)) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo pagar la deuda con el cheque.") from exc
+
+    for imp in imputaciones:
+        db.refresh(imp.pasivo)
+    return PagoAcreedorResult(
+        acreedor=pasivos[0].acreedor,
+        imputaciones=imputaciones,
+        saldo_restante=(total - reduccion).quantize(_CENTAVO),
+        cancelados=cancelados,
+    )

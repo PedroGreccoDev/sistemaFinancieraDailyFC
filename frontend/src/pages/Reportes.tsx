@@ -120,6 +120,39 @@ function CajaBloque({ caja, simbolo }: { caja: CajaMoneda; simbolo: 'ARS' | 'USD
         </span>
       </div>
 
+      {/* Las dos cajas por separado. El saldo de arriba es la suma y sirve para
+          leer el flujo, pero **el cierre del día se hace contra estos dos**: los
+          billetes se cuentan a mano y la cuenta se mira en el banco. */}
+      {(caja.efectivo || caja.transferencia) && (
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))',
+          borderBottom: '1px solid var(--bd-006)',
+        }}>
+          {([
+            ['💵', 'En billetes', caja.efectivo],
+            ['🏦', 'En la cuenta', caja.transferencia],
+          ] as const).map(([icono, texto, sub]) => sub && (
+            <div key={texto} style={{ padding: '0.6rem 1.1rem', borderRight: '1px solid var(--bd-006)' }}>
+              <div style={{ fontFamily: FM, fontSize: '0.68rem', color: 'rgba(100,116,139,0.75)', marginBottom: '0.2rem' }}>
+                {icono} {texto}
+              </div>
+              <div style={{
+                fontFamily: FN, fontSize: '1.15rem', letterSpacing: '0.02em',
+                color: parseFloat(sub.saldo_cierre) >= 0 ? 'var(--text-1)' : '#f87171',
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                {fmt(sub.saldo_cierre)}
+              </div>
+              <div style={{ fontFamily: FM, fontSize: '0.66rem', color: 'rgba(100,116,139,0.6)' }}>
+                <span style={{ color: 'var(--success)' }}>+ {fmt(sub.ingresos_total)}</span>
+                {'  '}
+                <span style={{ color: 'var(--danger)' }}>− {fmt(sub.egresos_total)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Detalle de líneas */}
       {caja.lineas.length === 0 ? (
         <p style={{ fontFamily: FM, fontSize: '0.78rem', color: 'rgba(100,116,139,0.55)', padding: '1.2rem 1.1rem' }}>

@@ -6,6 +6,7 @@ import { useToast } from '../lib/toast'
 import { btnFlat, btnSolid, btnBordered, FM } from '../lib/ui'
 import { IconDownload, IconUpload, IconFileJson, IconTable, IconAlert, IconClose, IconUserCog } from '../components/icons'
 import AperturaSistema from '../components/AperturaSistema'
+import ResetCaja from '../components/ResetCaja'
 
 const TABLA_LABELS: Record<string, string> = {
   clientes:             'Clientes',
@@ -269,6 +270,18 @@ export default function Configuracion() {
             subtitle="Los saldos con los que el negocio arrancó a usar el sistema: la cartera de cheques que ya tenían y el efectivo que había en el cajón."
           />
           <AperturaSistema />
+        </SectionCard>
+
+        {/* ── Reset de caja ────────────────────────────────────────────── */}
+        {/* Va pegado a la apertura porque son los dos pasos de la misma cosa:
+            se resetea y a continuación se cargan los saldos nuevos. */}
+        <SectionCard>
+          <SectionTitle
+            icon={<IconAlert size={20} />}
+            title="Arrancar la caja de cero"
+            subtitle="Borra el historial de caja para empezar con los saldos que contás hoy. Los cheques, lo que te deben y lo que debés quedan intactos."
+          />
+          <ResetCaja />
         </SectionCard>
 
         {/* ── Usuarios ─────────────────────────────────────────────────── */}

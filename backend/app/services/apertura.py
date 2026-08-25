@@ -31,6 +31,7 @@ from app.db.models import (
     CajaTipo,
     Cheque,
     ConfiguracionApertura,
+    MedioPago,
     Moneda,
     MovimientoCaja,
 )
@@ -61,6 +62,23 @@ def es_carga_inicial(db: Session, fecha: date) -> bool:
 
     Lo consulta el alta de cheques (panel y bot) para decidir si asienta o no el
     egreso de compra. Sin fecha de corte definida, todo es operación normal."""
+    return es_anterior_al_corte(db, fecha)
+
+
+def es_anterior_al_corte(db: Session, fecha: date) -> bool:
+    """True si una operación de `fecha` quedó del lado viejo de la línea.
+
+    Es el mismo criterio que la cartera preexistente, extendido a todo lo que
+    sobrevive a un corte: préstamos, deudas de clientes y pasivos (§Reset de
+    caja). Su plata se movió **antes** de la línea y el saldo que el dueño contó
+    ese día ya la tiene descontada, así que **rehacer su asiento la restaría dos
+    veces**.
+
+    Lo consultan los `resync_*`: sin esto, corregir el banco de un cheque viejo o
+    la fecha de un préstamo viejo le resucita el egreso dentro de la caja nueva,
+    y no hay ninguna señal — el operador tocó un dato menor y el saldo se movió
+    solo. Sin corte definido, todo es operación normal.
+    """
     cfg = db.get(ConfiguracionApertura, _ID)
     if cfg is None or cfg.fecha_corte_carga_inicial is None:
         return False
@@ -193,21 +211,28 @@ def definir_saldo_inicial(
     fecha: date,
     operador_id: str,
     cotizacion_usd: Decimal | None = None,
+    saldo_ars_transf: Decimal = Decimal("0"),
+    saldo_usd_transf: Decimal = Decimal("0"),
     forzar: bool = False,
 ) -> ConfiguracionApertura:
-    """Carga el efectivo con el que arrancó el negocio. **Por única vez.**
+    """Carga los saldos con los que arrancó el negocio. **Por única vez.**
 
-    Asienta una línea `SALDO_INICIAL` por moneda en la fecha indicada —que es el
-    día al que corresponde el efectivo, no el día en que se tipea—. El reporte la
-    trata como saldo de apertura y no como ingreso del día, para no inflar el neto
-    de la jornada en que se carga.
+    Son **cuatro**, uno por cada caja: `saldo_ars`/`saldo_usd` son los billetes
+    en mano y los `_transf`, lo que había depositado (§Caja paralela). Cada uno
+    asienta su propia línea `SALDO_INICIAL`, porque los dos libros se cuadran
+    contra realidades distintas —el cajón y el resumen del banco— y un saldo de
+    arranque en el lado equivocado los descuadra a los dos desde el día uno.
+
+    La fecha es el día al que corresponden esos saldos, no el día en que se
+    tipean. El reporte los trata como saldo de apertura y no como ingreso del
+    día, para no inflar el neto de la jornada en que se cargan.
 
     `forzar` permite rehacerlo si se cargó mal: borra las líneas anteriores y las
     vuelve a asentar.
     """
     if not (operador_id and operador_id.strip()):
         raise ValidationError("Se requiere identificar al operador.")
-    if saldo_ars < 0 or saldo_usd < 0:
+    if min(saldo_ars, saldo_usd, saldo_ars_transf, saldo_usd_transf) < 0:
         raise ValidationError("Los saldos de apertura no pueden ser negativos.")
     # Sin la cotización de costo no se puede armar el lote, y sin lote los dólares
     # quedan en la caja pero no se pueden vender: mejor frenar acá que descubrirlo
@@ -230,7 +255,13 @@ def definir_saldo_inicial(
         # Rehacer: se limpian las líneas previas para no duplicar la apertura.
         svc_caja.borrar_por_referencia_tipo(db, _REF_APERTURA)
 
-        for moneda, monto in ((Moneda.ARS, saldo_ars), (Moneda.USD, saldo_usd)):
+        cajas = (
+            (Moneda.ARS, MedioPago.EFECTIVO, saldo_ars, "efectivo en el cajón"),
+            (Moneda.USD, MedioPago.EFECTIVO, saldo_usd, "efectivo en el cajón"),
+            (Moneda.ARS, MedioPago.TRANSFERENCIA, saldo_ars_transf, "depositado"),
+            (Moneda.USD, MedioPago.TRANSFERENCIA, saldo_usd_transf, "depositado"),
+        )
+        for moneda, medio, monto, texto in cajas:
             if monto > 0:
                 svc_caja.registrar(
                     db,
@@ -239,8 +270,9 @@ def definir_saldo_inicial(
                     tipo=CajaTipo.INGRESO,
                     categoria=CajaCategoria.SALDO_INICIAL,
                     monto=monto,
+                    medio_pago=medio,
                     referencia_tipo=_REF_APERTURA,
-                    detalle="Saldo inicial de caja (efectivo al arrancar el sistema)",
+                    detalle=f"Saldo inicial de caja ({texto} al arrancar el sistema)",
                 )
 
         # Stock de dólares: el efectivo lo da la línea SALDO_INICIAL de arriba, el
@@ -254,6 +286,8 @@ def definir_saldo_inicial(
 
         cfg.saldo_inicial_ars = saldo_ars
         cfg.saldo_inicial_usd = saldo_usd
+        cfg.saldo_inicial_ars_transf = saldo_ars_transf
+        cfg.saldo_inicial_usd_transf = saldo_usd_transf
         cfg.cotizacion_usd_inicial = cotizacion_usd if saldo_usd > 0 else None
         cfg.fecha_saldo_inicial = fecha
         cfg.definido_por = operador_id.strip()

@@ -26,6 +26,9 @@ class PasivoCreate(BaseModel):
     ingreso_caja: bool = False
     # Día en que entró esa plata; solo con `ingreso_caja`. Null = el día de alta.
     fecha_ingreso: date | None = None
+    # Por cuál de las dos cajas entró (solo con `ingreso_caja`). Quien presta suele
+    # transferir, pero lo dice el operador: acá no se adivina (§Caja paralela).
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     # Obligatoria si le prestaron DÓLARES: costo ($/USD) del lote de stock que se
     # crea. Sin lote esos dólares no se pueden vender (la venta consume lotes FIFO).
     cotizacion_ingreso_usd: Decimal | None = Field(

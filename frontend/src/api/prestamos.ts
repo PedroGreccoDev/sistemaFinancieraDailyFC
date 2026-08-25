@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Cuota, Prestamo, Moneda, Frecuencia, CuotaCobrarConChequeResult, CuotasLoteCobrarConChequeResult } from '../types'
+import type { Cuota, CuotaCobrarConChequeResult, CuotasLoteCobrarConChequeResult, Frecuencia, MedioPago, Moneda, Prestamo } from '../types'
 
 export const getPrestamos = (estado?: string): Promise<Prestamo[]> =>
   apiFetch<Prestamo[]>(`/prestamos${estado ? `?estado=${estado}` : ''}`)
@@ -43,6 +43,8 @@ export const editarPrestamo = (id: string, payload: PrestamoUpdatePayload): Prom
 export interface PrestamoPagoPayload {
   monto_pagado: number
   moneda_pago: Moneda
+  /** Por cuál de las dos cajas pasa la plata. Efectivo si no se manda. */
+  medio_pago?: MedioPago
   cotizacion?: number | null
   /** Costo ($/USD) con el que los dólares cobrados entran al stock vendible. */
   cotizacion_stock?: number | null

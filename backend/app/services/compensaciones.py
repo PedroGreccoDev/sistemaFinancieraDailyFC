@@ -73,6 +73,7 @@ from app.services.conversion import (
 )
 from app.services.deudas_simples import repartir_cobro_fifo
 from app.services.prestamos import repartir_pago_en_cuotas
+from app.services.pasivos import cargar_pasivos_acreedor
 from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
@@ -146,36 +147,6 @@ def _imputaciones_reales(
 # ══════════════════════════════════════════════════════════════════════
 #  Registrar la compensación
 # ══════════════════════════════════════════════════════════════════════
-
-def cargar_pasivos_acreedor(
-    db: Session, acreedor: str, moneda: Moneda, *, bloquear: bool = False
-) -> list[Pasivo]:
-    """Las deudas vivas del negocio con un acreedor, de la más vieja a la más nueva.
-
-    El orden es por `created_at`: un pasivo no tiene fecha de origen propia más
-    allá de cuándo se cargó, y el vencimiento no sirve para esto —una deuda que
-    vence antes no es más vieja—. Es el mismo criterio de "primero lo más viejo"
-    que usa la imputación del lado del cliente (§2.c).
-
-    El match del nombre es **exacto** (case-insensitive): quién resuelve un
-    nombre parcial es quien llama —el bot, con su desambiguación— y acá elegir
-    de más significaría saldarle la deuda a otro.
-    """
-    stmt = (
-        select(Pasivo)
-        .where(
-            func.lower(Pasivo.acreedor) == acreedor.strip().lower(),
-            Pasivo.moneda == moneda,
-            Pasivo.estado == PasivoEstado.PENDIENTE,
-            Pasivo.saldo_pendiente > _CERO,
-            Pasivo.anulado_at.is_(None),
-        )
-        .order_by(Pasivo.created_at.asc())
-    )
-    if bloquear:
-        stmt = stmt.with_for_update()
-    return list(db.scalars(stmt))
-
 
 def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
     """El cliente le transfiere a un acreedor del negocio y bajan las dos deudas.

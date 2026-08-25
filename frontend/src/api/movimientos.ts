@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { MovimientoEfectivo } from '../types'
+import type { MedioPago, MovimientoEfectivo } from '../types'
 
 export const getMovimientos = (): Promise<MovimientoEfectivo[]> =>
   apiFetch<MovimientoEfectivo[]>('/movimientos-efectivo')
@@ -13,6 +13,13 @@ export interface MovimientoCreatePayload {
   cotizacion_aplicada: number
   cliente_id?: string | null
   observaciones?: string | null
+  /**
+   * Una operación de divisas mueve DOS cajas y no tienen por qué ser la misma:
+   * se paga por transferencia y se reciben los billetes en mano, o al revés.
+   * `medio_pago` es la pata en pesos; `medio_usd`, la de los dólares.
+   */
+  medio_pago?: MedioPago
+  medio_usd?: MedioPago
   // Solo en COMPRA. Omitir = se pagó todo (la operación normal). Menos que
   // monto × cotización deja el resto a deber: no descuenta la caja y genera la
   // deuda con el vendedor, que pasa a ser obligatorio (§Comprar sin abonar).

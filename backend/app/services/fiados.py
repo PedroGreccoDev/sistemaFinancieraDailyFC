@@ -56,6 +56,7 @@ def imputar_cobro(
     fecha: date,
     monto_caja: Decimal | None,
     moneda_pago: Moneda,
+    medio_pago: MedioPago,
     cotizacion: Decimal | None,
 ) -> bool:
     """Baja el saldo del fiado por `reduccion` (ARS) y asienta su línea de caja.
@@ -92,6 +93,7 @@ def imputar_cobro(
         tipo=CajaTipo.INGRESO,
         categoria=CajaCategoria.COBRO_FIADO,
         monto=monto_caja,
+        medio_pago=medio_pago,
         referencia_tipo="fiado",
         referencia_id=fiado.id,
         detalle=detalle,
@@ -148,6 +150,7 @@ def cobrar_con_efectivo(
         monto_caja=payload.monto_cobrado,
         moneda_pago=payload.moneda_pago,
         cotizacion=payload.cotizacion if es_cross else None,
+        medio_pago=payload.medio_pago,
     )
 
     try:

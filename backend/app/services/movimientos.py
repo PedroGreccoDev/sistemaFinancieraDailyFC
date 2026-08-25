@@ -150,6 +150,7 @@ def create_movimiento(
                 svc_caja.registrar(
                     db, fecha=fecha_caja, moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
                     categoria=CajaCategoria.COMPRA_USD, monto=abonado,
+                    medio_pago=payload.medio_pago,
                     referencia_tipo=_REF, referencia_id=movimiento.id,
                     detalle=detalle if a_deber <= _CERO else f"{detalle} (pago parcial)",
                 )
@@ -159,6 +160,7 @@ def create_movimiento(
             svc_caja.registrar(
                 db, fecha=fecha_caja, moneda=Moneda.USD, tipo=CajaTipo.INGRESO,
                 categoria=CajaCategoria.COMPRA_USD, monto=monto,
+                medio_pago=payload.medio_usd,
                 referencia_tipo=_REF, referencia_id=movimiento.id, detalle=detalle,
             )
 
@@ -205,11 +207,13 @@ def create_movimiento(
             svc_caja.registrar(
                 db, fecha=fecha_caja, moneda=Moneda.ARS, tipo=CajaTipo.INGRESO,
                 categoria=CajaCategoria.VENTA_USD, monto=pesos, ganancia=ganancia,
+                medio_pago=payload.medio_pago,
                 referencia_tipo=_REF, referencia_id=movimiento.id, detalle=detalle,
             )
             svc_caja.registrar(
                 db, fecha=fecha_caja, moneda=Moneda.USD, tipo=CajaTipo.EGRESO,
                 categoria=CajaCategoria.VENTA_USD, monto=monto,
+                medio_pago=payload.medio_usd,
                 referencia_tipo=_REF, referencia_id=movimiento.id, detalle=detalle,
             )
 
@@ -363,6 +367,20 @@ def _resync_caja_movimiento(db: Session, mov: MovimientoEfectivo) -> None:
         return
     fecha_caja = fecha_local(mov.fecha_operacion)
     pesos = (mov.monto * mov.cotizacion_aplicada).quantize(Decimal("0.01"))
+    # Las dos patas se leen por separado —misma categoría, monedas distintas—:
+    # una compra pagada por transferencia pudo entregar los billetes en mano, y
+    # rehacer ambas por la misma caja descuadraría las dos (§Caja paralela).
+    categoria = (
+        CajaCategoria.COMPRA_USD
+        if mov.tipo == MovimientoEfectivoTipo.COMPRA
+        else CajaCategoria.VENTA_USD
+    )
+    medio_ars = svc_caja.medio_de_referencia(
+        db, _REF, mov.id, categoria, moneda=Moneda.ARS
+    )
+    medio_usd = svc_caja.medio_de_referencia(
+        db, _REF, mov.id, categoria, moneda=Moneda.USD
+    )
     if mov.tipo == MovimientoEfectivoTipo.COMPRA:
         detalle = f"Compra de {mov.monto} USD @ ${mov.cotizacion_aplicada}"
         # El egreso es por lo abonado, no por el total: una compra a deber solo
@@ -373,12 +391,14 @@ def _resync_caja_movimiento(db: Session, mov: MovimientoEfectivo) -> None:
             svc_caja.registrar(
                 db, fecha=fecha_caja, moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
                 categoria=CajaCategoria.COMPRA_USD, monto=abonado,
+                medio_pago=medio_ars,
                 referencia_tipo=_REF, referencia_id=mov.id,
                 detalle=detalle if abonado >= pesos else f"{detalle} (pago parcial)",
             )
         svc_caja.registrar(
             db, fecha=fecha_caja, moneda=Moneda.USD, tipo=CajaTipo.INGRESO,
             categoria=CajaCategoria.COMPRA_USD, monto=mov.monto,
+            medio_pago=medio_usd,
             referencia_tipo=_REF, referencia_id=mov.id, detalle=detalle,
         )
     else:
@@ -386,11 +406,13 @@ def _resync_caja_movimiento(db: Session, mov: MovimientoEfectivo) -> None:
         svc_caja.registrar(
             db, fecha=fecha_caja, moneda=Moneda.ARS, tipo=CajaTipo.INGRESO,
             categoria=CajaCategoria.VENTA_USD, monto=pesos, ganancia=mov.ganancia,
+            medio_pago=medio_ars,
             referencia_tipo=_REF, referencia_id=mov.id, detalle=detalle,
         )
         svc_caja.registrar(
             db, fecha=fecha_caja, moneda=Moneda.USD, tipo=CajaTipo.EGRESO,
             categoria=CajaCategoria.VENTA_USD, monto=mov.monto,
+            medio_pago=medio_usd,
             referencia_tipo=_REF, referencia_id=mov.id, detalle=detalle,
         )
 

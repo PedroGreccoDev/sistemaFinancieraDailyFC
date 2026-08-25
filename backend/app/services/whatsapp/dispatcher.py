@@ -11,28 +11,29 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
-    Compensacion,
     CajaCategoria,
     CajaTipo,
     Cheque,
+    ChequeEstado,
     Cliente,
+    Compensacion,
     Cuota,
     CuotaEstado,
     DeudaSimple,
     DeudaSimpleEstado,
     Fiado,
     FiadoEstado,
-    GastoOperativo,
-    Pasivo,
-    PasivoEstado,
-    Prestamo,
-    PrestamoEstado,
-    ChequeEstado,
     FrecuenciaCuotas,
+    GastoOperativo,
+    MedioPago,
     Moneda,
     MovimientoCaja,
     MovimientoEfectivo,
     MovimientoEfectivoTipo,
+    Pasivo,
+    PasivoEstado,
+    Prestamo,
+    PrestamoEstado,
 )
 from app.schemas.gastos_operativos import GastoOperativoCreate
 from app.services import gastos_operativos as svc_gastos
@@ -56,6 +57,7 @@ from app.services import clientes as svc_clientes
 from app.services import fiados as svc_fiados
 from app.services import movimientos as svc_movimientos
 from app.services import prestamos as svc_prestamos
+from app.services import traspasos as svc_traspasos
 from app.services import reportes as svc_reportes
 from app.core.fechas import fecha_local, hora_local, hoy_local
 from app.services.exceptions import ServiceError, ValidationError
@@ -136,6 +138,10 @@ def dispatch(
             return _registrar_deuda(db, data, msg_at)
         if intent == "REGISTRAR_DEUDA_CLIENTE":
             return _registrar_deuda_cliente(db, data, msg_at)
+        if intent == "PAGAR_PASIVO":
+            return _pagar_pasivo(db, phone, data, msg_at)
+        if intent == "TRASPASO_CAJA":
+            return _traspaso_caja(db, data, msg_at)
         if intent == "MOVIMIENTO_EFECTIVO":
             return _movimiento_efectivo(db, data, msg_at)
         if intent == "REGISTRAR_GASTO":
@@ -260,6 +266,7 @@ def _registrar_un_cheque(
         porcentaje_compra=pct_compra,
         cliente_origen_id=cliente_id,
         monto_abonado=monto_abonado,
+        medio_pago=_medio(item),
     )
     foto_bytes, foto_mime = foto if foto else (None, None)
     cheque = svc_cheques.create_cheque(
@@ -349,6 +356,7 @@ def _vender_un_cheque_obj(
         motivo="Venta registrada por operador",
         porcentaje_venta=pct_venta,
         cliente_destino_id=cliente_destino_id,
+        medio_pago=_medio(data),
     )
     return svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
 
@@ -368,6 +376,7 @@ def _vender_un_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dat
         motivo="Venta registrada por operador",
         porcentaje_venta=pct_venta,
         cliente_destino_id=cliente_destino_id,
+        medio_pago=_medio(data),
     )
     cheque = svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
 
@@ -421,6 +430,7 @@ def _cobrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dateti
         target_state=ChequeEstado.COBRADO,
         operador_id=phone,
         motivo="Cobrado en ventanilla",
+        medio_pago=_medio(data),
     )
     cheque = svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
     return True, f"✅ Cheque Nº {cheque.nro_cheque} marcado como *COBRADO*."
@@ -455,6 +465,7 @@ def _nuevo_prestamo(db: Session, data: dict[str, Any], msg_at: datetime | None =
         frecuencia=frecuencia,
         total_a_cobrar=total,
         fecha_inicio=fecha_local(msg_at),
+        medio_pago=_medio(data),
     )
     prestamo = svc_prestamos.create_prestamo(db, payload)
 
@@ -525,7 +536,9 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
 
     fecha_cobro = fecha_local(msg_at)
     cobradas = [
-        svc_prestamos.cobrar_cuota(db, prestamo_id, c.id, fecha_cobro=fecha_cobro)
+        svc_prestamos.cobrar_cuota(
+            db, prestamo_id, c.id, fecha_cobro=fecha_cobro, medio_pago=_medio(data)
+        )
         for c in a_cobrar
     ]
 
@@ -584,6 +597,7 @@ def _registrar_deuda(db: Session, data: dict[str, Any], msg_at: datetime | None 
         ingreso_caja=ingreso_caja,
         fecha_ingreso=fecha_ingreso,
         cotizacion_ingreso_usd=cotizacion_ingreso,
+        medio_pago=_medio(data),
     )
     pasivo = svc_pasivos.create_pasivo(db, payload, created_at=msg_at)
 
@@ -633,6 +647,7 @@ def _registrar_deuda_cliente(
         monto=monto,
         moneda=moneda,
         fecha=fecha or fecha_local(msg_at),
+        medio_pago=_medio(data),
     )
     deuda = svc_deudas_simples.create_deuda_simple(db, payload)
 
@@ -673,6 +688,8 @@ def _movimiento_efectivo(db: Session, data: dict[str, Any], msg_at: datetime | N
         monto_abonado=monto_abonado,
         fecha_operacion=msg_at,
         observaciones=observaciones,
+        medio_pago=_medio(data),
+        medio_usd=_medio(data, "medio_usd"),
     )
     mov = svc_movimientos.create_movimiento(db, payload)
 
@@ -786,6 +803,7 @@ def _registrar_gasto(db: Session, data: dict[str, Any], msg_at: datetime | None 
                 moneda=moneda,
                 fecha_operacion=fecha,
                 hora_operacion=hora,
+                medio_pago=_medio(data),
             ),
         )
         registrados.append(gasto)
@@ -824,6 +842,7 @@ def _cobrar_fiado_efectivo(db: Session, phone: str, data: dict[str, Any]) -> Dis
     payload = FiadoCobrarEfectivoRequest(
         monto_cobrado=monto_cobrado,
         operador_id=phone,
+        medio_pago=_medio(data),
     )
     fiado_actualizado = svc_fiados.cobrar_con_efectivo(db, fiado.id, payload)
 
@@ -897,6 +916,7 @@ def _cobrar_deuda_cliente(
         moneda_pago=moneda_pago,
         cotizacion=cotizacion,
         cotizacion_stock=cotizacion_stock,
+        medio_pago=_medio(data),
         fecha_cobro=fecha_local(msg_at),
     )
     r = svc_deudores.cobrar_cliente(db, payload)
@@ -1322,6 +1342,20 @@ def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
     Se usa tras editar monto/%compra/%venta: borra las líneas de caja del cheque
     y las vuelve a crear (egreso de compra siempre; ingreso de venta/cobro según estado).
     """
+    # Los medios se leen antes de barrer: cada pata del cheque pudo ir por una
+    # caja distinta y rehacerlas todas en efectivo descuadraría las dos
+    # (§Caja paralela). Mismo criterio que `svc_cheques.resync_caja_cheque`.
+    medio_compra = svc_caja.medio_de_referencia(
+        db, "cheque", cheque.id, CajaCategoria.COMPRA_CHEQUE
+    )
+    medio_venta = svc_caja.medio_de_referencia(
+        db,
+        "cheque",
+        cheque.id,
+        CajaCategoria.VENTA_CHEQUE
+        if cheque.estado == ChequeEstado.VENDIDO
+        else CajaCategoria.COBRO_CHEQUE,
+    )
     svc_caja.borrar_por_referencia(db, "cheque", cheque.id)
     pagado = (cheque.monto * (_CIEN_PCT - cheque.porcentaje_compra) / _CIEN_PCT).quantize(Decimal("0.01"))
     # La cartera preexistente nunca asentó el egreso de compra (ver
@@ -1330,6 +1364,7 @@ def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
         svc_caja.registrar(
             db, fecha=fecha_local(cheque.created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
             categoria=CajaCategoria.COMPRA_CHEQUE, monto=pagado,
+            medio_pago=medio_compra,
             referencia_tipo="cheque", referencia_id=cheque.id,
             detalle=f"Compra cheque Nº {cheque.nro_cheque}",
         )
@@ -1339,6 +1374,7 @@ def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
             svc_caja.registrar(
                 db, fecha=fecha_local(cheque.ultimo_evento_manual_at), moneda=Moneda.ARS, tipo=CajaTipo.INGRESO,
                 categoria=CajaCategoria.VENTA_CHEQUE, monto=ingreso,
+                medio_pago=medio_venta,
                 referencia_tipo="cheque", referencia_id=cheque.id,
                 detalle=f"Venta cheque Nº {cheque.nro_cheque}",
             )
@@ -1346,6 +1382,7 @@ def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
         svc_caja.registrar(
             db, fecha=fecha_local(cheque.ultimo_evento_manual_at), moneda=Moneda.ARS, tipo=CajaTipo.INGRESO,
             categoria=CajaCategoria.COBRO_CHEQUE, monto=cheque.monto.quantize(Decimal("0.01")),
+            medio_pago=medio_venta,
             referencia_tipo="cheque", referencia_id=cheque.id,
             detalle=f"Cobro cheque Nº {cheque.nro_cheque}",
         )
@@ -1353,10 +1390,11 @@ def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
 
 def _resync_caja_gasto(db: Session, gasto: GastoOperativo) -> None:
     """Reconstruye la línea de caja (egreso) de un gasto tras editar su monto/moneda."""
+    medio = svc_caja.medio_de_referencia(db, "gasto", gasto.id, CajaCategoria.GASTO)
     svc_caja.borrar_por_referencia(db, "gasto", gasto.id)
     svc_caja.registrar(
         db, fecha=gasto.fecha_operacion, moneda=gasto.moneda, tipo=CajaTipo.EGRESO,
-        categoria=CajaCategoria.GASTO, monto=gasto.monto,
+        categoria=CajaCategoria.GASTO, monto=gasto.monto, medio_pago=medio,
         referencia_tipo="gasto", referencia_id=gasto.id, detalle=gasto.concepto,
     )
 
@@ -2810,3 +2848,195 @@ def _advertencias_cheque(fecha_emision: date | None, fecha_pago: date | None) ->
         avisos.append(f"⚠️ La fecha de emisión ({_fmt_date(fecha_emision)}) es futura.")
 
     return avisos
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Las dos cajas (§Caja paralela)
+# ────────────────────────────────────────────────────────────────────────────
+
+def _medio(data: dict[str, Any], clave: str = "medio_pago") -> MedioPago:
+    """Por cuál de las dos cajas pasó la plata. Efectivo si el mensaje no lo dice.
+
+    Es lo único que el bot asume, y es a propósito (regla 15 del prompt): el
+    efectivo es el caso normal, la respuesta dice por qué caja salió y el
+    operador lo corrige ahí. Preguntarlo en cada carga duplicaría cada mensaje.
+    """
+    valor = data.get(clave)
+    if not valor:
+        return MedioPago.EFECTIVO
+    try:
+        return MedioPago(str(valor).strip().upper())
+    except ValueError:
+        # Un medio que no existe es efectivo, no un error: frenar la operación
+        # entera por una palabra mal escrita cuesta más que asumir el caso normal.
+        logger.warning("medio_pago desconocido: %r. Se toma EFECTIVO.", valor)
+        return MedioPago.EFECTIVO
+
+
+def _texto_medio(medio: MedioPago) -> str:
+    """Cómo se nombra la caja en la respuesta al operador."""
+    return "efectivo" if medio == MedioPago.EFECTIVO else "transferencia"
+
+
+def _pagar_pasivo(
+    db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None
+) -> DispatchResult:
+    """El negocio le paga a alguien a quien le debía: baja la deuda y sale plata.
+
+    Con cheque de por medio no sale efectivo —esa plata salió cuando se compró el
+    cheque—, así que es otro camino: lo decide la presencia de `nro_cheque`.
+
+    Si le debe varias deudas al mismo acreedor, el pago se reparte de la más vieja
+    a la más nueva. Y **no se puede pagar de más**: por WhatsApp el monto viene
+    dictado, y de más suele ser un dedazo o el acreedor equivocado (decisión del
+    dueño, 2026-08-24).
+    """
+    acreedor_nombre = _req_str(data, "acreedor")
+    acreedor, pasivos = _resolver_acreedor(db, acreedor_nombre)
+
+    if data.get("nro_cheque"):
+        return _pagar_pasivo_con_cheque(db, phone, data, acreedor, msg_at)
+
+    monto = _req_decimal(data, "monto")
+    moneda_pago = (
+        _req_enum(data, "moneda_pago", Moneda) if data.get("moneda_pago") else Moneda.ARS
+    )
+    medio = _medio(data)
+    cotizacion = _opt_decimal(data, "cotizacion")
+
+    # Contra cuál de sus monedas va. Elegir por su cuenta movería la caja
+    # equivocada; mismo criterio que la compensación.
+    monedas = {p.moneda for p in pasivos}
+    if data.get("moneda_deuda"):
+        moneda_deuda = _req_enum(data, "moneda_deuda", Moneda)
+    elif len(monedas) == 1:
+        moneda_deuda = next(iter(monedas))
+    else:
+        return False, (
+            f"❓ Le debés a {acreedor} en pesos y en dólares. "
+            "¿Cuál de las dos estás pagando?"
+        )
+    del pasivos  # el servicio las vuelve a cargar con bloqueo
+
+    r = svc_pasivos.pagar_a_acreedor(
+        db,
+        acreedor=acreedor,
+        moneda_deuda=moneda_deuda,
+        monto_pagado=monto,
+        moneda_pago=moneda_pago,
+        medio_pago=medio,
+        cotizacion=cotizacion,
+        fecha=fecha_local(msg_at),
+    )
+
+    simbolo_pago = "U$D" if moneda_pago == Moneda.USD else "$"
+    simbolo_deuda = "U$D" if moneda_deuda == Moneda.USD else "$"
+    lines = [
+        "✅ *Pago registrado*",
+        f"Le pagaste {simbolo_pago}{_fmt_num(monto)} a {r.acreedor} "
+        f"por {_texto_medio(medio)}",
+        "",
+        "*Se imputó a:*",
+    ]
+    for imp in r.imputaciones:
+        saldado = " ✔️ saldada" if imp.cancelo else ""
+        lines.append(
+            f"  • {imp.pasivo.concepto} — {simbolo_deuda}{_fmt_num(imp.imputado)}{saldado}"
+        )
+    if r.saldo_restante <= Decimal("0.00"):
+        lines.append(f"  🎉 No le debés más nada en {moneda_deuda.value}.")
+    else:
+        lines.append(
+            f"  Le seguís debiendo: {simbolo_deuda}{_fmt_num(r.saldo_restante)}"
+        )
+    # El operador tiene que poder ver de qué caja salió: es su control inmediato
+    # de que el bot no lo mandó al lado equivocado (§Caja paralela).
+    lines.append("")
+    lines.append(f"💸 Salió de la caja en {_texto_medio(medio)}.")
+    return True, "\n".join(lines)
+
+
+def _pagar_pasivo_con_cheque(
+    db: Session,
+    phone: str,
+    data: dict[str, Any],
+    acreedor: str,
+    msg_at: datetime | None = None,
+) -> DispatchResult:
+    """Entrega un cheque de cartera para saldar lo que se le debe al acreedor.
+
+    No mueve efectivo: el desembolso ocurrió al comprar el cheque. Lo que cambia
+    de manos es el papel.
+    """
+    nro = _req_str(data, "nro_cheque")
+    banco = (str(data["banco"]).strip() or None) if data.get("banco") else None
+    porcentaje = _req_decimal(data, "porcentaje_venta")
+
+    cheque = svc_cheques.resolve_cheque(db, nro, banco)
+    r = svc_pasivos.cancelar_a_acreedor_con_cheque(
+        db,
+        acreedor=acreedor,
+        cheque=cheque,
+        porcentaje_venta=porcentaje,
+        operador_id=phone,
+        motivo=f"Entregado a {acreedor} para pagar deuda (bot)",
+        fecha=fecha_local(msg_at),
+    )
+
+    neto = sum((i.imputado for i in r.imputaciones), Decimal("0.00"))
+    lines = [
+        "✅ *Deuda pagada con cheque*",
+        f"Le entregaste el cheque Nº {cheque.nro_cheque} a {r.acreedor} "
+        f"al {_fmt_num(porcentaje)}% — vale {_ars(neto)} netos",
+        "",
+        "*Se imputó a:*",
+    ]
+    for imp in r.imputaciones:
+        saldado = " ✔️ saldada" if imp.cancelo else ""
+        lines.append(f"  • {imp.pasivo.concepto} — {_ars(imp.imputado)}{saldado}")
+    if r.saldo_restante <= Decimal("0.00"):
+        lines.append("  🎉 No le debés más nada.")
+    else:
+        lines.append(f"  Le seguís debiendo: {_ars(r.saldo_restante)}")
+    lines.append("")
+    lines.append("⚠️ No movió la caja: esa plata salió cuando compraste el cheque.")
+    return True, "\n".join(lines)
+
+
+def _traspaso_caja(
+    db: Session, data: dict[str, Any], msg_at: datetime | None = None
+) -> DispatchResult:
+    """Un depósito o una extracción: la plata cambia de caja sin entrar ni salir."""
+    monto = _req_decimal(data, "monto")
+    moneda = _req_enum(data, "moneda", Moneda) if data.get("moneda") else Moneda.ARS
+    origen = _medio(data, "origen")
+    destino = _medio(data, "destino")
+
+    if origen == destino:
+        # El modelo mandó los dos iguales: no se puede adivinar para qué lado va,
+        # y elegir uno movería plata en la dirección contraria a la real.
+        return False, (
+            "❓ ¿Depositaste o extrajiste? Decímelo así lo cargo para el lado "
+            "correcto: \"deposité 500 mil\" o \"saqué 500 mil del cajero\"."
+        )
+
+    t = svc_traspasos.registrar(
+        db,
+        monto=monto,
+        moneda=moneda,
+        origen=origen,
+        destino=destino,
+        fecha=fecha_local(msg_at),
+    )
+
+    simbolo = "U$D" if moneda == Moneda.USD else "$"
+    accion = "Depósito" if origen == MedioPago.EFECTIVO else "Extracción"
+    return True, "\n".join(
+        [
+            f"✅ *{accion} registrado*" if accion == "Depósito" else f"✅ *{accion} registrada*",
+            f"{simbolo}{_fmt_num(t.monto)} de {_texto_medio(origen)} "
+            f"a {_texto_medio(destino)}",
+            "",
+            "⚠️ No cambió lo que tenés: la misma plata pasó de una caja a la otra.",
+        ]
+    )

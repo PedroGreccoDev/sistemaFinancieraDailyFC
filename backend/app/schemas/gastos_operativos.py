@@ -6,13 +6,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.db.models import Moneda
+from app.db.models import MedioPago, Moneda
 
 
 class GastoOperativoCreate(BaseModel):
     concepto: str = Field(min_length=1, max_length=300)
     monto: Decimal = Field(gt=0)
     moneda: Moneda = Moneda.ARS
+    # Por cuál de las dos cajas salió. El efectivo es el caso normal de un gasto
+    # diario (nafta, almuerzo), así que es el default; una transferencia se dice.
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     fecha_operacion: date | None = None
     hora_operacion: time | None = None
     observaciones: str | None = None
@@ -25,6 +28,7 @@ class GastoOperativoUpdate(BaseModel):
     concepto: str | None = Field(default=None, min_length=1, max_length=300)
     monto: Decimal | None = Field(default=None, gt=0)
     moneda: Moneda | None = None
+    medio_pago: MedioPago | None = None
     fecha_operacion: date | None = None
     hora_operacion: time | None = None
     observaciones: str | None = None

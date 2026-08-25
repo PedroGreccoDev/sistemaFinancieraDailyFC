@@ -18,6 +18,7 @@ from app.db.models import (
     Cuota,
     CuotaEstado,
     FrecuenciaCuotas,
+    MedioPago,
     Moneda,
     Prestamo,
     PrestamoEstado,
@@ -30,6 +31,7 @@ from app.schemas.prestamos import (
     PrestamoPagoRequest,
     PrestamoUpdate,
 )
+from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
 from app.services import stock_usd as svc_stock
 from app.services.conversion import calcular_reduccion_saldo
@@ -111,6 +113,7 @@ def _registrar_cobro_cuota(
     prestamo: Prestamo,
     cuota: Cuota,
     monto: Decimal,
+    medio_pago: MedioPago,
     cotizacion_stock: Decimal | None = None,
 ) -> None:
     """Asienta en la caja el ingreso por lo cobrado de una cuota (en la moneda del préstamo).
@@ -128,6 +131,7 @@ def _registrar_cobro_cuota(
         tipo=CajaTipo.INGRESO,
         categoria=CajaCategoria.COBRO_CUOTA,
         monto=monto,
+        medio_pago=medio_pago,
         referencia_tipo="cuota",
         referencia_id=cuota.id,
         detalle=f"Cuota #{cuota.numero_cuota} - {cliente_nombre}",
@@ -230,6 +234,7 @@ def create_prestamo(db: Session, payload: PrestamoCreate) -> Prestamo:
             tipo=CajaTipo.EGRESO,
             categoria=CajaCategoria.OTORGAMIENTO_PRESTAMO,
             monto=prestamo.credito,
+            medio_pago=payload.medio_pago,
             referencia_tipo="prestamo",
             referencia_id=prestamo.id,
             detalle=f"Préstamo a {cliente.nombre}",
@@ -322,8 +327,20 @@ def editar_prestamo(
 
     try:
         # Rehacer el egreso de caja del otorgamiento (monto/moneda/fecha pueden cambiar).
+        # El medio se conserva salvo que la edición traiga otro: corregir el monto
+        # de un préstamo entregado por transferencia no debe devolverlo al efectivo.
+        medio = data.get("medio_pago") or svc_caja.medio_de_referencia(
+            db, "prestamo", prestamo.id, CajaCategoria.OTORGAMIENTO_PRESTAMO
+        )
         svc_caja.borrar_por_referencia(db, "prestamo", prestamo.id)
         cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
+        # Un préstamo anterior al corte ya salió de la caja vieja: reasentarlo
+        # restaría esa plata dos veces (§Reset de caja). Se borra la línea igual
+        # —si quedó alguna, no corresponde— y no se vuelve a escribir.
+        if svc_apertura.es_anterior_al_corte(db, fecha_inicio):
+            _resync_stock_otorgamiento(db, prestamo)
+            db.commit()
+            return get_prestamo(db, prestamo.id)
         svc_caja.registrar(
             db,
             fecha=fecha_inicio,
@@ -331,6 +348,7 @@ def editar_prestamo(
             tipo=CajaTipo.EGRESO,
             categoria=CajaCategoria.OTORGAMIENTO_PRESTAMO,
             monto=credito,
+            medio_pago=medio,
             referencia_tipo="prestamo",
             referencia_id=prestamo.id,
             detalle=f"Préstamo a {cliente_nombre}",
@@ -349,6 +367,7 @@ def cobrar_cuota(
     cuota_id: uuid.UUID,
     fecha_cobro: date | None = None,
     cotizacion_stock: Decimal | None = None,
+    medio_pago: MedioPago = MedioPago.EFECTIVO,
 ) -> Cuota:
     cuota = db.scalar(
         select(Cuota)
@@ -370,7 +389,9 @@ def cobrar_cuota(
         db.flush()
         prestamo = db.get(Prestamo, prestamo_id)
         if prestamo is not None:
-            _registrar_cobro_cuota(db, prestamo, cuota, restante, cotizacion_stock)
+            _registrar_cobro_cuota(
+                db, prestamo, cuota, restante, medio_pago, cotizacion_stock
+            )
         # Cualquier cuota no cobrada (PENDIENTE o EN_MORA) mantiene vivo el préstamo.
         pendientes_restantes = db.scalar(
             select(func.count()).select_from(Cuota).where(
@@ -453,6 +474,7 @@ def cobrar_cuotas_lote(
     cuota_ids: list[uuid.UUID],
     fecha_cobro: date | None = None,
     cotizacion_stock: Decimal | None = None,
+    medio_pago: MedioPago = MedioPago.EFECTIVO,
 ) -> list[Cuota]:
     cuotas = list(
         db.scalars(
@@ -481,7 +503,8 @@ def cobrar_cuotas_lote(
         if prestamo is not None:
             for cuota in cuotas:
                 _registrar_cobro_cuota(
-                    db, prestamo, cuota, restantes[cuota.id], cotizacion_stock
+                    db, prestamo, cuota, restantes[cuota.id],
+                    medio_pago, cotizacion_stock,
                 )
         pendientes_restantes = db.scalar(
             select(func.count()).select_from(Cuota).where(
@@ -589,6 +612,7 @@ def imputar_pago(
     fecha: date,
     monto_caja: Decimal | None,
     moneda_pago: Moneda,
+    medio_pago: MedioPago,
     cotizacion: Decimal | None,
     cotizacion_stock: Decimal | None = None,
 ) -> bool:
@@ -640,6 +664,7 @@ def imputar_pago(
         tipo=CajaTipo.INGRESO,
         categoria=CajaCategoria.COBRO_CUOTA,
         monto=monto_caja,
+        medio_pago=medio_pago,
         referencia_tipo="prestamo",
         referencia_id=prestamo.id,
         detalle=detalle,
@@ -710,6 +735,7 @@ def pagar_prestamo(
         monto_caja=payload.monto_pagado,
         moneda_pago=payload.moneda_pago,
         cotizacion=payload.cotizacion if es_cross else None,
+        medio_pago=payload.medio_pago,
         cotizacion_stock=payload.cotizacion_stock,
     )
 

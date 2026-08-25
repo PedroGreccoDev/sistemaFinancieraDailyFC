@@ -8,12 +8,13 @@ import { useToast } from '../lib/toast'
 import { IconRefresh, IconCamera } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
 import ChequeFotoModal from '../components/ChequeFotoModal'
-import type { Cheque } from '../types'
+import type { Cheque, MedioPago } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
 import DateRangePicker from '../components/DateRangePicker'
 import ModalEliminar from '../components/ModalEliminar'
 import ModalRevertirCheque from '../components/ModalRevertirCheque'
 import ClienteSelect from '../components/ClienteSelect'
+import SelectorMedioPago from '../components/SelectorMedioPago'
 
 const MODAL_BG = 'var(--modal)'
 const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: "'Manrope', sans-serif", fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
@@ -31,6 +32,9 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
   const [clienteOrigenId, setClienteOrigenId] = useState('')
   const [aDeber, setADeber] = useState(false)
   const [montoAbonado, setMontoAbonado] = useState('')
+  // Por dónde pagaste el cheque. Solo importa si algo se abonó: una compra
+  // enteramente a deber no saca plata de ninguna caja.
+  const [medioPago, setMedioPago] = useState<MedioPago>('EFECTIVO')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
@@ -61,6 +65,7 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
         fecha_emision: fechaEmision || null,
         fecha_pago: fechaPago || null,
         cliente_origen_id: clienteOrigenId || null,
+        medio_pago: medioPago,
         // Sin la marca no viaja el campo: el backend lo lee como compra pagada.
         ...(aDeber ? { monto_abonado: abonadoNum } : {}),
       })
@@ -103,6 +108,11 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
                 </>
               )}
             </div>
+          )}
+          {/* Si no se abonó nada, no sale plata de ninguna caja y el control
+              sobra: mostrarlo invitaría a elegir algo que no se va a usar. */}
+          {abonadoNum > 0 && (
+            <SelectorMedioPago valor={medioPago} onChange={setMedioPago} label="¿Cómo lo pagaste?" />
           )}
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', fontFamily: FM, fontSize: '0.76rem', color: 'var(--text-2)', cursor: 'pointer' }}>
             <input type="checkbox" checked={aDeber} onChange={(e) => { setADeber(e.target.checked); if (!e.target.checked) setMontoAbonado('') }} style={{ cursor: 'pointer' }} />

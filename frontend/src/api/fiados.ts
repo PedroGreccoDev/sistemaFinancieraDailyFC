@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Fiado, FiadoEstado, CobrarConChequeResult, Moneda } from '../types'
+import type { CobrarConChequeResult, Fiado, FiadoEstado, MedioPago, Moneda } from '../types'
 
 interface CobrarConChequePayload {
   nro_cheque_pago: string
@@ -20,7 +20,7 @@ export const cobrarEfectivo = (
   id: string,
   monto_cobrado: number,
   operador_id: string,
-  extra?: { moneda_pago?: Moneda; cotizacion?: number | null },
+  extra?: { moneda_pago?: Moneda; medio_pago?: MedioPago; cotizacion?: number | null },
 ): Promise<Fiado> =>
   apiFetch<Fiado>(`/fiados/${id}/cobrar-efectivo`, {
     method: 'POST',
@@ -28,6 +28,8 @@ export const cobrarEfectivo = (
       monto_cobrado,
       operador_id,
       moneda_pago: extra?.moneda_pago ?? 'ARS',
+      // Efectivo si no se aclara: es el caso normal del negocio.
+      medio_pago: extra?.medio_pago ?? 'EFECTIVO',
       cotizacion: extra?.cotizacion ?? null,
     }),
   })

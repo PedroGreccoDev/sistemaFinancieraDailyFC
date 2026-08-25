@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import ajustes_caja, anulacion, apertura, auth, backup, cheques, clientes, compensaciones, deudas_simples, deudores, fiados, gastos_operativos, health, movimientos, pasivos, prestamos, reportes, webhook
+from app.api.routes import ajustes_caja, anulacion, apertura, auth, backup, cheques, clientes, compensaciones, deudas_simples, deudores, fiados, gastos_operativos, health, movimientos, pasivos, prestamos, reportes, reset_caja, traspasos, webhook
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -94,6 +94,8 @@ app.include_router(deudores.router, prefix=settings.api_v1_prefix, dependencies=
 app.include_router(compensaciones.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 app.include_router(gastos_operativos.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 app.include_router(ajustes_caja.router, prefix=settings.api_v1_prefix, dependencies=_auth)
+app.include_router(traspasos.router, prefix=settings.api_v1_prefix, dependencies=_auth)
+app.include_router(reset_caja.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 app.include_router(anulacion.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 app.include_router(apertura.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 app.include_router(backup.router, prefix=settings.api_v1_prefix, dependencies=_auth)

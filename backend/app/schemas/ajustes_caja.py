@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.db.models import AjusteCajaMotivo, CajaTipo, Moneda
+from app.db.models import AjusteCajaMotivo, CajaTipo, MedioPago, Moneda
 
 
 class AjusteCajaCreate(BaseModel):
@@ -23,6 +23,9 @@ class AjusteCajaCreate(BaseModel):
     tipo: CajaTipo
     motivo: AjusteCajaMotivo
     monto: Decimal = Field(gt=0)
+    # Cuál de las dos cajas se corrige. Un descuadre se detecta contando billetes,
+    # así que el efectivo es el default; el banco se elige explícitamente.
+    medio_pago: MedioPago = MedioPago.EFECTIVO
     cotizacion_usd: Decimal | None = Field(default=None, gt=0)
     descripcion: str | None = None
     operador_id: str = Field(min_length=1, max_length=80)

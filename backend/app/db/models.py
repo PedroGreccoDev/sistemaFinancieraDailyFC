@@ -77,6 +77,15 @@ class CajaTipo(str, enum.Enum):
 
 
 class MedioPago(str, enum.Enum):
+    """Por cuál de las dos cajas paralelas pasó la plata.
+
+    No es una etiqueta descriptiva: es el eje que separa los libros. Cada moneda
+    lleva dos saldos independientes —el efectivo se cuenta contra los billetes
+    del cajón, la transferencia contra el resumen del banco— y ningún movimiento
+    cae en los dos. Lo único que cruza de un lado al otro es `TRASPASO_CAJA`
+    (§Traspaso entre cajas).
+    """
+
     EFECTIVO      = "EFECTIVO"
     TRANSFERENCIA = "TRANSFERENCIA"
 
@@ -105,6 +114,11 @@ class CajaCategoria(str, enum.Enum):
     # Plata agregada o restada a mano, sin operación de negocio detrás: corrección
     # de un descuadre, aporte o retiro del dueño (§Ajustes de caja).
     AJUSTE_CAJA          = "AJUSTE_CAJA"
+    # Plata que pasa de una caja a la otra sin entrar ni salir del negocio: un
+    # depósito o una extracción. Siempre son DOS filas de esta categoría —el
+    # egreso de una caja y el ingreso de la otra, mismo monto y misma moneda—,
+    # así que en el neto del día se cancelan solas (§Traspaso entre cajas).
+    TRASPASO_CAJA        = "TRASPASO_CAJA"
 
 
 class AjusteCajaMotivo(str, enum.Enum):
@@ -790,9 +804,14 @@ class MovimientoCaja(Base):
     monto:     Mapped[Decimal]       = mapped_column(sa.Numeric(18, 2))
     # Solo VENTA_USD: ganancia FIFO realizada (en ARS). Dato de reporte, no de caja.
     ganancia:  Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
-    # Solo pagos de pasivo (PAGO_PASIVO): medio con el que se pagó. Null en el resto.
-    medio_pago: Mapped[MedioPago | None] = mapped_column(
-        sa.Enum(MedioPago, name="medio_pago", create_type=False), nullable=True
+    # Por cuál de las dos cajas pasó. **Obligatorio**: no hay movimiento que no
+    # caiga en una o en la otra, y dejarlo en blanco lo volvería invisible para
+    # los dos saldos. Lo histórico quedó en EFECTIVO (migración `0026`), que es lo
+    # que el sistema asumía de hecho antes de que existiera la caja paralela.
+    medio_pago: Mapped[MedioPago] = mapped_column(
+        sa.Enum(MedioPago, name="medio_pago", create_type=False),
+        nullable=False,
+        index=True,
     )
     # $/USD aplicado cuando un pago cruza monedas (deuda en una moneda, pago en otra).
     # Null cuando pago y deuda comparten moneda. Solo dato de reporte/auditoría.
@@ -957,13 +976,26 @@ class ConfiguracionApertura(Base):
             "saldo_inicial_usd IS NULL OR saldo_inicial_usd >= 0",
             name="ck_configuracion_apertura_usd_no_negativo",
         ),
+        sa.CheckConstraint(
+            "saldo_inicial_ars_transf IS NULL OR saldo_inicial_ars_transf >= 0",
+            name="ck_configuracion_apertura_ars_transf_no_negativo",
+        ),
+        sa.CheckConstraint(
+            "saldo_inicial_usd_transf IS NULL OR saldo_inicial_usd_transf >= 0",
+            name="ck_configuracion_apertura_usd_transf_no_negativo",
+        ),
     )
 
     id: Mapped[int] = mapped_column(sa.Integer(), primary_key=True, default=1)
 
     fecha_corte_carga_inicial: Mapped[date | None] = mapped_column(sa.Date(), nullable=True)
+    # Los cuatro saldos de arranque: cada moneda por sus dos cajas (§Caja paralela).
+    # Los dos primeros son el EFECTIVO —conservan su nombre porque es lo que
+    # significaban cuando la caja era una sola— y los `_transf`, lo depositado.
     saldo_inicial_ars:         Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
     saldo_inicial_usd:         Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+    saldo_inicial_ars_transf:  Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+    saldo_inicial_usd_transf:  Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
     # $/USD promedio al que se consiguió el stock inicial de dólares: es el costo
     # contra el que se calcula la ganancia de las primeras ventas (migración 0019).
     cotizacion_usd_inicial:    Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 4), nullable=True)

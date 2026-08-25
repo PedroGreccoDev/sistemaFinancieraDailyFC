@@ -46,7 +46,9 @@ de modo que el asiento de caja y la operación de negocio son **atómicos** (o a
   `COBRO_CUOTA` referencia la `cuota`
   cuando se cobra una cuota entera, o el `prestamo` cuando es un pago de **importe libre** (§3).
 - `ganancia` — solo en `VENTA_USD`: ganancia FIFO realizada en ARS. Es dato de **reporte**, no de caja.
-- `medio_pago` — solo en `PAGO_PASIVO`: `EFECTIVO` | `TRANSFERENCIA` (enum `medio_pago`, migración `0014`); null en el resto.
+- `medio_pago` — **obligatorio**: por cuál de las dos cajas paralelas pasó la plata
+  (`EFECTIVO` | `TRANSFERENCIA`, enum `medio_pago`, migración `0014`; NOT NULL desde la
+  `0026`). No es una etiqueta: es el eje que separa los dos libros — ver §Las dos cajas.
 - `cotizacion` — `$/USD` aplicado cuando un pago cruza monedas (deuda y pago en monedas distintas);
   la usan `PAGO_PASIVO` (§5), `COBRO_FIADO` (§2) y `COBRO_CUOTA` (§3). Null si comparten moneda. Dato de reporte/auditoría.
 - `detalle` — texto libre con el detalle de la línea.
@@ -64,6 +66,165 @@ categoría** (`borrar_por_referencia(..., categoria=...)`). Un pasivo lleva el
 que salió de verdad. La alternativa —un `referencia_tipo` distinto por línea, como hace
 `deuda_simple`/`deuda_simple_cobro`— no sirve acá: el motor de anulación necesita encontrar
 **todas** las líneas del pasivo por una sola referencia.
+
+---
+
+## Las dos cajas en paralelo — efectivo y transferencia _(régimen definido 2026-08-25)_
+
+Hasta la migración `0026` la caja era **un solo saldo por moneda** y `medio_pago` una
+etiqueta suelta que solo llenaban los pagos de pasivo. Alcanzaba para el reporte pero
+no para **cerrar el día**: el dueño cuenta billetes y los comparaba contra un número
+que también tenía adentro las transferencias, así que nunca le podía dar.
+
+Desde acá cada moneda lleva **dos libros paralelos**: el efectivo del cajón y la plata
+de la cuenta. Todo movimiento cae en uno **o** en el otro —nunca en los dos— y cada uno
+se cuadra contra su propia realidad. Son cuatro saldos: ARS efectivo, ARS
+transferencia, USD efectivo, USD transferencia.
+
+- **`medio_pago` es NOT NULL en `movimientos_caja`** y `caja.registrar()` lo exige **sin
+  default**. Que sea obligatorio en la firma es la pieza central del régimen: con un
+  default, una operación nueva que se lo olvidara entraría igual y sus líneas irían
+  todas al efectivo **en silencio**. Así el olvido falla al escribir el código y no en
+  el cierre del mes. `test_caja_paralela.py` recorre el árbol de sintaxis de `app/` y
+  falla si algún `registrar()` no lo pasa.
+- **Los schemas de entrada sí tienen default `EFECTIVO`**, que es el caso normal del
+  negocio. La obligación vive en la capa interna, la comodidad en la de entrada.
+- **El medio no se pierde al rehacer una operación.** Los `resync_caja_*` leen el medio
+  de la línea **antes** de barrerla (`caja.medio_de_referencia`). Sin eso, corregir el
+  monto de un gasto pagado por transferencia lo devolvería al efectivo y el error sería
+  **doble**: una caja baja de más y la otra queda alta por lo mismo.
+  - **Filtra por `moneda` cuando hace falta:** una compra de dólares asienta **dos**
+    líneas de la misma categoría (saca pesos, mete USD) y cada pata pudo ir por una caja
+    distinta —"le transferí los pesos y me dio los billetes"—. Sin el filtro se leería
+    el medio de la primera y se aplicaría a las dos.
+- **Las divisas llevan dos medios**: `medio_pago` (la pata en pesos) y `medio_usd` (la
+  de los dólares), en `MovimientoEfectivoCreate` y en el bot.
+- **Apertura: cuatro saldos.** `configuracion_apertura` suma `saldo_inicial_ars_transf` y
+  `saldo_inicial_usd_transf`; las columnas viejas pasan a ser **el efectivo** (es lo que
+  significaban cuando la caja era una sola). Cada uno asienta su propia línea
+  `SALDO_INICIAL` con su medio. Sin esto la caja de transferencias arranca en cero
+  aunque haya plata depositada.
+- **El reporte expone las dos por separado.** `CajaMoneda` suma `efectivo` y
+  `transferencia` (`CajaPorMedio`: ingresos, egresos, neto, apertura y cierre propios).
+  Los totales de la moneda siguen siendo la suma —sirven para leer el flujo del
+  negocio— pero **el cierre del día se hace contra los de abajo**, que son los únicos
+  que se pueden contar contra algo. `_saldo_hasta` agrupa por `(moneda, medio)`.
+- **`medio_pago` es null solo en el feed unificado**, y solo en los eventos **sin
+  efectivo** (un cheque que entra a cartera): no pasaron por ninguna de las dos cajas.
+
+**Panel:** `components/SelectorMedioPago.tsx`, dos botones y no un desplegable —es la
+decisión que más veces por día toma el operador—, con el efectivo elegido de entrada. Va
+en el cobro/pago (`ModalPagarDeuda`), el gasto, el alta de cheque, el ajuste de caja y la
+operación de dólares, que lleva **dos** (los pesos y los billetes pueden ir por cajas
+distintas). Se oculta cuando no sale un peso: una compra enteramente a deber no toca
+ninguna caja. El reporte muestra los dos saldos por separado bajo el total.
+
+### Traspaso entre cajas — depositar y extraer
+
+Categoría `TRASPASO_CAJA`, servicio `svc_traspasos`, router `/traspasos`.
+
+Depositar en el banco o sacar del cajero **no es un ingreso ni un egreso**: la plata no
+entró ni salió del negocio, cambió de bolsillo. Pero sí mueve los dos saldos, en
+sentidos opuestos. Sin esta operación las dos cajas se despegan de la realidad el día
+del primer depósito y no hay forma de arreglarlo salvo dos ajustes a mano que el
+reporte muestra como "corrección de descuadre".
+
+- **Son siempre DOS líneas** con el mismo `referencia_id` (un uuid propio del traspaso):
+  el EGRESO de la caja de origen y el INGRESO de la de destino, mismo monto y moneda. En
+  el neto del día **se cancelan solas**, que es lo correcto.
+- **No tiene tabla propia**: se reconstruye desde sus dos líneas. Media línea suelta no
+  se lista —se saltea en vez de inventar el lado que falta, que mostraría una caja
+  moviéndose sola—. Anular borra las dos o ninguna.
+- **No toca el stock de dólares** aunque la moneda sea USD: esos dólares ya eran del
+  negocio antes y lo siguen siendo. El stock mide cuántos hay y a qué costo entraron, no
+  en qué bolsillo están (§Stock de dólares).
+- **Bot:** intent `TRASPASO_CAJA`. La trampa que cubre el prompt: **"deposité 500 mil"**
+  es plata propia cambiando de caja, **"Juan me depositó 500 mil"** es un COBRO que entró
+  por transferencia. La diferencia es si hay **otra persona**; confundirlos infla o
+  desinfla el neto del día por el monto entero.
+
+### El bot paga los pasivos _(2026-08-25)_
+
+Hasta acá el bot **anotaba** las deudas del negocio pero no las pagaba: "le pagué 500
+lucas a Cuello" no tenía intent, caía en `DESCONOCIDO` y el bot **ni siquiera avisaba**
+que había que ir al panel. El backend ya sabía hacerlo (`POST /pasivos/{id}/pagar`);
+faltaba la punta del chat.
+
+- **Intent `PAGAR_PASIVO`**, con dos caminos que decide la presencia de `nro_cheque`:
+  con plata (`svc_pasivos.pagar_a_acreedor`) o entregando un cheque de cartera
+  (`cancelar_a_acreedor_con_cheque`).
+- **Se dirige a un ACREEDOR, no al id de una deuda.** El panel paga una deuda puntual
+  porque el operador la ve y la clickea; por WhatsApp se dice un nombre. Si le debe
+  varias, el pago se reparte de la más vieja a la más nueva, igual que la compensación
+  (§Compensación). El acreedor se resuelve con `_resolver_acreedor`, el mismo helper.
+- **Una sola transacción, no un `for` de `pagar_pasivo`.** Esa función commitea: con
+  tres deudas serían tres commits, y si el segundo falla el primero ya quedó grabado —la
+  deuda baja a medias y la caja queda con un egreso huérfano.
+- **Una línea de caja por deuda**, con su `referencia_id`. Anular un pasivo barre la caja
+  por esa referencia: una sola línea contra el primero se llevaría también lo que se pagó
+  de los otros. Cuando el pago cruza monedas las partes se prorratean y **el último
+  renglón se calcula por diferencia**, para que la suma sea exactamente lo que salió.
+- **Pagar de más falla, no se acomoda** _(decisión del dueño, 2026-08-25)_. Por WhatsApp
+  el monto viene dictado y de más suele ser un dedazo o el acreedor equivocado; un pasivo
+  a favor inventado hay que ir a borrarlo a mano. Con cheque, igual: si el neto cubre de
+  más **no se entrega** —el vuelto del panel deja elegir entre pagar la diferencia o
+  quedar debiendo, y esa elección por chat no está—.
+- **La respuesta dice por qué caja salió.** Es el control inmediato del operador de que
+  el bot no lo mandó al lado equivocado, el mismo criterio que el "no movió la caja" de
+  la compensación.
+- **Un pago que no baja un centavo se rechaza.** Un importe que redondeado a centavos da
+  cero —o una cotización que lo pulveriza— dejaba pasar la operación: el bot contestaba
+  el pago hecho, la deuda quedaba igual y de la caja no salía un peso. Contestar "listo"
+  sin haber tocado nada es peor que fallar.
+- **Un cheque que no vale nada no se entrega.** Al 100% de descuento el neto es cero:
+  saldaba nada y **salía de cartera igual**. Es la peor forma de perder un cheque —sin
+  error, sin deuda saldada y sin rastro—, así que se valida antes de tocarlo.
+
+### Reset de caja — arrancar el libro de cero
+
+Servicio `svc_reset_caja`, router `/reset-caja`. **Borra datos y no se puede deshacer.**
+
+Existe para un momento puntual: arrancar con saldos contados de verdad cuando la
+historia acumulada ya no representa lo que hay. **Se lleva** todo lo que *es* caja
+(`movimientos_caja`, los lotes de `movimientos_efectivo`, `ajustes_caja` y
+`gastos_operativos` —que existen solo como movimiento de caja—) y **conserva** lo que el
+negocio tiene o debe: cheques en cartera, préstamos, cuotas, fiados, deudas libres,
+pasivos, compensaciones y clientes.
+
+- **Dos pasos separados a propósito:** `GET` previsualiza qué se borraría y qué queda,
+  `POST` ejecuta. Un solo endpoint con un flag haría que el resumen se pudiera saltear, y
+  ese resumen es la única chance de ver que hay algo cargado que no se esperaba.
+- **Exige la frase exacta `RESETEAR CAJA`.** Un booleano `forzar=true` se manda por
+  accidente desde cualquier cliente HTTP; una frase escrita a mano no.
+- **Suelta `pasivos.lote_id` antes de borrar los lotes** (FK, §5), o el reset queda a
+  medias.
+- **Deja la apertura sin definir**, para que cargar los saldos nuevos no exija `forzar`
+  como si se estuviera corrigiendo un error. Usa `get_configuracion` y no un `select`
+  a secas: sobre una base sin configuración, el corte quedaba **sin fijar** y el agujero
+  de abajo reaparecía en silencio.
+- Un cheque vendido queda vendido aunque su ingreso ya no esté en el libro, igual que la
+  cartera preexistente de la puesta en marcha (§Apertura): esa plata entró antes del
+  corte y el saldo inicial que se cargue **ya la tiene adentro**.
+
+**Mueve la línea de corte, y sin esa parte el reset no sirve.** Editar un cheque, un
+préstamo o una deuda **rehace su asiento de caja**: sin corte, corregir el banco de un
+cheque comprado hace tres meses le resucita el egreso dentro de la caja recién
+estrenada. El operador tocó un dato menor y el saldo se movió solo, sin ninguna señal.
+
+- **La línea se pone por ESTADO, no por fecha.** Se marca como preexistente todo lo que
+  está cargado en el momento de ejecutarlo y el corte queda en el día **anterior**. Así
+  lo que se cargue después —incluso ese mismo día— es operación normal y descuenta como
+  corresponde. El operador no elige ninguna fecha, que es justo donde se equivocaría: un
+  corte puesto "hoy" haría que las compras reales del día no descontaran plata.
+- **Alcanza a las cuatro familias que rehacen asientos.** Los cheques ya lo resolvían con
+  `es_carga_inicial`; préstamos, deudas de clientes y pasivos consultan ahora
+  `svc_apertura.es_anterior_al_corte`, el mismo criterio extendido. Una entidad nueva que
+  rehaga su línea de caja **se da de alta ahí**, o al primer reset volverá a descontar
+  plata vieja.
+
+**Panel:** botón "Resetear la caja" en Configuración (`components/ResetCaja.tsx`), pegado
+a la apertura porque son los dos pasos de la misma cosa: se resetea y a continuación se
+cargan los saldos nuevos.
 
 ---
 
@@ -645,7 +806,7 @@ una de esas: está pagando lo que debe.** La pestaña **General** de Deudores es
 - Cobro simple en lote (multi-selección): `POST /prestamos/{id}/cuotas/cobrar-lote`.
 - Cobro con cheque (1 cuota): `POST /prestamos/{id}/cuotas/{cuota_id}/cobrar-con-cheque` — genera un cheque `EN_CARTERA`.
 - Cobro con cheque en lote: `POST /prestamos/{id}/cuotas/cobrar-con-cheque-lote`.
-- **Método de pago "Efectivo" vs "Transferencia" es solo una etiqueta de UI**: el backend NO persiste el medio; solo distingue cobro simple (sin cheque) vs cobro con cheque.
+- **El método de pago se persiste** desde 2026-08-25: `medio_pago` viaja en el payload del cobro y decide **por cuál de las dos cajas** entra la plata (§Las dos cajas). Antes era solo una etiqueta de UI que el backend descartaba.
 
 **Pago de importe libre (parcial o total) — régimen definido 2026-07-14 (✅ implementado):** además del
 cobro por cuota entera, existe `POST /prestamos/{id}/pagar` (`svc_prestamos.pagar_prestamo`) que

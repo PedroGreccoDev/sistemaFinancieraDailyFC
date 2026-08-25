@@ -4,7 +4,8 @@ import { useAuth } from '../auth/AuthContext'
 import { fmtMonto } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
-import type { AjusteCajaMotivo, Moneda } from '../types'
+import type { AjusteCajaMotivo, MedioPago, Moneda } from '../types'
+import SelectorMedioPago from './SelectorMedioPago'
 
 const FM = "'Manrope', sans-serif"
 const FN = "'Bebas Neue', sans-serif"
@@ -45,6 +46,9 @@ export default function ModalAjusteCaja({ onClose, onSuccess }: { onClose: () =>
   const [tipo, setTipo] = useState<'INGRESO' | 'EGRESO'>('INGRESO')
   const [motivo, setMotivo] = useState<AjusteCajaMotivo>('CORRECCION')
   const [monto, setMonto] = useState('')
+  // Cuál de las dos cajas se corrige. Un descuadre se descubre contando
+  // billetes, así que el efectivo es el caso normal.
+  const [medioPago, setMedioPago] = useState<MedioPago>('EFECTIVO')
   const [cotizacion, setCotizacion] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [loading, setLoading] = useState(false)
@@ -73,6 +77,7 @@ export default function ModalAjusteCaja({ onClose, onSuccess }: { onClose: () =>
         tipo,
         motivo,
         monto: montoNum,
+        medio_pago: medioPago,
         cotizacion_usd: pideCotizacion ? cotizacionNum : null,
         descripcion: descripcion.trim() || null,
         operador_id: user?.username ?? 'panel',
@@ -141,6 +146,13 @@ export default function ModalAjusteCaja({ onClose, onSuccess }: { onClose: () =>
               </div>
             </div>
           </div>
+
+          <SelectorMedioPago
+            valor={medioPago}
+            onChange={setMedioPago}
+            label="¿Qué caja estás corrigiendo?"
+            ayuda="Cada caja se cuadra por su lado: el efectivo contra el cajón, la transferencia contra el banco."
+          />
 
           {/* Cotización: solo al sumar dólares */}
           {pideCotizacion && (
