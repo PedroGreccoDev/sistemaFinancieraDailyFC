@@ -15,6 +15,7 @@ from app.db.models import (
     ChequeEstado,
     Fiado,
     FiadoEstado,
+    MedioPago,
     Moneda,
 )
 from app.core.fechas import hoy_local

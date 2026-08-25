@@ -33,6 +33,7 @@ def crear_ajuste(payload: AjusteCajaCreate, db: DbSession) -> AjusteCajaRead:
         tipo=payload.tipo,
         motivo=payload.motivo,
         monto=payload.monto,
+        medio_pago=payload.medio_pago,
         cotizacion_usd=payload.cotizacion_usd,
         descripcion=payload.descripcion,
         operador_id=payload.operador_id,

@@ -37,6 +37,7 @@ from app.db.models import (
     AjusteCajaMotivo,
     CajaCategoria,
     CajaTipo,
+    MedioPago,
     Moneda,
     MovimientoEfectivo,
     MovimientoEfectivoTipo,
@@ -76,6 +77,9 @@ def crear_ajuste(
     motivo: AjusteCajaMotivo,
     monto: Decimal,
     operador_id: str,
+    # Cuál de las dos cajas se corrige. Efectivo por default: un descuadre se
+    # detecta contando billetes, el banco se elige explícitamente.
+    medio_pago: MedioPago = MedioPago.EFECTIVO,
     cotizacion_usd: Decimal | None = None,
     descripcion: str | None = None,
 ) -> AjusteCaja:
@@ -148,7 +152,7 @@ def crear_ajuste(
             tipo=tipo,
             categoria=CajaCategoria.AJUSTE_CAJA,
             monto=monto,
-            medio_pago=payload.medio_pago,
+            medio_pago=medio_pago,
             referencia_tipo=_REF,
             referencia_id=ajuste.id,
             detalle=_detalle(ajuste),

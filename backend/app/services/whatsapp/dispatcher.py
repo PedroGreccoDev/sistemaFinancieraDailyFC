@@ -266,7 +266,7 @@ def _registrar_un_cheque(
         porcentaje_compra=pct_compra,
         cliente_origen_id=cliente_id,
         monto_abonado=monto_abonado,
-        medio_pago=_medio(item),
+        medio_pago=_medio(data),
     )
     foto_bytes, foto_mime = foto if foto else (None, None)
     cheque = svc_cheques.create_cheque(
