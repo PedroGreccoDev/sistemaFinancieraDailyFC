@@ -12,7 +12,7 @@ from app.api.routes import ajustes_caja, anulacion, apertura, auth, backup, cheq
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.services import monitor
+from app.services import bugs, monitor
 from app.services.exceptions import ServiceError
 from app.services.usuarios import bootstrap_admin
 
@@ -37,9 +37,47 @@ app.add_middleware(
 )
 
 
+def _ambito(request: Request) -> str:
+    """Por dónde entró el request, con la ruta sin los identificadores.
+
+    Se prefiere la plantilla de la ruta (`/clientes/{cliente_id}`) sobre la URL
+    real: así todos los errores de ese endpoint son un solo bug y no uno por
+    cliente. Si la excepción saltó antes de resolverse la ruta, queda la URL y
+    `bugs.normalizar_ambito` le saca los IDs igual.
+    """
+    ruta = getattr(request.scope.get("route"), "path", None) or request.url.path
+    return f"{request.method} {ruta}"
+
+
 @app.exception_handler(ServiceError)
-async def service_error_handler(_: Request, exc: ServiceError) -> JSONResponse:
+async def service_error_handler(request: Request, exc: ServiceError) -> JSONResponse:
+    # Un ServiceError de 4xx es el negocio diciendo que no ("el cheque ya está
+    # vendido"): operación normal, no bug. Uno de 5xx —DatabaseWriteError— es el
+    # sistema fallando, y ese sí tiene que quedar anotado y sonar.
+    if exc.status_code >= 500:
+        bugs.capturar(exc, origen=bugs.ORIGEN_PANEL, ambito=_ambito(request))
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Toda excepción no controlada del panel: la anota y le pone número.
+
+    Este handler es la razón de ser del registro de bugs. Hasta que existió, un
+    500 de cualquier endpoint moría en los logs de Railway: el operador veía una
+    pantalla rota, seguía trabajando como podía, y del lado técnico nadie se
+    enteraba hasta que algo no cerraba. Ahora suena en el momento, con un número
+    para buscarlo en `docs/BUGS.md`.
+
+    Del lado del cliente no cambia nada: sigue siendo un 500 genérico. El
+    mensaje de la excepción no se devuelve —arrastra SQL con datos del negocio—
+    y queda en la tabla.
+    """
+    bugs.capturar(exc, origen=bugs.ORIGEN_PANEL, ambito=_ambito(request))
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Ocurrió un error inesperado. Ya quedó registrado."},
+    )
 
 
 @app.on_event("startup")
@@ -64,10 +102,24 @@ def _startup() -> None:
     except Exception as exc:  # noqa: BLE001
         logging.getLogger(__name__).error("No se pudo iniciar el monitor de salud: %s", exc)
 
+    # Registro de bugs: el drenador que escribe la tabla y avisa, y el enganche
+    # al logging que convierte en bug todo `logger.error` del proceso —incluidos
+    # los de los `except Exception` que loguean y siguen—. Como el monitor, si
+    # algo falla al arrancarlo no puede tumbar el proceso web: existe para que
+    # los errores se vean, no para causarlos.
+    try:
+        bugs.iniciar()
+        bugs.instalar_captura_de_logs()
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).error("No se pudo iniciar el registro de bugs: %s", exc)
+
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     await monitor.detener()
+    # Después del monitor: si al detenerse dejó algún error encolado, esta
+    # última pasada lo escribe antes de que el proceso se vaya.
+    await bugs.detener()
 
 
 # Salud — público: /health (liveness de Railway) y /health/deep (watchdog externo)

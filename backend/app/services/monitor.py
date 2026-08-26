@@ -24,10 +24,6 @@ logger = logging.getLogger(__name__)
 
 _tarea: asyncio.Task | None = None
 
-# Antifloods de `alertar_error`: última vez que se avisó de cada clave de error.
-_ultimo_error: dict[str, datetime] = {}
-_VENTANA_ERROR = timedelta(minutes=15)
-
 
 async def _ciclo() -> None:
     """Loop de vigilancia. Nunca muere por un chequeo fallido."""
@@ -110,24 +106,30 @@ async def detener() -> None:
 
 
 async def alertar_error(clave: str, titulo: str, detalle: str) -> None:
-    """Avisa por Telegram de un error puntual del bot (no de una caída).
+    """Avisa de un error puntual del bot (no de una caída), con su numeral.
 
     Sirve para lo que el chequeo periódico no ve: una operación que explotó
-    procesando un mensaje real. `clave` agrupa errores repetidos — el mismo
-    tipo de error no vuelve a avisar dentro de `_VENTANA_ERROR`, para que un
-    problema sistemático no llene el chat de Telegram y tape lo demás.
+    procesando un mensaje real, o el clasificador que se quedó mudo. `clave`
+    agrupa los repetidos: es la identidad del bug.
+
+    Antes esto mandaba el mensaje directo y silenciaba quince minutos. Ahora
+    entra por el registro de bugs, que le da número y se queda con el detalle
+    —que puede traer datos del negocio y no tiene por qué ir a Telegram— y
+    resuelve el antiflood contra la fila, no contra un diccionario en memoria
+    que cada redeploy de Railway ponía en cero.
+
+    El import va adentro por el mismo motivo que en los motores de IA: `bugs`
+    depende de `telegram`, y atarlos al importar cerraría el círculo.
     """
-    if not telegram.configurado():
-        return
+    from app.services import bugs
 
-    ahora = datetime.now(timezone.utc)
-    previo = _ultimo_error.get(clave)
-    if previo is not None and ahora - previo < _VENTANA_ERROR:
-        return
-    _ultimo_error[clave] = ahora
-
-    await telegram.enviar_alerta(
-        f"⚠️ <b>{telegram.escapar(titulo)}</b>\n\n"
-        f"<pre>{telegram.escapar(detalle[:1500])}</pre>\n"
-        f"🕒 {health.hora_ar(ahora)}"
+    bugs.capturar_mensaje(
+        origen=bugs.ORIGEN_BOT,
+        titulo=titulo,
+        tipo="Alerta",
+        # La clave es la ubicación a los fines de la huella: es lo que hace que
+        # "el clasificador no contesta" sea siempre el mismo número de bug.
+        ubicacion=clave,
+        ambito=f"alerta:{clave}",
+        detalle=detalle,
     )

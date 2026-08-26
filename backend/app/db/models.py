@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, relationship
 
@@ -1132,3 +1133,83 @@ class CompensacionImputacion(Base):
     compensacion: Mapped["Compensacion"] = relationship(
         "Compensacion", back_populates="imputaciones"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  MODELO: Bug — registro de errores con numeral
+# ══════════════════════════════════════════════════════════════════════
+
+class Bug(Base):
+    """Un error del sistema, con un número que lo identifica para siempre.
+
+    La tabla existe para responder una pregunta que hoy no tiene respuesta:
+    *¿qué se rompió y cuántas veces?* Hasta acá un error del panel moría en los
+    logs de Railway y nadie se enteraba hasta que el operador no podía seguir
+    trabajando. El aviso llegaba tarde y sin nombre.
+
+    El `id` es el numeral —#1, #2, #3— y es lo único que viaja a Telegram. El
+    traceback se queda acá: el mensaje de una excepción de SQLAlchemy arrastra
+    el SQL con sus parámetros (montos, nombres de clientes, teléfonos) y
+    Telegram es un tercero. Esta base ya tiene esos datos; el chat no.
+
+    La `huella` es lo que hace que el mismo error mil veces sea **un** bug y no
+    mil: se calcula del tipo de excepción, el `archivo:línea` donde saltó y el
+    ámbito (endpoint o intent), nunca de los valores. Dos fallas distintas en la
+    misma línea son el mismo bug a los fines prácticos —se arreglan juntas— y
+    la misma falla en dos endpoints son dos, porque se llega por caminos
+    distintos.
+
+    El antiflood vive en la fila (`ultimo_aviso_at`, `avisos_enviados`) y no en
+    memoria: Railway reinicia el proceso seguido, y un contador en RAM haría que
+    cada redeploy volviera a avisar de lo mismo desde cero.
+    """
+
+    __tablename__ = "bugs"
+    __table_args__ = (
+        sa.UniqueConstraint("huella", name="uq_bugs_huella"),
+        sa.CheckConstraint(
+            "estado IN ('ABIERTO', 'EN_CURSO', 'CERRADO')", name="ck_bugs_estado"
+        ),
+        sa.CheckConstraint("ocurrencias > 0", name="ck_bugs_ocurrencias_positive"),
+    )
+
+    # El numeral. Es un entero y no un UUID a propósito: se dice en voz alta, se
+    # escribe en un mensaje y se busca en el documento. "Bug #47", no
+    # "bug 3f2a9c...".
+    id: Mapped[int] = mapped_column(sa.Integer, primary_key=True, autoincrement=True)
+
+    huella: Mapped[str] = mapped_column(sa.String(64), index=True)
+
+    # 'bot' | 'panel' | 'frontend' | 'testing' | 'monitor'
+    origen:    Mapped[str] = mapped_column(sa.String(20), index=True)
+    titulo:    Mapped[str] = mapped_column(sa.String(200))
+    tipo:      Mapped[str] = mapped_column(sa.String(120))
+    # `archivo.py:línea` del último frame: dónde saltó.
+    ubicacion: Mapped[str] = mapped_column(sa.String(200))
+    # Por dónde se llegó: `POST /api/v1/cheques`, `intent:registrar_cheque`, el
+    # módulo que logueó. Es lo que distingue dos caminos hacia la misma línea.
+    ambito:    Mapped[str] = mapped_column(sa.String(200), default="")
+
+    # Traceback completo. Solo se lee desde acá o desde el documento generado.
+    detalle:  Mapped[str]         = mapped_column(sa.Text(), default="")
+    contexto: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    ocurrencias: Mapped[int]      = mapped_column(sa.Integer, default=1)
+    primera_vez: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now()
+    )
+    ultima_vez:  Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), index=True
+    )
+
+    estado: Mapped[str]        = mapped_column(sa.String(20), default="ABIERTO", index=True)
+    notas:  Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+
+    # Qué corrida de la sesión de testing lo encontró, si vino de ahí.
+    sesion_test: Mapped[str | None] = mapped_column(sa.String(60), nullable=True)
+
+    # Antiflood: la última vez que se avisó y cuántas veces. Ver services/bugs.py.
+    ultimo_aviso_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    avisos_enviados: Mapped[int] = mapped_column(sa.Integer, default=0)

@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-import traceback
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Request
@@ -12,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.services import monitor
+from app.services import bugs
 # El motor concreto (Claude / OpenAI) lo elige `motor` por env var; acá no
 # se sabe ni hace falta cuál está atendiendo (ver services/ia/motor.py).
 from app.services.ia import motor as ia_motor
@@ -56,19 +54,6 @@ _REJECT_WORDS = frozenset({
     # emojis
     "👎", "❌", "🚫",
 })
-
-
-def _ubicacion(exc: BaseException) -> str:
-    """`archivo.py:línea` del último frame de la excepción, para ubicar el error.
-
-    Es lo único del traceback que se puede mandar afuera sin riesgo de filtrar
-    datos del negocio: nombres de archivo y números de línea, sin valores.
-    """
-    tb = exc.__traceback__
-    if tb is None:
-        return "ubicación desconocida"
-    ultimo = traceback.extract_tb(tb)[-1]
-    return f"{Path(ultimo.filename).name}:{ultimo.lineno}"
 
 
 def _normalizar_repeticiones(palabra: str) -> str:
@@ -182,19 +167,22 @@ async def _procesar_mensaje_safe(
     try:
         await _procesar_mensaje(msg, settings)
     except Exception as exc:
-        logger.exception("Error no controlado procesando mensaje de %s: %s", msg.phone, exc)
-        # El operador ve un "error inesperado" y sigue; sin este aviso nadie del
-        # lado técnico se entera de que el bot dejó de poder operar.
+        # Va PRIMERO el registro y después el log, y el orden importa: el bug se
+        # anota acá con el ámbito bueno ("bot:mensaje"), y cuando el
+        # `logger.exception` de abajo pase por el handler de logs la excepción ya
+        # está marcada, así que no abre un segundo bug por lo mismo.
         #
-        # Va el tipo de error y DÓNDE ocurrió, no el traceback: el mensaje de una
+        # A Telegram va el número y el tipo, no el traceback: el mensaje de una
         # excepción de SQLAlchemy arrastra el SQL con sus parámetros (montos,
         # nombres de clientes, teléfonos) y Telegram es un tercero. El detalle
-        # completo ya quedó arriba, en el log de Railway, que es donde se debuggea.
-        await monitor.alertar_error(
-            clave=f"webhook-{type(exc).__name__}",
+        # completo queda en la tabla de bugs y en el log de Railway.
+        bugs.capturar(
+            exc,
+            origen=bugs.ORIGEN_BOT,
+            ambito="bot:mensaje",
             titulo="Error procesando un mensaje del bot",
-            detalle=f"{type(exc).__name__} en {_ubicacion(exc)}\n\nEl detalle completo está en los logs de Railway.",
         )
+        logger.exception("Error no controlado procesando mensaje de %s: %s", msg.phone, exc)
         await wa_client.send_text(
             msg.phone,
             "⚠️ Ocurrió un error inesperado. Por favor intentá de nuevo.",

@@ -199,10 +199,10 @@ async def _extraer_con_modelo(
         return IntentResult(**parsed)
 
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        logger.error("Error parseando respuesta de OpenAI (%s): %s", model, exc)
+        logger.exception("Error parseando respuesta de OpenAI (%s): %s", model, exc)
         return None
     except Exception as exc:
-        logger.error("Error llamando a OpenAI (%s): %s", model, exc)
+        logger.exception("Error llamando a OpenAI (%s): %s", model, exc)
         return None
 
 
@@ -277,7 +277,7 @@ async def clasificar_confirmacion(text: str, operacion_pendiente: str = "") -> s
         await _alertar_sin_veredicto(modelo, text, getattr(respuesta, "usage", None))
         return "other"
     except Exception as exc:
-        logger.error("Error clasificando confirmación con OpenAI: %s", exc)
+        logger.exception("Error clasificando confirmación con OpenAI: %s", exc)
         return "other"
 
 
@@ -293,7 +293,7 @@ async def _alertar_sin_veredicto(modelo: str, texto: str, uso: Any) -> None:
     dependencia de aviso, no de funcionamiento, y no puede impedir que el
     clasificador cargue.
     """
-    logger.error("El clasificador (%s) no devolvió veredicto ni con el tope doble.", modelo)
+    logger.warning("El clasificador (%s) no devolvió veredicto ni con el tope doble.", modelo)
     try:
         from app.services import monitor
 

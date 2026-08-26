@@ -130,6 +130,24 @@ class Settings(BaseSettings):
     # por degradación (nunca el recordatorio periódico, que es solo para caídas).
     monitor_alertar_degradado: bool = Field(default=False)
 
+    # ── Registro de bugs (ver services/bugs.py) ──────────────────────────
+    # Cada error único entra en la tabla `bugs` con un numeral, y ese número
+    # —no el traceback— es lo que viaja a Telegram.
+    bugs_activo: bool = Field(default=True)
+    # Convertir en bug todo `logger.error` del proceso. Es lo que destapa los
+    # veinte `except Exception` que loguean y siguen sin avisarle a nadie.
+    # Apagarlo deja solo la captura explícita (handler global y bot).
+    bugs_capturar_logs: bool = Field(default=True)
+    bugs_avisar_telegram: bool = Field(default=True)
+    # Cada cuánto vacía la cola el drenador. Es el retardo real entre que el
+    # error ocurre y que llega el aviso.
+    bugs_intervalo_segundos: int = Field(default=2)
+    # En qué número de ocurrencia se vuelve a avisar de un bug ya conocido. Un
+    # bug que escala de 3 a 3000 tiene que volver a sonar: es el caso grave.
+    bugs_escalones: str = Field(default="1,10,50,100,500,1000")
+    # Y además, cada tantas horas mientras siga vivo.
+    bugs_repetir_horas: int = Field(default=6)
+
 
 @lru_cache
 def get_settings() -> Settings:

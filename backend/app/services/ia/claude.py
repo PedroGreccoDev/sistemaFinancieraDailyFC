@@ -150,7 +150,7 @@ async def clasificar_confirmacion(text: str, operacion_pendiente: str = "") -> s
         await _alertar_sin_veredicto(getattr(respuesta, "usage", None))
         return "other"
     except Exception as exc:
-        logger.error("Error clasificando confirmación con Claude: %s", exc)
+        logger.exception("Error clasificando confirmación con Claude: %s", exc)
         return "other"
 
 
@@ -161,7 +161,7 @@ async def _alertar_sin_veredicto(uso: Any) -> None:
     operador sin dejar rastro. El import va adentro para no atar el motor de IA
     al monitor: es una dependencia de aviso, no de funcionamiento.
     """
-    logger.error(
+    logger.warning(
         "El clasificador (%s) no devolvió veredicto ni con el tope ampliado.", _MODEL_CONFIRMACION
     )
     try:
@@ -238,10 +238,10 @@ async def _extraer_con_modelo(
         return IntentResult(**parsed)
 
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        logger.error("Error parseando respuesta de Claude (%s): %s", model, exc)
+        logger.exception("Error parseando respuesta de Claude (%s): %s", model, exc)
         return None
     except Exception as exc:
-        logger.error("Error llamando a Claude (%s): %s", model, exc)
+        logger.exception("Error llamando a Claude (%s): %s", model, exc)
         return None
 
 

@@ -1153,14 +1153,95 @@ avisa **por Telegram** diciendo **qué** se rompió.
 - **Además del chequeo periódico se alerta en el momento** en dos lugares donde el
   operador se queda esperando: `send_text` que no se puede entregar
   (`_alertar_no_entregado`) y una excepción no controlada procesando un mensaje
-  (`webhook._procesar_mensaje_safe`, con traceback). Van por `monitor.alertar_error`,
-  que agrupa por `clave` y no repite el mismo error dentro de 15 min: un problema
-  sistemático llenaría el chat y taparía lo demás.
+  (`webhook._procesar_mensaje_safe`). Los dos van por `monitor.alertar_error`, que
+  desde 2026-08-25 **delega en el registro de bugs** (§Registro de bugs): el aviso
+  sale con número y el antiflood lo resuelve la fila, no un diccionario en memoria.
 - **Env vars:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_IDS` (coma-separados),
   `HEALTH_TOKEN` y los `MONITOR_*`. Sin token de Telegram el monitor **no arranca**
   (lo loguea); el resto sigue funcionando igual.
 - **Tests:** `test_health.py`, unitario puro — interpretación de los estados de WAHA,
   el chequeo de webhook y toda la máquina de `decidir_alerta`.
+
+---
+
+## Registro de bugs — cada error con su numeral _(régimen definido 2026-08-25)_
+
+El aviso llegaba **cuando el operador ya no podía trabajar**. Un 500 de cualquier
+endpoint del panel moría en los logs de Railway —no había ningún handler global— y
+los veinte `except Exception` que loguean y siguen no le avisaban a nadie: el
+descuadre se descubría al cerrar el día. Los avisos que sí existían (§10) no tenían
+nombre ni memoria: el mismo problema tres días seguidos eran tres mensajes sueltos.
+
+Desde acá **todo error, se haya tragado o no, entra en la tabla `bugs` con un
+número**, y ese número es lo que llega a Telegram. Tabla `bugs` (modelo `Bug`,
+migración `0027`), servicio `app/services/bugs.py`.
+
+- **El `id` es el numeral** —#1, #2, #47— y es entero a propósito: se dice en voz
+  alta, se escribe en un mensaje y se busca en el documento.
+- **La `huella` es lo que junta el mismo error mil veces en una fila con un
+  contador**: tipo de excepción + `archivo:línea` + ámbito (endpoint o intent),
+  **nunca los valores**. Si el monto o el cliente entraran, el mismo error con otro
+  cliente sería un bug nuevo y el contador no mediría nada. Los ids de la ruta se
+  normalizan (`/clientes/{id}`), o una falla en la ficha de cliente abriría un bug
+  por cada cliente que la abriera.
+- **A Telegram va el número y la ubicación, nunca el traceback.** Es la misma
+  decisión que ya tomaba `webhook._ubicacion`: el mensaje de una excepción de
+  SQLAlchemy arrastra el SQL con montos, nombres y teléfonos, y Telegram es un
+  tercero. El detalle completo queda en la tabla, que es de casa. **El numeral es
+  justamente lo que hace innecesario mandar el detalle.**
+- **Un `ServiceError` de 4xx no abre bug** (`es_error_de_negocio`): "el cheque ya
+  está vendido" es el sistema funcionando. Uno de **5xx sí** —`DatabaseWriteError`
+  comparte clase base—, y descartarlos a todos por `isinstance(ServiceError)` deja
+  los errores de escritura sin registrar.
+- **Capturar no bloquea ni lanza.** `capturar()` solo encola; un drenador de fondo
+  escribe y avisa. Una escritura sincrónica frenaría el event loop justo cuando el
+  sistema ya está en problemas, y una falla al anotar el bug volteando la operación
+  que lo produjo sería peor que no tener registro. La cola es acotada (500): un
+  error en loop no puede comerse la RAM.
+- **`_persistir` busca primero y recién inserta**, en vez de un `INSERT … ON
+  CONFLICT` que es más corto y sale mal por dos motivos: el `serial` **consume un
+  número igual cuando el insert termina en update** (con un bug de mil ocurrencias,
+  el próximo bug nuevo sería el #1013 y el numeral dejaría de servir para lo único
+  que existe), y el `RETURNING` de un `ON CONFLICT` devuelve la fila **ya
+  actualizada**, así que no se puede saber si el bug venía cerrado. La carrera que
+  eso abre la cierra el índice único: el segundo choca, relee y actualiza.
+- **Sesión propia, siempre.** Si el error fue de base, la sesión en curso quedó
+  inválida: anotar el bug tiene que funcionar justo cuando lo de al lado se rompió.
+- **El antiflood vive en la fila** (`ultimo_aviso_at`, `avisos_enviados`), no en
+  memoria: Railway reinicia seguido y un contador en RAM volvería a avisar de lo
+  mismo en cada redeploy. Se avisa cuando el bug es nuevo, cuando **reaparece**
+  (un bug cerrado que vuelve a ocurrir no está cerrado) y cuando **escala** —en los
+  escalones de `BUGS_ESCALONES`—. La regla vieja silenciaba quince minutos a secas
+  y perdía el caso más grave: el bug que se dispara de 3 a 3000 no volvía a sonar.
+
+**Los tres enganches** (`main.py`):
+
+1. **`@app.exception_handler(Exception)`** — toda excepción no controlada del panel.
+   Es la razón de ser del registro: hasta que existió, no había ninguno.
+2. **`service_error_handler`** captura los `ServiceError` de 5xx.
+3. **`bugs.instalar_captura_de_logs()`** engancha un `logging.Handler` al logger raíz
+   que convierte en bug todo `logger.error`/`logger.exception` del proceso. **Es la
+   pieza que cierra el agujero de fondo**: engancharlos uno por uno serían veinte
+   cambios y el veintiuno se olvidaría; escuchando el logging entran todos, incluidos
+   los que se escriban mañana. Solo ERROR y CRITICAL — los WARNING son ruido
+   operativo normal (un cliente ambiguo, un reintento) y llenarían el chat.
+
+**La misma excepción no se cuenta dos veces.** Pasa por varias manos —el
+`logger.exception` del servicio y después el handler global— y sin la marca
+`_bug_capturado` el contador saldría al doble, justo el número que se mira para
+decidir si algo es grave. Por eso en `webhook._procesar_mensaje_safe` **el registro
+va primero y el log después**: el bug se anota con el ámbito bueno (`bot:mensaje`) y
+el log ya lo encuentra marcado.
+
+**Env vars:** `BUGS_ACTIVO`, `BUGS_CAPTURAR_LOGS`, `BUGS_AVISAR_TELEGRAM`,
+`BUGS_INTERVALO_SEGUNDOS` (retardo real entre el error y el aviso),
+`BUGS_ESCALONES`, `BUGS_REPETIR_HORAS`. Usa el Telegram de §10.
+
+**Tests:** `test_bugs.py`, unitario puro — qué junta y qué separa la huella, que un
+error de negocio no abra bug pero uno de 5xx sí, que la misma excepción no se cuente
+dos veces, que **el traceback no aparezca en el texto del aviso**, la máquina del
+antiflood y la captura de logs (incluido que el registro no se alerte a sí mismo,
+que sería un loop infinito).
 
 ---
 
@@ -1572,6 +1653,13 @@ avisa **por Telegram** diciendo **qué** se rompió.
   - **`test_apertura.py`** — fecha de corte de la carga inicial (§Apertura): el día del corte es
     inclusive, después vuelve a descontar, y sin corte definido todo es operación normal. Fija
     además que `SALDO_INICIAL` va al grupo `APERTURA` y no cuenta como ingreso del día.
+  - **`test_bugs.py`** — el registro de bugs (§Registro de bugs): qué junta y qué separa la
+    huella —el mismo error mil veces es **un** número con un contador, y los ids de la ruta
+    no abren un bug por cliente—, que un error de negocio no abra bug pero uno de 5xx sí,
+    que la misma excepción no se cuente dos veces (pasa por el log y por el handler global),
+    que **el traceback no aparezca en el texto que va a Telegram**, la máquina del antiflood
+    —que un bug que escala vuelva a sonar y uno cerrado que reaparece también— y la captura
+    de logs, incluido que el registro no se alerte a sí mismo: eso sería un loop infinito.
 - **Convención:** mantené la lógica de negocio en funciones/métodos testeables sin BD; si una
   pieza nueva necesita una sesión, extraé la parte pura para poder cubrirla en este estilo.
 
@@ -1593,7 +1681,9 @@ avisa **por Telegram** diciendo **qué** se rompió.
   la deuda que sí hace entrar plata) y `0024` (`cotizacion_ingreso_usd`/`lote_id`,
   el stock de un préstamo recibido en dólares) y `0025` (`origen_tipo`/`origen_id` en
   `movimientos_efectivo`, para que **toda** entrada o salida de dólares mueva el stock —
-  ver §Stock de dólares).
+  ver §Stock de dólares), `0026` (dos cajas en paralelo: `medio_pago` NOT NULL y la
+  apertura por medio — ver §Las dos cajas) y `0027` (tabla `bugs`: cada error con su
+  numeral — ver §Registro de bugs).
 
 ---
 
