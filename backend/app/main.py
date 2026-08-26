@@ -24,6 +24,19 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 
+# httpx loguea en INFO **la URL completa** de cada request, y la de Telegram
+# lleva el token del bot adentro de la ruta
+# (`api.telegram.org/bot<TOKEN>/sendMessage`). Con INFO, cada alerta enviada
+# dejaba la credencial escrita en texto plano en los logs de Railway, donde
+# queda para cualquiera que pueda leerlos.
+#
+# Se sube a WARNING y no se filtra la URL a mano: el resto de los INFO de httpx
+# son ruido —"HTTP Request: GET … 200 OK" por cada llamada a WAHA y a la IA— y
+# los errores, que son los que sirven, siguen apareciendo. Cualquier servicio
+# nuevo que ponga una credencial en la URL queda cubierto por el mismo cambio.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 settings = get_settings()
 
 app = FastAPI(title=settings.app_name)
