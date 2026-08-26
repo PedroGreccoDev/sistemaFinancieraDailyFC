@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import ajustes_caja, anulacion, apertura, auth, backup, cheques, clientes, compensaciones, deudas_simples, deudores, fiados, gastos_operativos, health, movimientos, pasivos, prestamos, reportes, reset_caja, traspasos, webhook
+from app.api.routes import ajustes_caja, anulacion, apertura, auth, backup, bugs as rutas_bugs, cheques, clientes, compensaciones, deudas_simples, deudores, fiados, gastos_operativos, health, movimientos, pasivos, prestamos, reportes, reset_caja, traspasos, webhook
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -151,6 +151,9 @@ app.include_router(reset_caja.router, prefix=settings.api_v1_prefix, dependencie
 app.include_router(anulacion.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 app.include_router(apertura.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 app.include_router(backup.router, prefix=settings.api_v1_prefix, dependencies=_auth)
+# Registro de bugs — cada ruta exige además admin (§Registro de bugs): el
+# traceback muestra las tripas del sistema y no le sirve al operador.
+app.include_router(rutas_bugs.router, prefix=settings.api_v1_prefix, dependencies=_auth)
 
 # WhatsApp Bot — público (mantiene su propio control por número de teléfono)
 app.include_router(webhook.router)

@@ -1233,6 +1233,47 @@ decidir si algo es grave. Por eso en `webhook._procesar_mensaje_safe` **el regis
 va primero y el log después**: el bug se anota con el ámbito bueno (`bot:mensaje`) y
 el log ya lo encuentra marcado.
 
+**Mirarlos y cerrarlos** (`services/bugs_reporte.py`, router `/bugs`). `bugs.py`
+los anota y este módulo los lee: están separados porque el registro corre solo y
+no puede fallar nunca, mientras que esto se consulta a mano.
+
+- **Solo lectura y cambio de estado.** No se dan de alta por acá ni se borran:
+  borrar uno sería perder que existió. Todas las rutas exigen **admin** — el
+  traceback muestra las tripas del sistema y no le sirve al operador que carga
+  cheques.
+- **El listado no devuelve el traceback**, el detalle sí. El detalle de un bug
+  ruidoso son miles de caracteres: en la lista, abrir la pantalla se traería
+  megabytes para mostrar veinte renglones.
+- **Ordena por ocurrencias y después por fecha.** Solo por fecha pondría arriba
+  el error que pasó una vez hace un minuto por encima del que viene fallando
+  trescientas veces desde ayer.
+- **Cerrar es decir "creemos que está arreglado", no borrar.** Si el bug vuelve
+  a ocurrir el registro lo **reabre solo** y lo avisa —conservando las notas—, y
+  que reaparezca es justamente la información que interesa.
+- `GET /bugs`, `GET /bugs/{id}`, `PATCH /bugs/{id}` (estado + notas),
+  `GET /bugs/resumen`, `GET /bugs/export.md`. **Las rutas fijas van declaradas
+  antes que `/{bug_id}`**: al revés, `/bugs/resumen` entra por la ruta del id y
+  FastAPI devuelve un 422 que no dice nada de lo que pasó.
+
+**El documento** (`docs/BUGS.md`, lo escribe `scripts/exportar_bugs.py`).
+
+- **Es una vista, no una fuente**: se regenera entero desde la tabla y por eso
+  lleva el aviso de no editarlo a mano. Lo que haya que conservar va en `notas`,
+  que vive en la base y el documento imprime.
+- **Los abiertos van con su traceback plegado; los cerrados, un renglón cada
+  uno.** Cien bugs viejos impresos enteros taparían los cuatro que están rotos
+  hoy.
+- **`traceback_legible` saca los frames de librerías** y los cuenta en un
+  marcador. Un error de endpoint llega con quince frames de starlette antes del
+  primero propio: guardados están bien —el detalle completo se ve por
+  `GET /bugs/{id}`— pero impresos entierran la línea que importa. Ojo con dos
+  cosas: un frame son **tres** líneas desde Python 3.12 (el `File`, el código y
+  los `^^^^` de la columna) y se van juntas o el marcador queda colgado; y el
+  filtro compara **en minúsculas**, porque en Windows la stdlib vive en `\Lib\`.
+- **Un estado desconocido no desaparece del documento**: cae en "Sin
+  clasificar". Perderlo en silencio sería la peor forma de perder un bug — el
+  aviso llegó con su número y el documento no lo tiene.
+
 **Env vars:** `BUGS_ACTIVO`, `BUGS_CAPTURAR_LOGS`, `BUGS_AVISAR_TELEGRAM`,
 `BUGS_INTERVALO_SEGUNDOS` (retardo real entre el error y el aviso),
 `BUGS_ESCALONES`, `BUGS_REPETIR_HORAS`. Usa el Telegram de §10.
@@ -1660,6 +1701,11 @@ que sería un loop infinito).
     que **el traceback no aparezca en el texto que va a Telegram**, la máquina del antiflood
     —que un bug que escala vuelva a sonar y uno cerrado que reaparece también— y la captura
     de logs, incluido que el registro no se alerte a sí mismo: eso sería un loop infinito.
+  - **`test_bugs_reporte.py`** — el documento (§Registro de bugs): que el numeral encabece
+    cada bug —el aviso dice "#47" y acá se encuentra—, que un cerrado ocupe un renglón y un
+    abierto traiga el traceback, que un estado desconocido **no lo haga desaparecer del
+    documento sin fallar**, y que `traceback_legible` saque los frames de librerías sin
+    dejar colgados los `^^^^` de columna ni cortar nunca el tipo de excepción.
 - **Convención:** mantené la lógica de negocio en funciones/métodos testeables sin BD; si una
   pieza nueva necesita una sesión, extraé la parte pura para poder cubrirla en este estilo.
 
