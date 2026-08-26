@@ -164,6 +164,13 @@ faltaba la punta del chat.
   por esa referencia: una sola línea contra el primero se llevaría también lo que se pagó
   de los otros. Cuando el pago cruza monedas las partes se prorratean y **el último
   renglón se calcula por diferencia**, para que la suma sea exactamente lo que salió.
+- **Un aviso que el operador no puede contestar es un loop, no una pregunta**
+  _(decisión del dueño, 2026-08-26)_. Al borrar un pasivo por chat hay dos casos que se ven
+  parecidos y solo uno tiene salida: si coinciden acreedores **distintos** ("Cuello" y
+  "Cuello Hermanos") precisar el nombre alcanza y se pregunta; si es el **mismo** acreedor
+  con varias deudas, todas se llaman igual y no hay nada más preciso que decir — ahí se
+  manda al panel. El criterio de agrupar por nombre normalizado es el mismo de
+  `_resolver_acreedor`, que ya lo hacía bien para cobrar.
 - **Pagar de más falla, no se acomoda** _(decisión del dueño, 2026-08-25)_. Por WhatsApp
   el monto viene dictado y de más suele ser un dedazo o el acreedor equivocado; un pasivo
   a favor inventado hay que ir a borrarlo a mano. Con cheque, igual: si el neto cubre de

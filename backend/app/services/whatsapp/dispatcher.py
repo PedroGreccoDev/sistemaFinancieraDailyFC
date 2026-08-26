@@ -1688,10 +1688,24 @@ def _resolver_para_anular(db: Session, tipo: str, identificador: str):
                 ).all()
             )
             if len(candidatos) > 1:
-                nombres = ", ".join(p.acreedor for p in candidatos[:5])
+                # Dos situaciones distintas, y una sola tiene salida por chat.
+                # Si coinciden acreedores DISTINTOS ("Cuello" y "Cuello Hermanos"),
+                # precisar el nombre alcanza. Si es el MISMO acreedor con varias
+                # deudas, todas se llaman igual: pedir "más precisión" ahí es un
+                # loop —el operador no tiene nada más preciso que decir— y por eso
+                # se manda al panel, como el resto de los casos que el chat no
+                # puede desambiguar _(decisión del dueño, 2026-08-26)_.
+                acreedores = {p.acreedor.strip().lower() for p in candidatos}
+                if len(acreedores) > 1:
+                    nombres = ", ".join(sorted({p.acreedor for p in candidatos})[:5])
+                    raise ValueError(
+                        f"Le debés a varios que coinciden con '{identificador}': "
+                        f"{nombres}. ¿A cuál de todos?"
+                    )
                 raise ValueError(
-                    f"Hay {len(candidatos)} deudas que coinciden ({nombres}). "
-                    "Decime cuál con más precisión."
+                    f"{candidatos[0].acreedor} tiene {len(candidatos)} deudas "
+                    "cargadas y todas se llaman igual, así que por chat no las "
+                    "puedo distinguir. Eliminá la que corresponda desde el panel."
                 )
             pasivo = candidatos[0] if candidatos else None
         if pasivo is None:
