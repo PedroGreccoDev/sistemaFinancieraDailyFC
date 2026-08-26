@@ -634,6 +634,25 @@ El cliente puede cancelar esa deuda de dos formas:
 **Restricción:** un cheque solo puede originar un fiado (`UNIQUE` en `cheque_nro`).
 **Bot WhatsApp:** intents `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
 
+- **Con MÁS DE UN fiado abierto, el cobro se va por la cuenta general del cliente**
+  _(decisión del dueño, 2026-08-26)_. `_fiados_abiertos()` devuelve la lista entera y no
+  elige: con uno se salda ese fiado —es más preciso—, y con varios el handler delega en
+  `_cobrar_deuda_cliente` / `_cobrar_deuda_cliente_con_cheque`, que imputan de la operación
+  más vieja a la más nueva cruzando fiados, deudas libres y cuotas. **No hay nada que
+  elegir**: el cliente no está pagando *uno* de sus fiados, está pagando lo que debe, y es
+  la misma regla que ya rige en el cobro consolidado y en los pagos a un acreedor.
+  - Antes esto cortaba con *"tiene N fiados abiertos, contactá al administrador para
+    resolverlo desde el panel"*. Fiarle varios cheques al mismo cliente es el caso normal
+    —lo dice el fiado en lote—, así que **el aviso se disparaba solo** y dejaba los dos
+    intents de cobro muertos por chat para ese cliente. El camino bueno ya existía y no se
+    usaba.
+  - **Lo que sí se sigue preguntando es el vuelto** cuando el cheque cubre de más: qué se
+    hace con la plata a favor del cliente es una decisión de negocio, no una ambigüedad del
+    bot. El operador la contesta en castellano ("que le quede a favor") y el modelo la manda
+    en `vuelto_modo`, que es un **Literal y no un Enum** — por eso lo lee `_vuelto_modo()` y
+    no `_req_enum`. Un valor que no se reconoce vuelve `None` y el servicio vuelve a pedirlo,
+    en vez de elegir por el operador.
+
 ---
 
 ### 2.b Deudas simples _(deuda libre de cliente — módulo agregado 2026-07-18)_

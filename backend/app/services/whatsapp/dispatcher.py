@@ -44,7 +44,7 @@ from app.schemas.clientes import ClienteCreate
 from app.schemas.deudas_simples import DeudaSimpleCreate
 from app.services import deudas_simples as svc_deudas_simples
 from app.schemas.compensaciones import CompensacionCreate
-from app.schemas.deudores import CobroClienteCreate
+from app.schemas.deudores import CobroClienteChequeCreate, CobroClienteCreate
 from app.services import compensaciones as svc_compensaciones
 from app.services import deudores as svc_deudores
 from app.schemas.fiados import FiadoCobrarConChequeRequest, FiadoCobrarEfectivoRequest
@@ -198,7 +198,7 @@ def dispatch(
         if intent == "COBRAR_CUOTA":
             return _cobrar_cuota(db, data, msg_at)
         if intent == "COBRAR_FIADO_EFECTIVO":
-            return _cobrar_fiado_efectivo(db, phone, data)
+            return _cobrar_fiado_efectivo(db, phone, data, msg_at)
         if intent == "COBRAR_FIADO_CON_CHEQUE":
             return _cobrar_fiado_con_cheque(db, phone, data, msg_at)
         if intent == "COBRAR_DEUDA_CLIENTE":
@@ -1144,13 +1144,26 @@ def _registrar_gasto(db: Session, data: dict[str, Any], msg_at: datetime | None 
     return True, "\n".join(lines)
 
 
-def _cobrar_fiado_efectivo(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:
+def _cobrar_fiado_efectivo(
+    db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None
+) -> DispatchResult:
+    """Cobra un fiado en efectivo.
+
+    Con **más de un fiado abierto** el cobro se va por la cuenta general del
+    cliente (`_cobrar_deuda_cliente`): el importe se imputa de la operación más
+    vieja a la más nueva, cruzando fiados, deudas libres y cuotas. No hay nada que
+    elegir —el cliente no está pagando *uno* de sus fiados, está pagando lo que
+    debe—, que es la misma regla del cobro consolidado y de los pagos a un
+    acreedor _(decisión del dueño, 2026-08-26)_."""
     cliente_nombre = _req_str(data, "cliente_nombre")
     monto_cobrado = _req_decimal(data, "monto_cobrado")
 
-    fiado = _buscar_fiado_abierto(db, cliente_nombre)
-    if fiado is None:
+    fiados = _fiados_abiertos(db, cliente_nombre)
+    if not fiados:
         return False, f"❓ No encontré un fiado abierto para '{cliente_nombre}'."
+    if len(fiados) > 1:
+        return _cobrar_deuda_cliente(db, data, msg_at)
+    fiado = fiados[0]
 
     payload = FiadoCobrarEfectivoRequest(
         monto_cobrado=monto_cobrado,
@@ -1400,6 +1413,90 @@ def _compensar_deuda(
     return True, "\n".join(lines)
 
 
+def _vuelto_modo(data: dict[str, Any]) -> str | None:
+    """Qué hacer con lo que sobra de un cheque que cubrió toda la deuda.
+
+    `VueltoModo` es un Literal y no un Enum, así que no pasa por `_req_enum`. Un
+    valor que no reconocemos vuelve como None y el servicio pide la aclaración,
+    en vez de elegir por el operador qué se hace con plata a favor del cliente."""
+    v = str(data.get("vuelto_modo") or "").upper().strip()
+    return v if v in ("SALDAR_EFECTIVO", "QUEDA_DEBIENDO") else None
+
+
+def _cobrar_deuda_cliente_con_cheque(
+    db: Session, data: dict[str, Any], msg_at: datetime | None = None
+) -> DispatchResult:
+    """El cliente entrega UN cheque contra todo lo que debe.
+
+    Es el camino del cobro consolidado cuando el que paga tiene más de un fiado
+    abierto: el cheque salda por su **valor neto**, imputado de la operación más
+    vieja a la más nueva igual que el efectivo, y no asienta caja —entra a
+    cartera a nombre del cliente y la plata se reconoce al venderlo o cobrarlo—.
+
+    Si el cheque cubre de más, el servicio pide qué hacer con el vuelto. Esa sí
+    es una pregunta de negocio y no un callejón: la contesta el operador diciendo
+    "devolveselo" o "quedáselo a favor", y el modelo la manda en `vuelto_modo`.
+    """
+    cliente_nombre = _req_str(data, "cliente_nombre")
+    cliente = _buscar_cliente_o_error(db, cliente_nombre, estricto=True)
+
+    ars = svc_deudores.resumen_cliente(db, cliente.id, Moneda.ARS)
+    usd = svc_deudores.resumen_cliente(db, cliente.id, Moneda.USD)
+    con_deuda = [r for r in (ars, usd) if r.total > Decimal("0.00")]
+    if not con_deuda:
+        return False, f"❓ {cliente.nombre} no tiene deuda abierta."
+
+    cotizacion = _opt_decimal(data, "cotizacion")
+    if data.get("moneda_deuda"):
+        moneda_deuda = _req_enum(data, "moneda_deuda", Moneda)
+    elif len(con_deuda) == 1:
+        moneda_deuda = con_deuda[0].moneda
+    else:
+        return False, (
+            f"❓ {cliente.nombre} debe {_ars(ars.total)} y U$D{_fmt_num(usd.total)}. "
+            "¿Contra cuál imputo el cheque, la deuda en pesos o la de dólares?"
+        )
+
+    payload = CobroClienteChequeCreate(
+        cliente_id=cliente.id,
+        moneda_deuda=moneda_deuda,
+        nro_cheque_pago=_req_str(data, "nro_cheque_pago"),
+        banco_pago=(str(data["banco_pago"]).strip() or None) if data.get("banco_pago") else None,
+        monto_cheque=_req_decimal(data, "monto_cheque"),
+        porcentaje_compra_cheque=_req_decimal(data, "porcentaje_compra_cheque"),
+        fecha_emision=_opt_date(data, "fecha_emision"),
+        fecha_pago=_opt_date(data, "fecha_pago"),
+        cotizacion=cotizacion,
+        vuelto_modo=_vuelto_modo(data),
+        fecha_cobro=fecha_local(msg_at),
+    )
+    r = svc_deudores.cobrar_cliente_con_cheque(db, payload, created_at=msg_at)
+
+    simbolo = "U$D" if moneda_deuda == Moneda.USD else "$"
+    lines = [
+        f"✅ *Cheque recibido a cuenta* — {r.cliente_nombre}",
+        f"Cheque Nº {r.cheque_ingresado.nro_cheque} | Nominal: "
+        f"{_ars(payload.monto_cheque)} | Compra: {_pct(payload.porcentaje_compra_cheque)}%",
+        "",
+        "Se imputó a:",
+    ]
+    for renglon in r.renglones:
+        saldado = " ✔️ saldado" if renglon.cancelado else ""
+        lines.append(
+            f"  • {renglon.detalle} — {simbolo}{_fmt_num(renglon.imputado)}{saldado}"
+        )
+    lines.append("")
+    if r.vuelto_ars > Decimal("0.00"):
+        lines.append(f"Sobró {_ars(r.vuelto_ars)} a favor del cliente.")
+    if r.saldo_restante <= Decimal("0.00"):
+        lines.append(f"🎉 No debe más nada en {moneda_deuda.value}.")
+    else:
+        lines.append(f"Sigue debiendo: {simbolo}{_fmt_num(r.saldo_restante)}")
+    lines.append("")
+    lines.append("⚠️ La plata no entró a la caja: el cheque está en cartera.")
+    return True, "\n".join(lines)
+
+
 def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     cliente_nombre = _req_str(data, "cliente_nombre")
     nro_cheque_pago = _req_str(data, "nro_cheque_pago")
@@ -1409,9 +1506,12 @@ def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_
     fecha_emision = _opt_date(data, "fecha_emision")
     fecha_pago = _opt_date(data, "fecha_pago")
 
-    fiado = _buscar_fiado_abierto(db, cliente_nombre)
-    if fiado is None:
+    fiados = _fiados_abiertos(db, cliente_nombre)
+    if not fiados:
         return False, f"❓ No encontré un fiado abierto para '{cliente_nombre}'."
+    if len(fiados) > 1:
+        return _cobrar_deuda_cliente_con_cheque(db, data, msg_at)
+    fiado = fiados[0]
 
     payload = FiadoCobrarConChequeRequest(
         nro_cheque_pago=nro_cheque_pago,
@@ -1444,31 +1544,29 @@ def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_
     return True, "\n".join(lines)
 
 
-def _buscar_fiado_abierto(db: Session, cliente_nombre: str) -> Fiado | None:
-    """Devuelve el fiado ABIERTO del cliente.
+def _fiados_abiertos(db: Session, cliente_nombre: str) -> list[Fiado]:
+    """Los fiados ABIERTOS del cliente, en orden de antigüedad.
 
-    Returns None si el cliente existe pero no tiene fiados abiertos.
-    Raises ValueError si el cliente no existe, hay ambigüedad de nombre,
-    o hay múltiples fiados abiertos.
-    """
+    Devuelve la lista entera y no elige: **con más de uno el cobro se va por la
+    cuenta general del cliente** _(decisión del dueño, 2026-08-26)_. Antes esto
+    cortaba con "contactá al administrador para resolverlo desde el panel", y
+    fiarle varios cheques al mismo cliente es el caso normal —lo dice el fiado en
+    lote—, así que ese aviso se disparaba solo y dejaba el cobro por chat muerto
+    para ese cliente.
+
+    Raises ValueError si el cliente no existe o el nombre es ambiguo."""
     cliente = _buscar_cliente_o_error(db, cliente_nombre, estricto=True)
-    fiados: list[Fiado] = list(
+    return list(
         db.scalars(
-            select(Fiado).where(
+            select(Fiado)
+            .where(
                 Fiado.cliente_id == cliente.id,
                 Fiado.estado == FiadoEstado.ABIERTO,
                 Fiado.anulado_at.is_(None),
             )
+            .order_by(Fiado.created_at.asc())
         ).all()
     )
-    if len(fiados) == 1:
-        return fiados[0]
-    if len(fiados) > 1:
-        raise ValueError(
-            f"{cliente.nombre} tiene {len(fiados)} fiados abiertos. "
-            "Contactá al administrador para resolverlo desde el panel."
-        )
-    return None
 
 
 def _revertir_operacion(db: Session, phone: str, data: dict[str, Any]) -> DispatchResult:

@@ -241,6 +241,10 @@ OPERACIONES DISPONIBLES
    data:
      - cliente_nombre: string
      - monto_cobrado: number (monto que está pagando en efectivo)
+     - medio_pago: "EFECTIVO" o "TRANSFERENCIA" (default EFECTIVO)
+   Regla: si el cliente tiene VARIOS fiados abiertos, el cobro se imputa a toda su
+     cuenta de lo más viejo a lo más nuevo, cruzando fiados, deudas y cuotas. No
+     preguntes a cuál de los fiados va: no está pagando uno, está pagando lo que debe.
 
 9. COBRAR_FIADO_CON_CHEQUE
    Cuándo: Un cliente con fiado abierto paga entregando un nuevo cheque.
@@ -254,6 +258,12 @@ OPERACIONES DISPONIBLES
      - porcentaje_compra_cheque: number (% de compra de ese cheque)
      - fecha_emision: "YYYY-MM-DD" o null
      - fecha_pago: "YYYY-MM-DD" o null
+     - vuelto_modo: "SALDAR_EFECTIVO" o "QUEDA_DEBIENDO" o null — SOLO si el cheque
+       cubre de más y el operador dice qué hace con la diferencia: "le devolví el
+       vuelto" → SALDAR_EFECTIVO; "se lo dejo a favor" / "le quedo debiendo" →
+       QUEDA_DEBIENDO. Si no lo dice, null: el sistema pregunta.
+   Regla: si el cliente tiene VARIOS fiados abiertos, el cheque se imputa a toda su
+     cuenta de lo más viejo a lo más nuevo. No preguntes a cuál de los fiados va.
 
 9b. COBRAR_DEUDA_CLIENTE  ←— el cobro por defecto
    Cuándo: Un cliente le entregó plata al operador para bajar lo que debe, SIN
