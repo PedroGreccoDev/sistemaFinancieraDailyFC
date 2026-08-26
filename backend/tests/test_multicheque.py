@@ -175,3 +175,174 @@ def test_sin_bloque_de_texto_devuelve_vacio_en_vez_de_romper() -> None:
         content = []
 
     assert _texto_de(Respuesta()) == ""
+
+
+# ── Fiado de varios cheques (bug del 2026-08-26) ──────────────────────
+#
+# "Cheques 9460 y 9461 fiado a Lalin al 2,5%": el modelo entendió los dos
+# —lo dijo en la confirmación— pero FIAR_CHEQUE solo tenía `nro_cheque`
+# suelto, así que al confirmar respondió "Falta el campo 'nro_cheque'" y no
+# se cargó ninguno. El alta y la venta ya eran multi; el fiado no.
+
+def test_los_fiados_usan_la_misma_normalizacion() -> None:
+    data = {"fiados": [{"nro_cheque": "9460"}, {"nro_cheque": "9461"}]}
+    assert len(_items_o_uno(data, "fiados")) == 2
+
+
+def test_el_fiado_en_formato_viejo_sigue_andando() -> None:
+    """Una sesión abierta con historial del contrato anterior (campos sueltos)
+    no debe romper a mitad de conversación."""
+    viejo = {"nro_cheque": "9460", "cliente_nombre": "Lalin", "porcentaje_venta": 2.5}
+    assert _items_o_uno(viejo, "fiados") == [viejo]
+
+
+def test_el_cliente_y_el_porcentaje_dichos_una_vez_bajan_a_cada_cheque() -> None:
+    """"Los fié a Lalin al 2,5%" nombra el cliente y el descuento UNA vez. Si el
+    modelo los deja en la raíz, sin herencia el lote entero se cae por un campo
+    que el operador sí dictó."""
+    data = {
+        "fiados": [{"nro_cheque": "9460"}, {"nro_cheque": "9461"}],
+        "cliente_nombre": "Lalin",
+        "porcentaje_venta": 2.5,
+    }
+    items = _items_o_uno(
+        data, "fiados", heredar=("cliente_nombre", "porcentaje_venta", "banco")
+    )
+    assert [i["cliente_nombre"] for i in items] == ["Lalin", "Lalin"]
+    assert [i["porcentaje_venta"] for i in items] == [2.5, 2.5]
+
+
+def test_la_herencia_nunca_pisa_lo_que_el_item_ya_dice() -> None:
+    """Un porcentaje por cheque ("el 9460 al 2% y el 9461 al 3%") manda sobre
+    cualquier valor suelto en la raíz."""
+    data = {
+        "fiados": [
+            {"nro_cheque": "9460", "porcentaje_venta": 2},
+            {"nro_cheque": "9461"},
+        ],
+        "porcentaje_venta": 3,
+    }
+    items = _items_o_uno(data, "fiados", heredar=("porcentaje_venta",))
+    assert [i["porcentaje_venta"] for i in items] == [2, 3]
+
+
+def test_el_prompt_pide_todos_los_cheques_fiados() -> None:
+    assert "fiados: ARRAY" in _SYSTEM_PROMPT
+    seccion = _SYSTEM_PROMPT.split("3. FIAR_CHEQUE")[1].split("4. COBRAR_CHEQUE")[0]
+    assert "aplican a todos" in seccion
+    assert "ACLARACION_REQUERIDA" in seccion
+
+
+def test_el_fiado_en_lote_carga_los_validos_y_avisa_del_que_falla() -> None:
+    """Misma política que el alta y la venta (decisión del dueño, 2026-08-06):
+    un cheque ya vendido no puede tirar abajo el resto del lote."""
+    from decimal import Decimal
+
+    from app.services.exceptions import ServiceError
+    from app.services.whatsapp import dispatcher
+
+    class FakeCheque:
+        def __init__(self, nro: str) -> None:
+            self.nro_cheque = nro
+            self.monto = Decimal("100000")
+            self.porcentaje_venta = Decimal("2.5")
+
+    class FakeFiado:
+        saldo_pendiente = Decimal("97500")
+
+    class FakeCliente:
+        nombre = "Lalin"
+
+    def fake_obj(db, phone, data, msg_at=None):
+        if data["nro_cheque"] == "9461":
+            raise ServiceError("El cheque ya no está EN_CARTERA")
+        return FakeCheque(data["nro_cheque"]), FakeFiado(), FakeCliente()
+
+    original = dispatcher._fiar_un_cheque_obj
+    dispatcher._fiar_un_cheque_obj = fake_obj
+    try:
+        ok, msg = dispatcher._fiar_cheque(
+            None,
+            "549",
+            {
+                "fiados": [{"nro_cheque": "9460"}, {"nro_cheque": "9461"}],
+                "cliente_nombre": "Lalin",
+                "porcentaje_venta": 2.5,
+            },
+        )
+    finally:
+        dispatcher._fiar_un_cheque_obj = original
+
+    assert ok is True
+    assert "9460" in msg and "Lalin" in msg
+    assert "no se pudo(eron) fiar" in msg
+    assert "9461" in msg
+
+
+# ── Cobro y rechazo en lote (revisión del 2026-08-26) ─────────────────
+#
+# Al banco se va con un fajo y los rebotes vienen de a varios (mismo librador,
+# misma cuenta sin fondos). Con un contrato de un solo `nro_cheque`, "cobré el
+# 9460 y el 9461" cargaba UNO y perdía el otro EN SILENCIO: el bot contestaba
+# "✅ Cheque 9460 COBRADO" y el operador daba los dos por cobrados. El que se
+# escapa queda EN CARTERA para siempre y su plata nunca entra a la caja.
+
+def test_los_cobros_y_rechazos_usan_la_misma_normalizacion() -> None:
+    assert len(_items_o_uno({"cobros": [{"nro_cheque": "1"}, {"nro_cheque": "2"}]}, "cobros")) == 2
+    assert len(_items_o_uno({"rechazos": [{"nro_cheque": "1"}]}, "rechazos")) == 1
+
+
+def test_cobro_y_rechazo_en_formato_viejo_siguen_andando() -> None:
+    viejo = {"nro_cheque": "9460", "banco": "Galicia"}
+    assert _items_o_uno(viejo, "cobros") == [viejo]
+    assert _items_o_uno(viejo, "rechazos") == [viejo]
+
+
+def test_el_prompt_pide_todos_los_cheques_cobrados_y_rechazados() -> None:
+    assert "cobros: ARRAY" in _SYSTEM_PROMPT
+    assert "rechazos: ARRAY" in _SYSTEM_PROMPT
+
+
+def test_el_cobro_en_lote_no_pierde_ningun_cheque_en_silencio() -> None:
+    """El que falla se nombra. Un cheque que no se pudo cobrar y no se informa
+    queda EN CARTERA mientras el operador lo da por cobrado."""
+    from decimal import Decimal
+
+    from app.services.exceptions import ServiceError
+    from app.services.whatsapp import dispatcher
+
+    class FakeCheque:
+        def __init__(self, nro: str) -> None:
+            self.nro_cheque = nro
+            self.banco = "Galicia"
+            self.monto = Decimal("100000")
+
+    def fake_uno(db, phone, data, msg_at=None):
+        if data["nro_cheque"] == "9461":
+            raise ServiceError("El cheque ya está COBRADO")
+        return FakeCheque(data["nro_cheque"])
+
+    original = dispatcher._cobrar_un_cheque
+    dispatcher._cobrar_un_cheque = fake_uno
+    try:
+        ok, msg = dispatcher._cobrar_cheque(
+            None, "549", {"cobros": [{"nro_cheque": "9460"}, {"nro_cheque": "9461"}]}
+        )
+    finally:
+        dispatcher._cobrar_un_cheque = original
+
+    assert ok is True
+    assert "9460" in msg
+    assert "9461" in msg and "ya está COBRADO" in msg
+    assert "no se pudo(eron) cobrar" in msg
+
+
+def test_el_medio_de_pago_dicho_una_vez_baja_a_cada_cobro() -> None:
+    """"Cobré el 9460 y el 9461, me los transfirieron": el medio se dice una vez
+    para todo el fajo. Sin herencia, la plata entraría por la caja equivocada."""
+    data = {
+        "cobros": [{"nro_cheque": "9460"}, {"nro_cheque": "9461"}],
+        "medio_pago": "TRANSFERENCIA",
+    }
+    items = _items_o_uno(data, "cobros", heredar=("banco", "medio_pago"))
+    assert [i["medio_pago"] for i in items] == ["TRANSFERENCIA", "TRANSFERENCIA"]

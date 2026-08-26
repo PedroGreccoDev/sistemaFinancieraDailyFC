@@ -159,28 +159,61 @@ OPERACIONES DISPONIBLES
      - Con más de un cheque, poné confirmacion_requerida: true y listá cuáles son.
 
 3. FIAR_CHEQUE
-   Cuándo: El operador entrega un cheque a alguien como crédito abierto (sin cuotas fijas).
-   Ej: "Se lo fié a Juan al 3%", "Fié el 12345 a María Gómez al 2.5%"
+   Cuándo: El operador entrega uno o VARIOS cheques a alguien como crédito abierto
+   (sin cuotas fijas).
+   Ej: "Se lo fié a Juan al 3%", "Fié el 12345 a María Gómez al 2.5%",
+       "Cheques 9460 y 9461 fiados a Lalin al 2,5%"
    La deuda queda abierta: el cliente pagará en efectivo o con otro cheque cuando pueda.
+   ⚠️ Igual que el alta y la venta: si nombra varios cheques, devolvelos TODOS en el array.
    data:
-     - nro_cheque: string
-     - banco: string o null (si lo menciona; para desambiguar números repetidos entre bancos)
-     - cliente_nombre: string
-     - porcentaje_venta: number (% de descuento pactado; el cliente deberá el monto menos ese %)
+     - fiados: ARRAY con un objeto por cheque fiado (aunque sea uno solo). Cada uno:
+         * nro_cheque: string
+         * banco: string o null (si lo menciona; para desambiguar números repetidos
+           entre bancos)
+         * cliente_nombre: string (a quién se le fía)
+         * porcentaje_venta: number (% de descuento pactado; el cliente deberá el
+           monto menos ese %)
+   Reglas:
+     - Un solo cliente y/o un solo porcentaje mencionados con varios cheques → se
+       aplican a todos ("los fié a Lalin al 2,5%" → los dos con ese cliente y ese %).
+     - Si dice VARIOS porcentajes, asignalos en el orden en que los nombra.
+     - Si se refiere a "esos cheques" / "los que cargué recién" sin números, buscá
+       en el historial los últimos cheques registrados y usá sus números.
+     - Si no podés determinar QUÉ cheques son, a quién se le fían o con qué
+       descuento → ACLARACION_REQUERIDA.
+     - Con más de un cheque, poné confirmacion_requerida: true y listá cuáles son.
 
 4. COBRAR_CHEQUE
-   Cuándo: El cheque se cobró en ventanilla al vencimiento.
-   Ej: "Cobré el cheque 12345", "Pasé el 12345 por ventanilla"
+   Cuándo: Uno o VARIOS cheques se cobraron en ventanilla al vencimiento.
+   Ej: "Cobré el cheque 12345", "Pasé el 12345 por ventanilla",
+       "Cobré el 12345 y el 12346", "Deposité esos 3 cheques"
+   ⚠️ Al banco se va con un fajo: si nombra varios, devolvelos TODOS en el array.
+      Un cheque que se te escape queda EN CARTERA para siempre y su plata nunca
+      entra a la caja — y el operador ya lo dio por cobrado.
    data:
-     - nro_cheque: string
-     - banco: string o null (si lo menciona; para desambiguar números repetidos entre bancos)
+     - cobros: ARRAY con un objeto por cheque cobrado (aunque sea uno solo). Cada uno:
+         * nro_cheque: string
+         * banco: string o null (si lo menciona; para desambiguar números repetidos
+           entre bancos)
+   Reglas:
+     - Si se refiere a "esos cheques" / "los que vencían hoy" sin números, buscá en
+       el historial los últimos cheques mencionados y usá sus números.
+     - Si no podés determinar QUÉ cheques son → ACLARACION_REQUERIDA.
+     - Con más de un cheque, poné confirmacion_requerida: true y listá cuáles son.
 
 5. RECHAZAR_CHEQUE
-   Cuándo: El cheque rebotó o fue rechazado por el banco.
-   Ej: "Rebotó el 12345", "Me rechazaron el cheque"
+   Cuándo: Uno o VARIOS cheques rebotaron o fueron rechazados por el banco.
+   Ej: "Rebotó el 12345", "Me rechazaron el cheque", "Rebotaron el 12345 y el 12346"
+   ⚠️ Los rebotes vienen de a varios (mismo librador, misma cuenta sin fondos): si
+      nombra varios, devolvelos TODOS en el array.
    data:
-     - nro_cheque: string
-     - banco: string o null (si lo menciona; para desambiguar números repetidos entre bancos)
+     - rechazos: ARRAY con un objeto por cheque rechazado (aunque sea uno solo). Cada uno:
+         * nro_cheque: string
+         * banco: string o null (si lo menciona; para desambiguar números repetidos
+           entre bancos)
+   Reglas:
+     - Si no podés determinar QUÉ cheques son → ACLARACION_REQUERIDA.
+     - Con más de un cheque, poné confirmacion_requerida: true y listá cuáles son.
 
 6. NUEVO_PRESTAMO
    Cuándo: El operador prestó dinero directamente (sin cheque).

@@ -175,17 +175,29 @@ def dispatch(
 # Handlers por intent
 # ────────────────────────────────────────────────────────────────────────────
 
-def _items_o_uno(data: dict[str, Any], clave: str) -> list[dict[str, Any]]:
+def _items_o_uno(
+    data: dict[str, Any], clave: str, heredar: tuple[str, ...] = ()
+) -> list[dict[str, Any]]:
     """Normaliza el payload del modelo a una lista de ítems.
 
     El bot acepta varios cheques por mensaje (una foto puede traer 4), así que el
     modelo devuelve un array. Se tolera el formato viejo de un solo objeto con los
     campos sueltos: una sesión que quedó abierta con historial del formato anterior
     sigue funcionando en vez de romper a mitad de una conversación.
+
+    `heredar` son las claves que, dichas UNA VEZ para todo el lote, el modelo suele
+    dejar en la raíz en vez de repetirlas en cada ítem ("los fié a Lalin al 2,5%").
+    Se copian a los ítems que no las traen — nunca se pisa lo que el ítem ya dice.
+    Sin esto el lote entero se cae por un campo que el operador sí dictó.
     """
     items = data.get(clave)
     if isinstance(items, list) and items:
-        return [i for i in items if isinstance(i, dict)]
+        items = [i for i in items if isinstance(i, dict)]
+        for item in items:
+            for k in heredar:
+                if item.get(k) is None and data.get(k) is not None:
+                    item[k] = data[k]
+        return items
     return [data]
 
 
@@ -303,7 +315,7 @@ def _vender_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dateti
 
     Misma política que el alta: los que se pueden vender se venden, y se informa
     cuál falló (por ejemplo si ya estaba vendido) sin tirar abajo el resto."""
-    items = _items_o_uno(data, "ventas")
+    items = _items_o_uno(data, "ventas", heredar=("porcentaje_venta", "cliente_nombre", "banco"))
 
     if len(items) == 1:
         return _vender_un_cheque(db, phone, items[0], msg_at)
@@ -397,6 +409,51 @@ def _vender_un_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dat
 
 
 def _fiar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
+    """Fiado de uno o varios cheques en un solo mensaje.
+
+    Misma política que el alta y la venta: los que se pueden fiar se fían, y se
+    informa cuál falló (por ejemplo si ya estaba vendido) sin tirar abajo el resto."""
+    items = _items_o_uno(
+        data, "fiados", heredar=("cliente_nombre", "porcentaje_venta", "banco")
+    )
+
+    if len(items) == 1:
+        return _fiar_un_cheque(db, phone, items[0], msg_at)
+
+    fiados: list[str] = []
+    fallidos: list[str] = []
+    saldo_total = Decimal("0.00")
+    for item in items:
+        try:
+            cheque, fiado, cliente = _fiar_un_cheque_obj(db, phone, item, msg_at)
+            saldo_total += fiado.saldo_pendiente
+            fiados.append(
+                f"  • Nº {cheque.nro_cheque} → {cliente.nombre} · "
+                f"{_ars(cheque.monto)} al {_pct(cheque.porcentaje_venta)}% "
+                f"· debe {_ars(fiado.saldo_pendiente)}"
+            )
+        except (ServiceError, ValueError) as exc:
+            motivo = getattr(exc, "message", None) or str(exc)
+            fallidos.append(f"  • Nº {item.get('nro_cheque', '?')}: {motivo}")
+
+    lines: list[str] = []
+    if fiados:
+        lines.append(f"✅ *{len(fiados)} cheque(s) fiado(s)*")
+        lines.extend(fiados)
+        lines.append("")
+        lines.append(f"Saldo pendiente total: {_ars(saldo_total)}")
+    if fallidos:
+        if fiados:
+            lines.append("")
+        lines.append(f"⚠️ *{len(fallidos)} no se pudo(eron) fiar*")
+        lines.extend(fallidos)
+    return bool(fiados), "\n".join(lines)
+
+
+def _fiar_un_cheque_obj(
+    db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None
+) -> tuple[Cheque, Fiado, Cliente]:
+    """Fía un cheque y devuelve las filas, para poder resumir el lote."""
     objetivo = _resolver_cheque(db, data)
     cliente_nombre = _req_str(data, "cliente_nombre")
     pct_venta = _req_decimal(data, "porcentaje_venta")
@@ -414,17 +471,63 @@ def _fiar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime
         fecha_fiado=fecha_local(msg_at),
         event_at=msg_at,
     )
+    return cheque, fiado, cliente
+
+
+def _fiar_un_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
+    cheque, fiado, cliente = _fiar_un_cheque_obj(db, phone, data, msg_at)
 
     lines = [
         f"✅ *Cheque fiado*",
         f"Nº {cheque.nro_cheque} → {cliente.nombre}",
         f"Monto nominal: {_ars(cheque.monto)}",
-        f"Descuento: {_pct(pct_venta)}% | Saldo pendiente: {_ars(fiado.saldo_pendiente)}",
+        f"Descuento: {_pct(cheque.porcentaje_venta)}% | "
+        f"Saldo pendiente: {_ars(fiado.saldo_pendiente)}",
     ]
     return True, "\n".join(lines)
 
 
 def _cobrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
+    """Cobro en ventanilla de uno o varios cheques.
+
+    Al banco se va con un fajo, así que el lote es el caso normal. Misma política
+    que el resto: se cobran los que se puede y se informa cuál falló."""
+    items = _items_o_uno(data, "cobros", heredar=("banco", "medio_pago"))
+
+    if len(items) == 1:
+        cheque = _cobrar_un_cheque(db, phone, items[0], msg_at)
+        return True, f"✅ Cheque Nº {cheque.nro_cheque} marcado como *COBRADO*."
+
+    cobrados: list[str] = []
+    fallidos: list[str] = []
+    total = Decimal("0.00")
+    for item in items:
+        try:
+            cheque = _cobrar_un_cheque(db, phone, item, msg_at)
+            total += cheque.monto or Decimal("0.00")
+            banco = f" — {cheque.banco}" if cheque.banco else ""
+            cobrados.append(f"  • Nº {cheque.nro_cheque}{banco} · {_ars(cheque.monto)}")
+        except (ServiceError, ValueError) as exc:
+            motivo = getattr(exc, "message", None) or str(exc)
+            fallidos.append(f"  • Nº {item.get('nro_cheque', '?')}: {motivo}")
+
+    lines: list[str] = []
+    if cobrados:
+        lines.append(f"✅ *{len(cobrados)} cheque(s) COBRADO(s)*")
+        lines.extend(cobrados)
+        lines.append("")
+        lines.append(f"Total cobrado: {_ars(total)}")
+    if fallidos:
+        if cobrados:
+            lines.append("")
+        lines.append(f"⚠️ *{len(fallidos)} no se pudo(eron) cobrar*")
+        lines.extend(fallidos)
+    return bool(cobrados), "\n".join(lines)
+
+
+def _cobrar_un_cheque(
+    db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None
+) -> Cheque:
     objetivo = _resolver_cheque(db, data)
     payload = ChequeManualTransition(
         target_state=ChequeEstado.COBRADO,
@@ -432,19 +535,60 @@ def _cobrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dateti
         motivo="Cobrado en ventanilla",
         medio_pago=_medio(data),
     )
-    cheque = svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
-    return True, f"✅ Cheque Nº {cheque.nro_cheque} marcado como *COBRADO*."
+    return svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
 
 
 def _rechazar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
+    """Rechazo de uno o varios cheques.
+
+    Los rebotes vienen de a varios (mismo librador, misma cuenta sin fondos)."""
+    items = _items_o_uno(data, "rechazos", heredar=("banco",))
+
+    if len(items) == 1:
+        cheque = _rechazar_un_cheque(db, phone, items[0], msg_at)
+        return True, (
+            f"⛔ Cheque Nº {cheque.nro_cheque} marcado como *RECHAZADO*. "
+            "Gestioná el recupero externamente."
+        )
+
+    rechazados: list[str] = []
+    fallidos: list[str] = []
+    total = Decimal("0.00")
+    for item in items:
+        try:
+            cheque = _rechazar_un_cheque(db, phone, item, msg_at)
+            total += cheque.monto or Decimal("0.00")
+            banco = f" — {cheque.banco}" if cheque.banco else ""
+            rechazados.append(f"  • Nº {cheque.nro_cheque}{banco} · {_ars(cheque.monto)}")
+        except (ServiceError, ValueError) as exc:
+            motivo = getattr(exc, "message", None) or str(exc)
+            fallidos.append(f"  • Nº {item.get('nro_cheque', '?')}: {motivo}")
+
+    lines: list[str] = []
+    if rechazados:
+        lines.append(f"⛔ *{len(rechazados)} cheque(s) RECHAZADO(s)*")
+        lines.extend(rechazados)
+        lines.append("")
+        lines.append(f"Total rechazado: {_ars(total)}")
+        lines.append("Gestioná el recupero externamente.")
+    if fallidos:
+        if rechazados:
+            lines.append("")
+        lines.append(f"⚠️ *{len(fallidos)} no se pudo(eron) marcar*")
+        lines.extend(fallidos)
+    return bool(rechazados), "\n".join(lines)
+
+
+def _rechazar_un_cheque(
+    db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None
+) -> Cheque:
     objetivo = _resolver_cheque(db, data)
     payload = ChequeManualTransition(
         target_state=ChequeEstado.RECHAZADO,
         operador_id=phone,
         motivo="Rechazado — informado por operador",
     )
-    cheque = svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
-    return True, f"⛔ Cheque Nº {cheque.nro_cheque} marcado como *RECHAZADO*. Gestioná el recupero externamente."
+    return svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
 
 
 def _nuevo_prestamo(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:

@@ -1466,16 +1466,35 @@ que sería un loop infinito).
     no 1024). Es un techo, no un cargo: solo se paga lo que se genera.
   - **`content[0]` puede ser un bloque `thinking`**, no el texto: leer por índice devuelve
     basura. Usar `_texto_de(response)`.
-- **Multi-cheque (§ punto 1, 2026-08-06): una foto puede traer varios cheques.**
-  `REGISTRAR_CHEQUE` devuelve `data.cheques` (ARRAY) y `VENDER_CHEQUE` devuelve `data.ventas`
-  (ARRAY), siempre — con un solo cheque el array trae un elemento. `_items_o_uno()` normaliza
-  y **tolera el formato viejo** de campos sueltos, para que una sesión abierta con historial
-  del contrato anterior no se rompa a mitad de conversación.
+- **Multi-cheque (§ punto 1, 2026-08-06; extendido 2026-08-26): TODA operación de cheques
+  acepta varios.** Los cheques se manejan en fajo —una foto trae cuatro, al banco se va con
+  seis, se fían dos al mismo cliente—, así que el lote es el caso normal y no la excepción.
+  Cada intent devuelve **su** array, siempre, con un elemento cuando es uno solo:
+  `REGISTRAR_CHEQUE` → `data.cheques`, `VENDER_CHEQUE` → `data.ventas`, `FIAR_CHEQUE` →
+  `data.fiados`, `COBRAR_CHEQUE` → `data.cobros`, `RECHAZAR_CHEQUE` → `data.rechazos`.
+  `_items_o_uno()` normaliza y **tolera el formato viejo** de campos sueltos, para que una
+  sesión abierta con historial del contrato anterior no se rompa a mitad de conversación.
+  - **Un intent de cheques que acepte uno solo es un bug esperando.** El operador dicta como
+    habla y nombra los que tenga en la mano; el contrato es lo único que decide si eso entra.
+    Los dos modos de falla, los dos vistos en producción:
+    **ruidoso** —`FIAR_CHEQUE` sin array contestaba "Falta el campo 'nro_cheque'" y no cargaba
+    ninguno de los dos (2026-08-26)— y **silencioso**, que es el caro: con lugar para un solo
+    número el modelo carga uno y descarta el resto sin que nada falle, el bot contesta "✅
+    Cheque 9460 COBRADO" y el operador da por cobrados los dos. El que se escapa queda
+    `EN_CARTERA` para siempre y su plata nunca entra a la caja.
+  - **Los datos que se dicen UNA VEZ para todo el lote se heredan** (`_items_o_uno(...,
+    heredar=(...))`): el cliente y el descuento de un fiado, el porcentaje de una venta, el
+    banco, el medio de pago de un cobro. "Los fié a Lalin al 2,5%" nombra cliente y descuento
+    una sola vez; si el modelo los deja en la raíz del payload, sin herencia **el lote entero
+    se cae por un campo que el operador sí dictó**. Nunca pisa lo que el ítem ya trae, así que
+    un porcentaje por cheque manda sobre el suelto.
   - **Porcentaje:** uno solo mencionado con varios cheques se aplica a todos; varios se
     asignan en orden; si no lo aclara y hay más de uno → `ACLARACION_REQUERIDA` (no se inventa).
-  - **Fallo parcial: se cargan los válidos y se informa cuál falló** (decisión del dueño), en
-    vez de abortar el lote — así no hay que repetir la foto de los cuatro por uno duplicado.
-    Cada alta commitea por separado, que es lo que hace posible ese comportamiento.
+  - **Fallo parcial: se procesan los válidos y se informa cuál falló** (decisión del dueño), en
+    vez de abortar el lote — así no hay que repetir la foto de los cuatro por uno duplicado, ni
+    volver a dictar seis cobros porque uno ya estaba marcado. Cada operación commitea por
+    separado, que es lo que hace posible ese comportamiento. **El que falla se nombra siempre**:
+    un cheque que no entró y no se informa es indistinguible de uno que entró.
 - El bot opera vía WAHA (WhatsApp HTTP API) → webhook `POST /webhook/whatsapp`.
 - Solo el número configurado en `WHATSAPP_OPERATOR_PHONE` puede operar. **Ojo: si la env
   var está vacía el filtro NO se aplica** (`webhook.py`: `if operator_phone and ...`) y
@@ -1789,6 +1808,13 @@ que sería un loop infinito).
     abierto traiga el traceback, que un estado desconocido **no lo haga desaparecer del
     documento sin fallar**, y que `traceback_legible` saque los frames de librerías sin
     dejar colgados los `^^^^` de columna ni cortar nunca el tipo de excepción.
+  - **`test_multicheque.py`** — que **toda** operación de cheques acepte un fajo (§Bot:
+    multi-cheque): la normalización de los cinco arrays, que el formato viejo siga andando,
+    que los datos dichos una vez para el lote (cliente, descuento, banco, medio de pago)
+    bajen a cada cheque sin pisar los propios, y que un fallo parcial procese el resto
+    **nombrando el que falló** — el que no se informa queda `EN_CARTERA` mientras el operador
+    lo da por hecho. Custodia además que el prompt siga pidiendo todos los cheques de la foto.
+
 - **Convención:** mantené la lógica de negocio en funciones/métodos testeables sin BD; si una
   pieza nueva necesita una sesión, extraé la parte pura para poder cubrirla en este estilo.
 
