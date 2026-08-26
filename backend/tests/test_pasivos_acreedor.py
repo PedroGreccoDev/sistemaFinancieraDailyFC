@@ -178,3 +178,31 @@ def test_el_centavo_de_redondeo_no_es_un_vuelto() -> None:
 
     assert deuda.estado == PasivoEstado.CANCELADA
     assert [o for o in db.agregados if isinstance(o, Pasivo)] == []
+
+
+# ── El chat y el panel tienen que decir lo mismo ─────────────────────────────
+
+def test_la_consulta_del_bot_agrupa_con_el_mismo_criterio_que_el_pago() -> None:
+    """Un acreedor cargado con otra mayúscula es el MISMO acreedor.
+
+    `_resolver_acreedor` y `cargar_pasivos_acreedor` normalizan (trim +
+    minúsculas) y el panel agrupa igual, así que la consulta tiene que hacerlo
+    también: si no, el chat lista dos renglones chicos donde el panel muestra uno
+    grande y el pago los junta. El operador lee que le debe menos.
+    """
+    from app.services.whatsapp import dispatcher
+
+    pasivos = [_pasivo("Lote de dólares", "100000"), _pasivo("Vuelto cheque", "63500")]
+    pasivos[1].acreedor = "  cuello "
+
+    original = dispatcher._pasivos_pendientes
+    dispatcher._pasivos_pendientes = lambda _db: pasivos
+    try:
+        texto = dispatcher._consulta_pasivos(None, None, None, {}, "TODO")
+    finally:
+        dispatcher._pasivos_pendientes = original
+
+    # Un solo renglón de acreedor, por el total de las dos deudas.
+    assert texto.count("👤") == 1
+    assert "2 deudas" in texto
+    assert "cuello" not in texto  # se muestra con el nombre tal como se escribió

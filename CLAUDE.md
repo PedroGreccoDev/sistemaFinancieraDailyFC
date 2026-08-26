@@ -944,7 +944,9 @@ el mismo agujero de los dólares de apertura y de los ajustes que suman USD.
   sin que la caja se mueva (§Compensación).
 - **Alta** via bot de WhatsApp (intent `REGISTRAR_DEUDA`) o desde el panel web (botón "Nueva deuda").
 - El bot **exige** que el operador indique el concepto; si falta, responde con `ACLARACION_REQUERIDA`.
-- **Cancelación** solo desde el panel web (el bot no puede cancelar pasivos).
+- **Cancelación:** desde el panel (por acreedor o por deuda puntual) y **también desde el
+  bot** con `PAGAR_PASIVO` desde 2026-08-25 (§Las dos cajas: "El bot paga los pasivos"). Lo
+  único que sigue siendo exclusivo del panel es el **vuelto** de un cheque que cubre de más.
 - Estados: `PENDIENTE` → `CANCELADA` (transición única, irreversible).
 - **Pagos parciales:** el pasivo tiene `saldo_pendiente` (migración `0007`); se puede cancelar en partes, en efectivo/transferencia o con un cheque de cartera. Pasa a `CANCELADA` cuando el saldo llega a 0.
 - **Pago en efectivo o transferencia (`POST /pasivos/{id}/pagar`, `svc_pasivos.pagar_pasivo`, régimen definido 2026-06-25):**

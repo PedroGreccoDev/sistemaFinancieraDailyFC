@@ -2640,10 +2640,19 @@ def _consulta_pasivos(
     if not pasivos:
         return "📭 No tenés deudas pendientes. El negocio no le debe nada a nadie."
 
+    # Se agrupa por el nombre **normalizado**, el mismo criterio de
+    # `_resolver_acreedor` y de `cargar_pasivos_acreedor` (§5). Agrupar por el
+    # texto crudo parte en dos al acreedor cargado con otra mayúscula o un
+    # espacio de más: el chat muestra dos renglones chicos donde el panel muestra
+    # uno grande, y el pago —que sí normaliza— los junta igual. El operador lee
+    # que le debe menos de lo que le debe.
     por_acreedor: dict[str, list[Pasivo]] = {}
+    nombre_de: dict[str, str] = {}
     totales: dict[Moneda, Decimal] = {}
     for p in pasivos:
-        por_acreedor.setdefault(p.acreedor, []).append(p)
+        clave = p.acreedor.strip().lower()
+        por_acreedor.setdefault(clave, []).append(p)
+        nombre_de.setdefault(clave, p.acreedor.strip())
         totales[p.moneda] = totales.get(p.moneda, Decimal("0.00")) + p.saldo_pendiente
 
     lines = [
@@ -2658,7 +2667,8 @@ def _consulta_pasivos(
         )
 
     detalle = []
-    for acreedor, deudas in sorted(por_acreedor.items(), key=lambda kv: -_saldo_ars(kv[1])):
+    for clave, deudas in sorted(por_acreedor.items(), key=lambda kv: -_saldo_ars(kv[1])):
+        acreedor = nombre_de[clave]
         del_acreedor: dict[Moneda, Decimal] = {}
         for d in deudas:
             del_acreedor[d.moneda] = del_acreedor.get(d.moneda, Decimal("0.00")) + d.saldo_pendiente
