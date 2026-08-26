@@ -81,7 +81,13 @@ def _preparar_base(db, rng: random.Random) -> None:
             saldo_ars=Decimal("5000000.00"),
             saldo_usd=Decimal("10000.00"),
             saldo_ars_transf=Decimal("3000000.00"),
-            saldo_usd_transf=Decimal("5000.00"),
+            # Los dólares van todos al efectivo: **el negocio no tiene cuenta
+            # bancaria en dólares** (dicho por el dueño, 2026-08-25). Cargarlos
+            # como depositados probaría un negocio que no es este, y además tapa
+            # los hallazgos de verdad: la apertura no le crea lote de stock a esa
+            # plata, así que el descuadre de USD se lleva puesta la corrida
+            # entera y ningún otro invariante llega a verse.
+            saldo_usd_transf=Decimal("0"),
             fecha=date.today(),
             operador_id="carga",
             cotizacion_usd=Decimal("1200"),

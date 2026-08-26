@@ -443,8 +443,11 @@ def operacion_divisas(ctx: Contexto) -> Resultado:
         "monto": float(Decimal(str(rng.randint(50, 5_000)))),
         "cotizacion_aplicada": float(_cotizacion(rng)),
         "cliente_nombre": _nombre(rng),
+        # Los pesos pueden ir por cualquiera de las dos cajas...
         "medio_pago": rng.choice(["EFECTIVO", "TRANSFERENCIA"]),
-        "medio_usd": rng.choice(["EFECTIVO", "TRANSFERENCIA"]),
+        # ...los dólares no: **el negocio no tiene cuenta en dólares** (dicho por
+        # el dueño, 2026-08-25). Los billetes se dan y se reciben en mano.
+        "medio_usd": "EFECTIVO",
     }
     if tipo == "compra" and rng.random() < 0.2:
         data["monto_abonado"] = 0
@@ -503,6 +506,124 @@ def consulta(ctx: Contexto) -> Resultado:
 
 
 # ══════════════════════════════════════════════════════════════════════
+#  Escenarios — deshacer y corregir (lo más peligroso que hay)
+# ══════════════════════════════════════════════════════════════════════
+#
+# Estas tres son las que más veces rompieron cosas en la historia del proyecto,
+# y por buenas razones: **rehacen asientos de caja ya escritos**. Anular tiene
+# que barrer todas las líneas de la entidad —una `referencia_tipo` que falte en
+# el catálogo las deja vivas contando plata que ya no existe—, revertir tiene que
+# borrar el ingreso pero conservar el egreso de la compra, y editar rehace el
+# asiento con los valores nuevos sin tocar los cobros que ya recibió.
+#
+# Sin estos escenarios, la mitad de los invariantes no se ejercita nunca: sin una
+# sola anulación, `caja_sin_huerfanos` no puede encontrar nada y la sesión
+# termina en verde sin haber mirado dónde más duele.
+
+def _entidad_para_deshacer(ctx: Contexto) -> tuple[str, str] | None:
+    """Algo vivo que se pueda deshacer, como lo nombraría el operador."""
+    rng = ctx.rng
+    opciones: list[tuple[str, str]] = []
+
+    cheque = _uno_al_azar(
+        ctx.db,
+        sa.select(Cheque).where(Cheque.anulado_at.is_(None)).order_by(Cheque.created_at.desc()),
+        rng,
+    )
+    if cheque is not None:
+        opciones.append(("CHEQUE", cheque.nro_cheque))
+
+    if _acreedor_con_deuda(ctx) is not None:
+        opciones.append(("PASIVO", "ultimo"))
+
+    prestamo = _uno_al_azar(
+        ctx.db,
+        sa.select(Cliente)
+        .join(Prestamo, Prestamo.cliente_id == Cliente.id)
+        .where(Prestamo.anulado_at.is_(None)),
+        rng,
+    )
+    if prestamo is not None:
+        opciones.append(("PRESTAMO", prestamo.nombre))
+
+    opciones += [("GASTO", "ultimo"), ("MOVIMIENTO", "ultimo")]
+    return rng.choice(opciones) if opciones else None
+
+
+def anular_operacion(ctx: Contexto) -> Resultado:
+    """Eliminar: da de baja la operación y **revierte su efecto en la caja**."""
+    elegida = _entidad_para_deshacer(ctx)
+    if elegida is None:
+        return Resultado(ok=True, rechazo="no hay nada cargado para deshacer")
+    tipo, identificador = elegida
+    return _bot(ctx, "REVERTIR_OPERACION", {
+        "accion": "ELIMINAR",
+        "tipo_operacion": tipo,
+        "identificador": identificador,
+    })
+
+
+def revertir_cheque(ctx: Contexto) -> Resultado:
+    """Revertir: devuelve un cheque terminal a cartera **sin eliminarlo**.
+
+    Borra el ingreso de la venta y conserva el egreso de la compra, que sigue
+    siendo cierto. Es la única puerta que abre los estados terminales.
+    """
+    cheque = _uno_al_azar(
+        ctx.db,
+        sa.select(Cheque).where(
+            Cheque.anulado_at.is_(None),
+            Cheque.estado.in_(
+                [ChequeEstado.VENDIDO, ChequeEstado.FIADO, ChequeEstado.COBRADO]
+            ),
+        ),
+        ctx.rng,
+    )
+    if cheque is None:
+        return Resultado(ok=True, rechazo="no hay cheques en estado terminal")
+    return _bot(ctx, "REVERTIR_OPERACION", {
+        "accion": "REVERTIR",
+        "tipo_operacion": "CHEQUE",
+        "identificador": cheque.nro_cheque,
+    })
+
+
+def editar_operacion(ctx: Contexto) -> Resultado:
+    """Corregir un valor ya cargado: rehace el asiento de caja de esa entidad."""
+    rng = ctx.rng
+    cheque = _uno_al_azar(
+        ctx.db,
+        sa.select(Cheque).where(Cheque.anulado_at.is_(None)).order_by(Cheque.created_at.desc()),
+        rng,
+    )
+    if cheque is None:
+        return Resultado(ok=True, rechazo="no hay cheques para corregir")
+
+    campo, valor = rng.choice([
+        ("monto", float(_monto(rng, 50_000, 4_000_000))),
+        ("porcentaje_compra", float(_porcentaje(rng))),
+        ("fecha_pago", _fecha(rng, 0, 120).isoformat()),
+        ("cliente_origen", _nombre(rng)),
+    ])
+    return _bot(ctx, "EDITAR_OPERACION", {
+        "tipo_operacion": "CHEQUE",
+        "identificador": cheque.nro_cheque,
+        "campo": campo,
+        "nuevo_valor": valor,
+    })
+
+
+def editar_gasto(ctx: Contexto) -> Resultado:
+    """El gasto es el que más se corrige por chat: se carga rápido y mal."""
+    return _bot(ctx, "EDITAR_OPERACION", {
+        "tipo_operacion": "GASTO",
+        "identificador": "ultimo",
+        "campo": "monto",
+        "nuevo_valor": float(_monto(ctx.rng, 500, 90_000)),
+    })
+
+
+# ══════════════════════════════════════════════════════════════════════
 #  Escenarios — por el panel
 # ══════════════════════════════════════════════════════════════════════
 
@@ -538,7 +659,10 @@ def panel_ajuste_caja(ctx: Contexto) -> Resultado:
         "tipo": tipo,
         "motivo": rng.choice(["CORRECCION", "APORTE", "RETIRO", "OTRO"]),
         "monto": str(_monto(rng, 1_000, 200_000)),
-        "medio_pago": rng.choice(["EFECTIVO", "TRANSFERENCIA"]),
+        # Un ajuste en dólares solo puede ser del efectivo: no hay cuenta en USD.
+        "medio_pago": (
+            "EFECTIVO" if moneda == "USD" else rng.choice(["EFECTIVO", "TRANSFERENCIA"])
+        ),
         "descripcion": "ajuste de la sesión de carga",
         "operador_id": "carga",
     }
@@ -592,6 +716,13 @@ CATALOGO: tuple[tuple[str, Callable[[Contexto], Resultado], int], ...] = (
     ("traspaso_caja",            traspaso_caja,             4),
     ("registrar_gasto",          registrar_gasto,           6),
     ("consulta",                 consulta,                  8),
+    # Deshacer y corregir: rehacen asientos de caja ya escritos. Pesan poco
+    # porque en el negocio real son la excepción, pero sin ellas la mitad de los
+    # invariantes no se ejercita nunca.
+    ("anular_operacion",         anular_operacion,          4),
+    ("revertir_cheque",          revertir_cheque,           3),
+    ("editar_operacion",         editar_operacion,          4),
+    ("editar_gasto",             editar_gasto,              3),
     ("panel_gasto",              panel_gasto,               3),
     ("panel_traspaso",           panel_traspaso,            2),
     ("panel_ajuste_caja",        panel_ajuste_caja,         3),
