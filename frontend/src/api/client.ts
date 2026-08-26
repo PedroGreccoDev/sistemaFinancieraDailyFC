@@ -1,3 +1,5 @@
+import { reportarError } from '../lib/errores'
+
 export const API_BASE = '/api/v1'
 
 // Clave del token de sesión en localStorage (sobrevive a recargar/cerrar el navegador).
@@ -40,14 +42,25 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   }
 
   const token = getToken()
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options?.headers ?? {}),
-    },
-  })
+
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options?.headers ?? {}),
+      },
+    })
+  } catch (err) {
+    // El pedido no llegó a destino: backend caído, deploy en curso, o el
+    // operador sin señal. Es el único error que el servidor NO puede registrar
+    // por su cuenta —nunca se enteró de que alguien lo llamó—, así que se anota
+    // desde acá. Un 5xx no se reporta: ese ya lo anotó el handler global.
+    reportarError(err, 'red', path.split('?')[0])
+    throw err
+  }
 
   if (!res.ok) {
     // Sesión vencida/revocada en una ruta protegida → desloguear y volver al login.

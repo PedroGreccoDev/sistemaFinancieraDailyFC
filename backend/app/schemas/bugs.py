@@ -50,6 +50,27 @@ class BugEstadoUpdate(BaseModel):
     notas: str | None = Field(default=None, max_length=4000)
 
 
+class BugFrontendCreate(BaseModel):
+    """Un error que reventó en el navegador del operador.
+
+    Los campos vienen del cliente, así que **son datos y no verdad**: se acotan
+    por largo acá y el servidor arma el título y la huella por su cuenta. Lo que
+    llega del navegador va al detalle, nunca al texto que viaja a Telegram.
+    """
+
+    mensaje: str = Field(min_length=1, max_length=500)
+    # Dónde reventó: `archivo.js:línea` sacado del stack, o el componente de React.
+    ubicacion: str = Field(default="", max_length=200)
+    # En qué pantalla estaba el operador (`/deudores/otras`), no la URL completa.
+    ruta: str = Field(default="", max_length=200)
+    # El stack completo. Se guarda en la tabla y no sale de casa.
+    stack: str = Field(default="", max_length=8000)
+    # 'error' (window.onerror), 'promesa' (unhandledrejection), 'render'
+    # (ErrorBoundary de React) o 'red' (una llamada a la API que no volvió).
+    clase: str = Field(default="error", max_length=30)
+    navegador: str = Field(default="", max_length=300)
+
+
 class BugResumen(BaseModel):
     total: int
     abiertos: int

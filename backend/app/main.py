@@ -132,6 +132,10 @@ app.include_router(auth.router, prefix=settings.api_v1_prefix)
 # <img src> directos del panel (que no pueden mandar el header Authorization).
 app.include_router(cheques.public_router, prefix=settings.api_v1_prefix)
 
+# Buzón de errores del navegador — público: el error que más importa del panel es
+# el que impide entrar, y ahí todavía no hay sesión que mandar (§Registro de bugs).
+app.include_router(rutas_bugs.public_router, prefix=settings.api_v1_prefix)
+
 # REST API de negocio — protegida: requiere sesión válida (Bearer token)
 _auth = [Depends(get_current_user)]
 app.include_router(clientes.router, prefix=settings.api_v1_prefix, dependencies=_auth)

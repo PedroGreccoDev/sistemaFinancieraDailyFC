@@ -22,10 +22,23 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import AdminUser
 from app.db.session import get_db
-from app.schemas.bugs import BugDetalle, BugEstadoUpdate, BugRead, BugResumen
-from app.services import bugs_reporte as service
+from app.schemas.bugs import (
+    BugDetalle,
+    BugEstadoUpdate,
+    BugFrontendCreate,
+    BugRead,
+    BugResumen,
+)
+from app.services import bugs, bugs_reporte as service
 
 router = APIRouter(prefix="/bugs", tags=["bugs"])
+
+# Router aparte para lo único público: el buzón donde el navegador deja sus
+# errores. Va sin sesión a propósito — el error que más importa del panel es el
+# que impide entrar, y ahí todavía no hay token que mandar. Es la misma decisión
+# que la foto del cheque (§Chequera Virtual): lo público es lo que tiene que
+# funcionar sin sesión, y se acota por otro lado.
+public_router = APIRouter(prefix="/bugs", tags=["bugs"])
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -84,3 +97,44 @@ def cambiar_estado(
     return service.cambiar_estado(
         db, bug_id, estado=payload.estado, notas=payload.notas
     )
+
+
+# ── Público: el buzón del navegador ─────────────────────────────────────────
+
+@public_router.post("/frontend", status_code=202)
+def reportar_del_navegador(payload: BugFrontendCreate) -> dict[str, str]:
+    """Recibe un error que reventó en la pantalla del operador.
+
+    Hasta acá el registro solo veía lo que pasaba en el servidor. Un error de
+    JavaScript deja la pantalla en blanco o un botón que no hace nada, y de eso
+    no quedaba **ningún** rastro: el operador reintenta, se cansa y sigue a mano.
+
+    Devuelve 202 y nada más. El navegador no necesita el número —no va a
+    mostrarlo— y hacerlo esperar la escritura sería cobrarle al operador, que ya
+    está mirando una pantalla rota, el tiempo de anotar el error.
+
+    Sobre que sea público: sin sesión no se puede reportar el error de la
+    pantalla de login, que es justo el que deja a todos afuera. Lo que llega
+    entra acotado por el schema, con `origen=frontend`, y el antiflood del
+    registro impide que alguien llene el chat de Telegram repitiendo el POST.
+    """
+    ubicacion = payload.ubicacion.strip() or "navegador"
+    ruta = payload.ruta.strip() or "/"
+
+    bugs.capturar_mensaje(
+        origen=bugs.ORIGEN_FRONTEND,
+        # El título viaja a Telegram: se arma con la clase y la pantalla, nunca
+        # con el mensaje del error, que puede traer datos del negocio.
+        titulo=f"Error en la pantalla ({payload.clase}) — {ruta}",
+        tipo=f"Frontend:{payload.clase}",
+        ubicacion=ubicacion,
+        ambito=f"panel:{ruta}",
+        detalle=(
+            f"{payload.mensaje}\n\n"
+            f"Pantalla: {ruta}\n"
+            f"Navegador: {payload.navegador}\n\n"
+            f"{payload.stack}"
+        ),
+        contexto={"clase": payload.clase, "ruta": ruta, "navegador": payload.navegador},
+    )
+    return {"estado": "anotado"}

@@ -297,3 +297,71 @@ def test_el_error_del_bot_se_marca_como_del_bot() -> None:
         )
     )
     assert bugs._COLA[0].origen == bugs.ORIGEN_BOT
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  El buzón del navegador
+# ══════════════════════════════════════════════════════════════════════
+#
+# Un error de JavaScript no llega a ningún log del servidor: deja la pantalla en
+# blanco o un botón que no hace nada, el operador reintenta y sigue a mano. El
+# buzón es el único camino por el que eso puede enterarse alguien.
+
+def _postear(payload: dict):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    # Sin `with`: no hace falta el lifespan, y `capturar_mensaje` solo encola
+    # (la escritura la haría el drenador), así que el test sigue sin tocar la BD.
+    return TestClient(app, raise_server_exceptions=False).post(
+        "/api/v1/bugs/frontend", json=payload
+    )
+
+
+def test_el_buzon_no_pide_sesion() -> None:
+    """El error que más importa del panel es el que impide entrar.
+
+    Si el buzón exigiera token, justo ese —el que deja a todos afuera— sería el
+    único que nunca se podría reportar.
+    """
+    resp = _postear({"mensaje": "boom", "ruta": "/login", "clase": "render"})
+    assert resp.status_code == 202
+    assert bugs.pendientes() == 1
+
+
+def test_el_mismo_error_en_dos_fichas_es_un_solo_bug() -> None:
+    """`/clientes/{uuid}` es una pantalla, no un bug por cliente."""
+    comun = {"mensaje": "undefined", "ubicacion": "index.js:990", "clase": "render"}
+    _postear({**comun, "ruta": "/deudores/clientes/3f2a9c1e-4b5d-4e6f-8a9b-0c1d2e3f4a5b"})
+    _postear({**comun, "ruta": "/deudores/clientes/9e8d7c6b-5a4f-4e3d-2c1b-0a9f8e7d6c5b"})
+
+    huellas = {evento.huella for evento in bugs._COLA}
+    assert len(huellas) == 1
+
+
+def test_el_titulo_del_navegador_no_lleva_el_mensaje_del_error() -> None:
+    """El título viaja a Telegram y el mensaje puede traer datos del negocio.
+
+    Un "Cannot read properties of undefined (reading 'saldo de Juan Pérez')" es
+    exactamente el tipo de texto que no tiene por qué salir de casa.
+    """
+    _postear({
+        "mensaje": "Cannot read saldo of Juan Pérez",
+        "ruta": "/deudores",
+        "clase": "render",
+    })
+    evento = bugs._COLA[0]
+
+    assert "Juan Pérez" not in evento.titulo
+    assert "/deudores" in evento.titulo
+    # Pero en el detalle sí está: esa es nuestra base, no un tercero.
+    assert "Juan Pérez" in evento.detalle
+
+
+def test_un_payload_basura_no_abre_bug() -> None:
+    """Es un endpoint público: lo que llega es un dato, no una verdad."""
+    assert _postear({"mensaje": ""}).status_code == 422
+    assert _postear({"mensaje": "x" * 9000}).status_code == 422
+    assert _postear({}).status_code == 422
+    assert bugs.pendientes() == 0

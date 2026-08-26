@@ -1219,7 +1219,23 @@ migración `0027`), servicio `app/services/bugs.py`.
 1. **`@app.exception_handler(Exception)`** — toda excepción no controlada del panel.
    Es la razón de ser del registro: hasta que existió, no había ninguno.
 2. **`service_error_handler`** captura los `ServiceError` de 5xx.
-3. **`bugs.instalar_captura_de_logs()`** engancha un `logging.Handler` al logger raíz
+3. **El navegador tiene su buzón**: `POST /api/v1/bugs/frontend`, **público**
+   (`rutas_bugs.public_router`). Un error de JavaScript no llega a ningún log
+   del servidor —deja la pantalla en blanco o un botón que no hace nada— y hasta
+   que existió esto no quedaba rastro de ninguno. Es público porque **el error
+   que más importa del panel es el que impide entrar**, y ahí todavía no hay
+   sesión que mandar; lo que llega viene acotado por el schema y el antiflood
+   impide que alguien llene el chat repitiendo el POST. Del lado del navegador
+   (`frontend/src/lib/errores.ts`): `window.onerror`, `unhandledrejection`, el
+   `ErrorBoundary` que atrapa lo que revienta en un render —lo único que los
+   capturadores globales **no** ven, y que deja la pantalla en blanco— y los
+   fallos de red del `apiFetch`, que son los únicos que el servidor no puede
+   registrar solo porque nunca se enteró de que lo llamaron. Un 5xx **no** se
+   reporta desde el navegador: ese ya lo anotó el handler global. El reporte usa
+   `fetch` pelado y no `apiFetch` (si no, un fallo del cliente se reportaría a sí
+   mismo para siempre), deduplica por huella en la pestaña —un error dentro de un
+   render se repite en cada re-render— y tiene tope por pestaña.
+4. **`bugs.instalar_captura_de_logs()`** engancha un `logging.Handler` al logger raíz
    que convierte en bug todo `logger.error`/`logger.exception` del proceso. **Es la
    pieza que cierra el agujero de fondo**: engancharlos uno por uno serían veinte
    cambios y el veintiuno se olvidaría; escuchando el logging entran todos, incluidos
