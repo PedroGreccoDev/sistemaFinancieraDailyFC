@@ -127,3 +127,43 @@ def test_no_repite_la_pregunta_si_ya_estaba() -> None:
 
 def test_un_mensaje_vacio_igual_pide_confirmacion() -> None:
     assert c.con_pregunta("") == "¿Confirmás esta operación?"
+
+
+# ── El prompt y el sistema tienen que decir el MISMO número ────────────
+#
+# El umbral vive en dos lados: `config.confirmacion_umbral_*` (la red que fuerza
+# la confirmación antes del dispatch) y la regla 10 del prompt (que es la que en
+# la práctica dispara casi todas, porque el modelo la cumple). Si se mueve uno
+# solo, el bot sigue preguntando por el número viejo y el cambio no se nota:
+# pasó al subir el umbral el 2026-08-26, donde tocar la env var sola no habría
+# quitado un solo mensaje de confirmación.
+
+def test_el_umbral_del_prompt_coincide_con_el_del_sistema() -> None:
+    from app.core.config import get_settings
+    from app.services.ia.claude import _SYSTEM_PROMPT
+
+    settings = get_settings()
+
+    # Anclado al texto de la regla y no al "10.", que también numera una
+    # operación (10. REGISTRAR_DEUDA) más arriba en el prompt.
+    regla = _SYSTEM_PROMPT.split("Si el monto supera")[1].split("\n11. ")[0]
+
+    def _formato_ar(n: float) -> str:
+        return f"{int(n):,}".replace(",", ".")
+
+    assert _formato_ar(settings.confirmacion_umbral_ars) in regla, (
+        "La regla 10 del prompt no menciona el umbral ARS configurado: el modelo "
+        "seguiría pidiendo confirmación por el número viejo."
+    )
+    assert _formato_ar(settings.confirmacion_umbral_usd) in regla, (
+        "La regla 10 del prompt no menciona el umbral USD configurado."
+    )
+
+
+def test_el_umbral_esta_por_encima_de_la_operacion_tipica() -> None:
+    """Decisión del dueño (2026-08-26): un umbral que se dispara en toda carga no
+    es una red, es un peaje — el operador aprende a contestar "dale" sin leer.
+    Las operaciones de este negocio son de varios millones."""
+    from app.core.config import get_settings
+
+    assert get_settings().confirmacion_umbral_ars >= 10_000_000

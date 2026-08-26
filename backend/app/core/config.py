@@ -73,8 +73,16 @@ class Settings(BaseSettings):
     # la haya pedido (ver services/whatsapp/confirmacion.py). El prompt tiene la
     # misma regla; esto es la red por debajo, para el día que el modelo la pase
     # por alto y una operación grande entre sin que nadie la vea.
-    confirmacion_umbral_ars: float = Field(default=700_000)
-    confirmacion_umbral_usd: float = Field(default=500)
+    #
+    # El umbral tiene que estar MUY por encima de la operación típica o deja de
+    # ser una red y pasa a ser un peaje (decisión del dueño, 2026-08-26). Con
+    # cheques de más de $5M, los $700.000 originales se disparaban en el 100% de
+    # las cargas: el operador confirmaba sin leer —y una confirmación que se
+    # aprieta sin mirar no protege nada— y cada turno extra es una chance más de
+    # perder el mensaje en el flujo de confirmación. Si algún día vuelve a saltar
+    # seguido, la respuesta es subirlo, no acostumbrarse.
+    confirmacion_umbral_ars: float = Field(default=20_000_000)
+    confirmacion_umbral_usd: float = Field(default=15_000)
 
     # WAHA (WhatsApp HTTP API — gateway no oficial, engine NOWEB)
     waha_api_url: str = Field(default="http://localhost:3000")

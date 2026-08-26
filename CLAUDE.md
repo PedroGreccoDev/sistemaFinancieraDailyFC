@@ -1542,8 +1542,8 @@ que sería un loop infinito).
   anterior. Ahora una foto entra por `other`, igual que cualquier otra cosa que no sea un sí
   o un no: descarta lo pendiente avisando y se procesa como la operación nueva que es.
 - **El umbral de confirmación lo impone el SISTEMA, no el modelo** _(régimen definido
-  2026-08-21)_. La regla 10 del prompt manda pedir confirmación arriba de **$700.000 ARS /
-  500 USD**, y el modelo la cumple casi siempre —y además redacta mejor el mensaje, porque
+  2026-08-21)_. La regla 10 del prompt manda pedir confirmación arriba de **$20.000.000 ARS /
+  15.000 USD** _(subidos desde $700.000 / 500 el 2026-08-26 — ver abajo)_, y el modelo la cumple casi siempre —y además redacta mejor el mensaje, porque
   sabe describir lo que va a hacer—. Pero es una **instrucción, no una garantía**: el día que
   la pasa por alto, una operación de tres millones entra sin que nadie la vea y sin dejar
   rastro, porque el bot contesta "listo" y sigue. `services/whatsapp/confirmacion.py` mira el
@@ -1565,6 +1565,24 @@ que sería un loop infinito).
     va a hacer, y sin la pregunta el operador no sabe que quedó algo esperando su "dale".
   - **Una consulta nunca se fuerza.** No toca nada, y el ruido enseña a confirmar sin leer:
     una confirmación que se aprieta sin mirar no protege absolutamente nada.
+  - **El umbral tiene que estar MUY por encima de la operación típica** _(decisión del
+    dueño, 2026-08-26)_. Los $700.000 originales quedaron por debajo de lo que este
+    negocio mueve en una carga cualquiera —los cheques son de varios millones—, así que
+    se disparaban en el **100%** de las operaciones. Un umbral así no es una red, es un
+    peaje: el operador aprende a contestar "dale" sin leer —y ahí deja de proteger, por
+    el mismo motivo por el que una consulta no se fuerza— y cada turno extra es una
+    chance más de perder el mensaje en el flujo de confirmación (el bug del 2026-08-21
+    vivía justo ahí). Si vuelve a saltar seguido, la respuesta es **subirlo**, no
+    acostumbrarse.
+  - **El número vive en DOS lados y hay que mover los dos.** `confirmacion_umbral_*` es
+    la red del sistema, pero la regla 10 del prompt lo lleva **escrito**, y es el modelo
+    quien dispara casi todas las confirmaciones: tocar solo la env var no quita un solo
+    mensaje. `test_confirmacion_umbral.py` compara los dos y falla si divergen.
+  - **El control que reemplaza a la confirmación es la RESPUESTA, no el silencio.** Al no
+    preguntar antes, lo que protege es que el bot diga con detalle qué cargó —cada cheque
+    con su número, por qué caja salió la plata, cuánto quedó debiendo— y que todo se pueda
+    corregir (`EDITAR_OPERACION`) o deshacer (`REVERTIR_OPERACION`). Es el mismo criterio
+    que ya rige en las dos cajas y en la compensación.
 - Los **pasivos** se pueden registrar desde el bot via `REGISTRAR_DEUDA` —incluida la plata que le prestan al negocio, con `ingreso_caja` (§5)—; la cancelación es solo desde el panel web.
 - Los **gastos operativos** sí son registrables desde el bot via intent `REGISTRAR_GASTO` (editables por concepto/hora/monto desde el chat).
 - Los **fiados** son operables desde el bot: `FIAR_CHEQUE`, `COBRAR_FIADO_EFECTIVO`, `COBRAR_FIADO_CON_CHEQUE`.
