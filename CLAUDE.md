@@ -527,10 +527,11 @@ queda en cero, lo que le debés a Pedro baja a $400.000, y la caja no se movió.
 - **Endpoints:** `POST /compensaciones`, `GET /compensaciones` (filtrable por
   cliente o acreedor), `POST /compensaciones/{id}/revertir`.
 - **Panel:** el mismo `ModalCompensar` con **dos entradas** —botón "Compensar" en
-  la pestaña General de Deudores (cliente fijo) y por fila en Deudas (acreedor
-  fijo)—, porque según el día el operador piensa la operación de un lado o del
-  otro. Entrar desde una fila de Deudas fija **el acreedor, no esa deuda**: la
-  imputación es contra todo lo que se le debe. Muestra en vivo cuánto le baja, en
+  la pestaña General de Deudores (cliente fijo) y en la tarjeta del acreedor en
+  Deudas (acreedor fijo)—, porque según el día el operador piensa la operación de
+  un lado o del otro. Entrar desde Deudas fija **el acreedor y la moneda, no una
+  deuda**: la imputación es contra todo lo que se le debe, y por eso el botón vive
+  junto al total y no en el renglón. Muestra en vivo cuánto le baja, en
   cuántas deudas, y que de la caja no sale nada.
 - **Bot:** intent `COMPENSAR_DEUDA`; se deshace con `REVERTIR_OPERACION` tipo
   `COMPENSACION`. Ver §Bot para las tres frases que se confunden.
@@ -960,6 +961,45 @@ el mismo agujero de los dólares de apertura y de los ajustes que suman USD.
   de cliente con cheque (§2.b): es la misma situación y tiene que resolverse igual en los dos
   lados del negocio— resuelve `SALDAR_EFECTIVO` (egreso `VUELTO_PASIVO` en ARS)
   o `QUEDA_DEBIENDO` (crea el pasivo a favor, sin movimiento de caja).
+**La pantalla es por ACREEDOR, no por deuda _(régimen definido 2026-08-26)_.** Es el
+espejo exacto de la pestaña General de Deudores (§2.c) y de "Otras deudas" (§2.b): al
+negocio le puede deber varias veces a la misma persona —le compró un lote de dólares sin
+pagarlo, después un cheque, y encima le pidió plata prestada— y **cuando le paga no está
+pagando una de esas: está pagando lo que le debe**.
+
+- **Una tarjeta por acreedor**, con el detalle de cada deuda y, al pie, **un total por
+  moneda con sus botones**: Pagar, Con cheque (solo ARS) y Compensar. ARS y USD no se
+  suman: son dos filas. El detalle **no lleva botón de pago** —acá se le paga al acreedor,
+  no a una deuda—; sí Editar y Eliminar, que corrigen la carga de esa deuda puntual.
+- **La agrupación se arma en el front** (`agrupar()` en `Pasivos.tsx`), sin endpoint de
+  agregación, igual que General y Otras deudas. **El criterio tiene que ser el mismo que el
+  del backend** (`cargar_pasivos_acreedor`: trim + case-insensitive) o la tarjeta mostraría
+  un total y el botón pagaría otro. `acreedor` es **texto libre y no un cliente con id**
+  (§Compensación), así que "Cuello" y "Cuello Hermanos" son dos acreedores y no hay forma
+  de que el sistema sepa lo contrario.
+- **El acreedor conserva su tarjeta aunque ya no se le deba nada**, para poder sumarle la
+  próxima; el filtro de estado decide qué deudas se traen.
+- **"Sumar deuda" crea un registro nuevo, no edita el anterior** (`ModalNuevaDeuda` con
+  `acreedorFijo`), por el mismo motivo que en §2.b: cada deuda tiene su fecha y su propia
+  línea de caja, y aplastarlas en un monto editable reescribiría días ya cerrados.
+- **Los endpoints son los que ya usaba el bot**, expuestos por HTTP: `POST
+  /pasivos/acreedores/pagar` y `POST /pasivos/acreedores/cancelar-con-cheque`
+  (`pagar_a_acreedor` / `cancelar_a_acreedor_con_cheque`). El reparto no depende de por
+  dónde entró la orden, que es la misma razón por la que la compensación reusa los helpers
+  del cobro consolidado en vez de duplicarlos. **Van declaradas antes que `/{pasivo_id}`**:
+  al revés, "acreedores" entra por la ruta del id y FastAPI devuelve un 422 que no dice
+  nada (mismo caso que `/bugs/resumen`).
+- **El vuelto del cheque volvió a estar disponible.** `cancelar_a_acreedor_con_cheque`
+  rechazaba el cheque que cubre de más porque el bot no tiene dónde preguntar qué hacer con
+  la diferencia; ahora acepta `vuelto_modo` y **el panel lo manda**, resolviéndolo con
+  `aplicar_vuelto_cheque` como en todos lados. El bot sigue sin mandarlo, así que su camino
+  no cambió. **El umbral de "cubre de más" es uno solo para rechazar y para aplicar**: con
+  el de aplicar en cero, el centavo de redondeo que la entrega tolera desde siempre se
+  convertía en un pasivo de $0,01 a favor del cliente.
+- Los pagos **por deuda puntual** (`POST /pasivos/{id}/pagar` y `/cancelar-con-cheque`)
+  siguen existiendo intactos: son la única forma de imputar contra una deuda que no es la
+  más vieja, y los usa quien llame a la API.
+
 - Campos: `acreedor`, `concepto`, `monto`, `moneda`, `fecha_vencimiento` (opcional).
 - **Editar carga:** `PATCH /pasivos/{id}` (`svc_pasivos.editar_pasivo`). `acreedor`/`concepto`/`fecha_vencimiento`/`observaciones` siempre; `monto`/`moneda` solo si está `PENDIENTE` y sin pagos parciales (`saldo == monto`), y al cambiar el monto se recalcula el saldo. Si la deuda trajo plata (`ingreso_caja`), la edición rehace esa línea de caja. En el panel, botón "Editar" por fila en Deudas.
   - **La corrección del bot va por el servicio, no escribiendo los campos a mano.** Hasta 2026-08-21 `_editar_pasivo` del dispatcher seteaba `monto` directo sobre el modelo: el `saldo_pendiente` se quedaba con el valor viejo y la deuda mostraba un número y debía otro.
@@ -1761,7 +1801,7 @@ que sería un loop infinito).
 - Cada tabla tiene trigger `updated_at` vía `fn_set_updated_at()` (creada en migración 0001).
 - Las transacciones críticas usan `SELECT ... FOR UPDATE` para evitar race conditions.
 - **Fechas/horas en hora local de Argentina (ART), no UTC.** Usar los helpers de `app/core/fechas.py` (`hoy_local`, etc.); los gastos guardan `hora_operacion` (migración `0008`).
-- **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad.
+- **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad. La pantalla agrupa **por acreedor** —una tarjeta cada uno, con el total por moneda y sus botones— igual que Deudores/General agrupa por cliente; ver §5.
 - **Sección "Deudores" (frontend):** agrupa lo que los **clientes** le deben al negocio (≠ "Deudas"/Pasivos, que es al revés). Cuatro pestañas: **General** (índice, `/deudores` → `DeudoresGeneral`), **Préstamos** (`/deudores/prestamos`), **Cheques fiados** (`/deudores/cheques-fiados`) y **Otras deudas** (`/deudores/otras` → `DeudoresOtras`, las deudas simples **agrupadas por cliente** — ver §2.b). La pestaña **General** es una **vista consolidada por cliente** (total ARS y USD sumando préstamos + fiados + deudas simples) armada **en el front** desde `/prestamos`, `/fiados` y `/deudas-simples` (no hay endpoint de agregación); tiene un botón **"Nuevo"** que abre `ModalNuevaDeudaSimple`. El **pago de importe libre** (parcial o total, cross-currency) vive en el componente compartido `components/ModalPagarDeuda.tsx` (llama a `pagar_prestamo`, `cobrar_con_efectivo`, `cobrar_deuda_simple` o `cobrar_deudas_cliente` según el `tipo` de deuda; con `deudas_cliente` el `id` que viaja es el del **cliente**, no el de una deuda) y se usa en General, Préstamos y Otras deudas (botón "Pago libre"/"Cobrar", además del cobro por cuota entera). No reemplaza el cobro directo desde las otras pestañas.
 
 ---
@@ -1894,6 +1934,12 @@ que sería un loop infinito).
     **nombrando el que falló** — el que no se informa queda `EN_CARTERA` mientras el operador
     lo da por hecho. Custodia además que el prompt siga pidiendo todos los cheques de la foto.
     Cubre también la herencia del alta y las dos reglas del `monto_abonado` (§Bot).
+  - **`test_pasivos_acreedor.py`** — el pago consolidado a un acreedor (§5): que el neto
+    del cheque llene la deuda más vieja primero y que el papel salga de cartera, y sobre
+    todo **el vuelto**, que es lo único que el panel puede resolver y el bot no: sin
+    `vuelto_modo` el cheque que cubre de más se rechaza (y no commitea nada), con él se
+    resuelve por las dos ramas —el pasivo a favor o el egreso—, y **el centavo de redondeo
+    que la entrega tolera no se convierte en un vuelto de $0,01**.
   - **`test_guarda_lote.py`** — la red bajo los intents que todavía cargan de a una
     operación: que un lote mandado a uno de ellos **no cargue nada** y avise, que los seis
     que sí llevan array pasen derecho, y que `_CLAVES_DE_LOTE` y la regla 16 del prompt no

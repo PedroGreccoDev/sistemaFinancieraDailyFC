@@ -77,3 +77,82 @@ export const cancelarPasivoConCheque = (
     method: 'POST',
     body: JSON.stringify(payload),
   })
+
+/**
+ * Pago consolidado a un acreedor — el espejo del cobro por cliente (§2.c).
+ *
+ * El negocio le puede deber varias veces a la misma persona: le compró un lote
+ * de dólares sin pagarlo, después un cheque, y encima le pidió plata prestada.
+ * Cuando le paga **no está pagando una de esas deudas: está pagando lo que le
+ * debe**. El importe se imputa de la deuda más vieja a la más nueva y todo entra
+ * en una sola transacción, con su propia línea de caja por deuda.
+ *
+ * El acreedor es **texto libre** (no un cliente con id) y el backend lo matchea
+ * exacto, sin distinguir mayúsculas. Agrupá con el mismo criterio o la pantalla
+ * va a mostrar un total y el botón va a pagar otro.
+ */
+
+/** Una deuda alcanzada por el pago, y cuánto le tocó. */
+export interface PasivoImputado {
+  id: string
+  concepto: string
+  imputado: string
+  saldo_restante: string
+  cancelo: boolean
+}
+
+export interface PagoAcreedorResult {
+  acreedor: string
+  moneda_deuda: Moneda
+  /** Las deudas alcanzadas, de la más vieja a la más nueva. */
+  imputaciones: PasivoImputado[]
+  /** Cuánto bajó la deuda en total, en `moneda_deuda`. */
+  imputado: string
+  saldo_restante: string
+  cancelados: number
+}
+
+export interface PagarAcreedorPayload {
+  acreedor: string
+  /** Contra cuál de las dos colas se imputa: ARS y USD no se suman. */
+  moneda_deuda: Moneda
+  monto_pagado: number
+  moneda_pago: Moneda
+  medio_pago: MedioPago
+  // Requerida solo si moneda_pago difiere de moneda_deuda ($/USD).
+  cotizacion?: number | null
+  fecha?: string | null
+}
+
+export const pagarAcreedor = (payload: PagarAcreedorPayload): Promise<PagoAcreedorResult> =>
+  apiFetch<PagoAcreedorResult>('/pasivos/acreedores/pagar', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+/**
+ * Entrega un cheque de cartera contra todas las deudas **en pesos** del acreedor.
+ *
+ * El cheque vale su neto (nominal menos el descuento pactado) y con eso se van
+ * llenando las deudas, de la más vieja a la más nueva. No mueve efectivo: el
+ * desembolso ocurrió al comprar el cheque, acá solo cambia de manos el papel.
+ * Un cheque es un instrumento en pesos, así que las deudas en dólares no entran.
+ */
+export interface CancelarAcreedorChequePayload {
+  acreedor: string
+  cheque_id: string
+  porcentaje_venta: number
+  operador_id: string
+  motivo: string
+  fecha?: string | null
+  // Requerido solo si el neto del cheque cubre de más.
+  vuelto_modo?: VueltoModo | null
+}
+
+export const cancelarAcreedorConCheque = (
+  payload: CancelarAcreedorChequePayload,
+): Promise<PagoAcreedorResult> =>
+  apiFetch<PagoAcreedorResult>('/pasivos/acreedores/cancelar-con-cheque', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })

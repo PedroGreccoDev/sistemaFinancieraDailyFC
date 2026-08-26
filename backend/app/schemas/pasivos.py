@@ -85,6 +85,69 @@ class PasivoCancelarConChequeRequest(BaseModel):
     vuelto_modo: VueltoModo | None = None
 
 
+# ── Pago consolidado por acreedor ─────────────────────────────────────
+#
+# El equivalente del lado del negocio a la pestaña General de Deudores: no se
+# paga una deuda puntual, se paga lo que se le debe a alguien. El importe se
+# reparte de la deuda más vieja a la más nueva y todo entra en una sola
+# transacción. El acreedor viaja en el cuerpo y no en la URL: es texto libre y
+# puede tener espacios, barras o acentos.
+
+
+class PagoAcreedorRequest(BaseModel):
+    """Pago en efectivo o transferencia contra todas las deudas con un acreedor.
+
+    `monto_pagado` es el dinero que sale de caja, en `moneda_pago`. `moneda_deuda`
+    dice contra cuál de las dos colas se imputa: ARS y USD no se suman. La
+    `cotizacion` ($/USD) es obligatoria solo cuando el pago cruza monedas."""
+
+    acreedor: str = Field(min_length=1, max_length=200)
+    moneda_deuda: Moneda
+    monto_pagado: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    moneda_pago: Moneda
+    medio_pago: MedioPago
+    cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+    fecha: date | None = None
+
+
+class CancelarAcreedorChequeRequest(BaseModel):
+    """Entrega de un cheque de cartera contra todas las deudas en pesos con un acreedor.
+
+    El cheque vale su neto (nominal menos el porcentaje pactado). `vuelto_modo`
+    solo se usa si ese neto cubre de más: sin él la operación se rechaza en vez
+    de inventar qué hacer con la diferencia."""
+
+    acreedor: str = Field(min_length=1, max_length=200)
+    cheque_id: UUID
+    porcentaje_venta: Decimal = Field(ge=Decimal("0"), le=Decimal("100"))
+    operador_id: str = Field(min_length=1, max_length=80)
+    motivo: str = Field(min_length=1)
+    fecha: date | None = None
+    vuelto_modo: VueltoModo | None = None
+
+
+class PasivoImputadoRead(BaseModel):
+    """Una deuda alcanzada por el pago, y cuánto le tocó."""
+
+    id: UUID
+    concepto: str
+    imputado: Decimal
+    saldo_restante: Decimal
+    cancelo: bool
+
+
+class PagoAcreedorResponse(BaseModel):
+    acreedor: str
+    moneda_deuda: Moneda
+    # Las deudas alcanzadas, en el orden en que se imputaron (de la más vieja a
+    # la más nueva).
+    imputaciones: list[PasivoImputadoRead]
+    # Cuánto bajó la deuda en total, en `moneda_deuda`.
+    imputado: Decimal
+    saldo_restante: Decimal
+    cancelados: int
+
+
 class PasivoRead(BaseModel):
     id: UUID
     acreedor: str

@@ -1,6 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPasivos, createPasivo, pagarPasivo, cancelarPasivoConCheque, editarPasivo } from '../api/pasivos'
+import {
+  getPasivos, createPasivo, editarPasivo,
+  pagarAcreedor, cancelarAcreedorConCheque,
+} from '../api/pasivos'
 import { getChequeCartera } from '../api/cheques'
 import { fmtARS, fmtUSD, fmtDate } from '../lib/fmt'
 import { chip, btnSolid, btnBordered, btnFlat } from '../lib/ui'
@@ -12,6 +15,8 @@ import DropdownFilter from '../components/DropdownFilter'
 import ModalEliminar from '../components/ModalEliminar'
 import ModalCompensar from '../components/ModalCompensar'
 
+// La lista es por ACREEDOR, no por deuda: el filtro decide qué deudas se traen,
+// pero la pantalla siempre las agrupa bajo quien las cobra.
 type Filtro = 'todos' | PasivoEstado
 
 const FM = "'Manrope', sans-serif"
@@ -20,8 +25,6 @@ const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-00
 const MODAL_BG = 'var(--modal)'
 const INPUT_STYLE: React.CSSProperties = { width: '100%', background: 'var(--bg)', border: '1px solid var(--bd-012)', color: 'var(--text-1)', fontFamily: FM, fontSize: '0.82rem', padding: '0.5rem 0.75rem', outline: 'none', boxSizing: 'border-box' }
 const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }
-const TH: React.CSSProperties = { fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)', padding: '0.625rem 1rem', textAlign: 'left', background: 'var(--ov-0025)', borderBottom: '1px solid var(--bd-006)', whiteSpace: 'nowrap' }
-const TD: React.CSSProperties = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'var(--text-1)' }
 
 function EstadoBadge({ estado }: { estado: PasivoEstado }) {
   const isPending = estado === 'PENDIENTE'
@@ -36,10 +39,75 @@ function fmtMoneda(monto: string | number, moneda: Moneda): string {
   return moneda === 'USD' ? fmtUSD(monto) : fmtARS(monto)
 }
 
+// ── Agrupación por acreedor ───────────────────────────────────────────
+//
+// `acreedor` es texto libre y no un cliente con id (§5), así que el que agrupa
+// es el nombre. **El criterio tiene que ser el mismo que el del backend**
+// (`cargar_pasivos_acreedor`: trim + case-insensitive) o la tarjeta mostraría un
+// total y el botón pagaría otro.
+
+function claveAcreedor(nombre: string): string {
+  return nombre.trim().toLowerCase()
+}
+
+interface GrupoAcreedor {
+  clave: string
+  /** El nombre tal cual se escribió en la deuda más vieja: es el que viaja al pagar. */
+  nombre: string
+  /** Todas sus deudas, de la más vieja a la más nueva: el mismo orden en que el
+   *  pago las va a imputar. */
+  deudas: Pasivo[]
+  pendientes: number
+  saldoARS: number
+  saldoUSD: number
+}
+
+function agrupar(pasivos: Pasivo[]): GrupoAcreedor[] {
+  const porAcreedor = new Map<string, Pasivo[]>()
+  for (const p of pasivos) {
+    const clave = claveAcreedor(p.acreedor)
+    const lista = porAcreedor.get(clave) ?? []
+    lista.push(p)
+    porAcreedor.set(clave, lista)
+  }
+
+  const grupos = [...porAcreedor.entries()].map(([clave, lista]) => {
+    // Por `created_at`: un pasivo no tiene fecha de origen propia más allá de
+    // cuándo se cargó, y el vencimiento no sirve —una deuda que vence antes no
+    // es más vieja—. Es el orden que usa el reparto del backend.
+    const ordenadas = [...lista].sort((a, b) => a.created_at.localeCompare(b.created_at))
+    const pendientes = ordenadas.filter((p) => p.estado === 'PENDIENTE')
+    const saldoDe = (m: Moneda) =>
+      pendientes.filter((p) => p.moneda === m).reduce((acc, p) => acc + parseFloat(p.saldo_pendiente), 0)
+    return {
+      clave,
+      nombre: ordenadas[0].acreedor,
+      deudas: ordenadas,
+      pendientes: pendientes.length,
+      saldoARS: saldoDe('ARS'),
+      saldoUSD: saldoDe('USD'),
+    }
+  })
+
+  // Primero a quien se le debe algo; entre iguales, alfabético.
+  grupos.sort((a, b) => (b.pendientes > 0 ? 1 : 0) - (a.pendientes > 0 ? 1 : 0) || a.nombre.localeCompare(b.nombre))
+  return grupos
+}
+
+/** Lo que se le debe a alguien en una moneda: el objetivo de los botones de la tarjeta. */
+interface DeudaAcreedor {
+  nombre: string
+  moneda: Moneda
+  saldo: number
+  operaciones: number
+  /** Primera cotización cross-moneda ya usada con este acreedor, como default editable. */
+  cotizacionPrevia: string | null
+}
+
 // ── Modal nueva deuda ─────────────────────────────────────────────────
 
-function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const [acreedor, setAcreedor] = useState('')
+function ModalNuevaDeuda({ acreedorFijo, onClose, onSuccess }: { acreedorFijo?: string; onClose: () => void; onSuccess: () => void }) {
+  const [acreedor, setAcreedor] = useState(acreedorFijo ?? '')
   const [concepto, setConcepto] = useState('')
   const [monto, setMonto] = useState('')
   const [moneda, setMoneda] = useState<Moneda>('ARS')
@@ -87,11 +155,17 @@ function ModalNuevaDeuda({ onClose, onSuccess }: { onClose: () => void; onSucces
     <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
       <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
-          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Nueva deuda</h2>
-          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{entroPlata ? 'Anota la deuda y suma la plata que entró a la caja' : 'Registrar una deuda del negocio (no mueve la caja)'}</p>
+          <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>{acreedorFijo ? 'Sumar deuda' : 'Nueva deuda'}</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{acreedorFijo ? `Otra deuda con ${acreedorFijo}` : entroPlata ? 'Anota la deuda y suma la plata que entró a la caja' : 'Registrar una deuda del negocio (no mueve la caja)'}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-          <div><label style={LABEL_STYLE}>A quién le debo</label><input type="text" value={acreedor} onChange={(e) => setAcreedor(e.target.value)} required style={INPUT_STYLE} /></div>
+          <div>
+            <label style={LABEL_STYLE}>A quién le debo</label>
+            <input type="text" value={acreedor} onChange={(e) => setAcreedor(e.target.value)} required readOnly={!!acreedorFijo} style={{ ...INPUT_STYLE, ...(acreedorFijo ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }} />
+            {/* Es una deuda NUEVA, no una edición de las que ya tiene: cada una
+                conserva su fecha y su propia línea de caja. */}
+            {acreedorFijo && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.3rem' }}>Se agrega a lo que ya le debés; las deudas anteriores no se tocan.</p>}
+          </div>
           <div><label style={LABEL_STYLE}>Concepto / razón</label><input type="text" value={concepto} onChange={(e) => setConcepto(e.target.value)} required style={INPUT_STYLE} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
             <div><label style={LABEL_STYLE}>Monto</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required style={INPUT_STYLE} /></div>
@@ -188,7 +262,7 @@ function ModalEditarDeuda({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onCl
             <div><label style={LABEL_STYLE}>Monto</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required disabled={dineroBloqueado} style={{ ...INPUT_STYLE, opacity: dineroBloqueado ? 0.5 : 1, cursor: dineroBloqueado ? 'not-allowed' : 'auto' }} /></div>
             <div><label style={LABEL_STYLE}>Moneda</label><select value={moneda} onChange={(e) => setMoneda(e.target.value as Moneda)} disabled={dineroBloqueado} style={{ ...INPUT_STYLE, cursor: dineroBloqueado ? 'not-allowed' : 'pointer', opacity: dineroBloqueado ? 0.5 : 1 }}><option value="ARS">ARS</option><option value="USD">USD</option></select></div>
           </div>
-          {dineroBloqueado && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(251,191,36,0.85)', marginTop: '-0.4rem' }}>Monto y moneda no se pueden cambiar: la deuda está cancelada o ya tiene pagos.</p>}
+          {dineroBloqueado && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(251,191,36,0.85)', marginTop: '-0.4rem' }}>Monto y moneda no se pueden cambiar: la deuda está cancelada o ya tiene pagos. Para deberle más, usá "Sumar deuda" en su tarjeta.</p>}
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', fontFamily: FM, fontSize: '0.76rem', color: 'var(--text-2)', cursor: 'pointer' }}>
             <input type="checkbox" checked={entroPlata} onChange={(e) => { setEntroPlata(e.target.checked); if (!e.target.checked) setFechaIngreso('') }} style={{ cursor: 'pointer' }} />
             Me prestaron la plata (entró a la caja)
@@ -226,32 +300,35 @@ function ModalEditarDeuda({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onCl
   )
 }
 
-// ── Modal pagar (efectivo / transferencia, en cualquier moneda) ───────
+// ── Modal pagar al acreedor (efectivo / transferencia) ────────────────
+//
+// El pago no se dirige a una deuda: se imputa de la más vieja a la más nueva
+// cruzando todas las que se le tienen en esa moneda. Por eso lo que viaja es el
+// nombre y no un id.
 
-function ModalPagar({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onClose: () => void; onSuccess: () => void }) {
-  const saldo = parseFloat(pasivo.saldo_pendiente)
+function ModalPagarAcreedor({ deuda, onClose, onSuccess }: { deuda: DeudaAcreedor; onClose: () => void; onSuccess: () => void }) {
   const [monto, setMonto] = useState('')
-  const [monedaPago, setMonedaPago] = useState<Moneda>(pasivo.moneda)
+  const [monedaPago, setMonedaPago] = useState<Moneda>(deuda.moneda)
   const [medioPago, setMedioPago] = useState<MedioPago>('EFECTIVO')
-  const [cotizacion, setCotizacion] = useState(pasivo.cotizacion_pago ?? '')
+  const [cotizacion, setCotizacion] = useState(deuda.cotizacionPrevia ?? '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
 
   const montoNum = parseFloat(monto) || 0
   const cotizNum = parseFloat(cotizacion) || 0
-  const cross = monedaPago !== pasivo.moneda
+  const cross = monedaPago !== deuda.moneda
 
   // Equivalente saldado en la moneda de la deuda (solo informativo en el modal).
   let equivalente: number | null = null
   if (montoNum > 0 && (!cross || cotizNum > 0)) {
     if (!cross) equivalente = montoNum
-    else if (pasivo.moneda === 'USD') equivalente = montoNum / cotizNum  // deuda USD, pago ARS
-    else equivalente = montoNum * cotizNum                                // deuda ARS, pago USD
+    else if (deuda.moneda === 'USD') equivalente = montoNum / cotizNum  // deuda USD, pago ARS
+    else equivalente = montoNum * cotizNum                              // deuda ARS, pago USD
     equivalente = Math.round(equivalente * 100) / 100
   }
-  const cancelaTotal = equivalente !== null && Math.abs(equivalente - saldo) < 0.01
-  const superaSaldo = equivalente !== null && equivalente - saldo >= 0.01
+  const cancelaTotal = equivalente !== null && Math.abs(equivalente - deuda.saldo) < 0.01
+  const superaSaldo = equivalente !== null && equivalente - deuda.saldo >= 0.01
   const faltaCotiz = cross && cotizNum <= 0
   const puedeEnviar = montoNum > 0 && !faltaCotiz && equivalente !== null && !superaSaldo
 
@@ -260,13 +337,17 @@ function ModalPagar({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onClose: (
     setError(null)
     setLoading(true)
     try {
-      await pagarPasivo(pasivo.id, {
+      const r = await pagarAcreedor({
+        acreedor: deuda.nombre,
+        moneda_deuda: deuda.moneda,
         monto_pagado: montoNum,
         moneda_pago: monedaPago,
         medio_pago: medioPago,
         cotizacion: cross ? cotizNum : null,
       })
-      toast('success', cancelaTotal ? 'Deuda cancelada' : 'Pago registrado')
+      toast('success', r.cancelados > 0
+        ? `Pago registrado — ${r.cancelados} deuda(s) saldada(s)`
+        : 'Pago registrado')
       onSuccess()
     }
     catch (err) { setError((err as Error).message) }
@@ -275,22 +356,21 @@ function ModalPagar({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onClose: (
 
   return (
     <div className="modal-overlay" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)', padding: '1rem', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
-      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '380px' }}>
+      <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '380px', maxHeight: '92dvh', overflowY: 'auto' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)' }}>
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Pagar deuda</h2>
-          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{pasivo.acreedor}</p>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{deuda.nombre}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
           <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', borderRadius: 'var(--r-md)', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-            {[
-              { label: 'Deuda original', value: fmtMoneda(pasivo.monto, pasivo.moneda), color: 'var(--text-1)' },
-              { label: 'Saldo pendiente', value: fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda), color: '#f87171' },
-            ].map(({ label, value, color }) => (
-              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
-                <span style={{ color: 'rgba(100,116,139,0.65)' }}>{label}</span>
-                <span style={{ fontWeight: 700, color }}>{value}</span>
-              </div>
-            ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
+              <span style={{ color: 'rgba(100,116,139,0.65)' }}>Le debés en {deuda.moneda}</span>
+              <span style={{ fontWeight: 700, color: '#f87171' }}>{fmtMoneda(deuda.saldo, deuda.moneda)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.72rem' }}>
+              <span style={{ color: 'rgba(100,116,139,0.5)' }}>En {deuda.operaciones} deuda{deuda.operaciones > 1 ? 's' : ''}</span>
+              <span style={{ color: 'rgba(100,116,139,0.5)' }}>se salda de la más vieja</span>
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -320,18 +400,18 @@ function ModalPagar({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onClose: (
               <label style={LABEL_STYLE}>Cotización (pesos por 1 USD)</label>
               <input type="number" step="0.0001" min="0.0001" value={cotizacion} onChange={(e) => setCotizacion(e.target.value)} required style={INPUT_STYLE} />
               <p style={{ fontFamily: FM, fontSize: '0.68rem', marginTop: '0.25rem', color: 'rgba(100,116,139,0.55)' }}>
-                Pagás en {monedaPago}; la deuda es en {pasivo.moneda}. La cotización imputa cuánto se salda.
+                Pagás en {monedaPago}; la deuda es en {deuda.moneda}. La cotización imputa cuánto se salda.
               </p>
             </div>
           )}
 
           {equivalente !== null && !superaSaldo && (
             <p style={{ fontFamily: FM, fontSize: '0.7rem', color: cancelaTotal ? '#4ade80' : '#fbbf24' }}>
-              {cross && `Salda ${fmtMoneda(equivalente, pasivo.moneda)} de la deuda · `}
-              {cancelaTotal ? 'Cancela la deuda completamente' : `Saldo restante: ${fmtMoneda(saldo - equivalente, pasivo.moneda)}`}
+              {cross && `Salda ${fmtMoneda(equivalente, deuda.moneda)} de la deuda · `}
+              {cancelaTotal ? 'Cancela todo lo que le debés' : `Le seguirías debiendo: ${fmtMoneda(deuda.saldo - equivalente, deuda.moneda)}`}
             </p>
           )}
-          {superaSaldo && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171' }}>El pago equivale a {fmtMoneda(equivalente!, pasivo.moneda)} y supera el saldo pendiente</p>}
+          {superaSaldo && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171' }}>El pago equivale a {fmtMoneda(equivalente!, deuda.moneda)} y supera lo que le debés</p>}
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Volver</button>
@@ -343,15 +423,16 @@ function ModalPagar({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onClose: (
   )
 }
 
-// ── Modal cancelar con cheque ─────────────────────────────────────────
+// ── Modal pagar con cheque de cartera ─────────────────────────────────
+//
+// El cheque es un instrumento en pesos: solo entra contra las deudas en ARS.
 
-function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; onClose: () => void; onSuccess: () => void }) {
-  const saldo = parseFloat(pasivo.saldo_pendiente)
+function ModalChequeAcreedor({ deuda, onClose, onSuccess }: { deuda: DeudaAcreedor; onClose: () => void; onSuccess: () => void }) {
   const [chequeSeleccionado, setChequeSeleccionado] = useState<Cheque | null>(null)
   const [porcentajeVenta, setPorcentajeVenta] = useState('')
   const [vueltoModo, setVueltoModo] = useState<'SALDAR_EFECTIVO' | 'QUEDA_DEBIENDO'>('SALDAR_EFECTIVO')
   const [operadorId, setOperadorId] = useState('')
-  const [motivo, setMotivo] = useState(`Cancelación de deuda con ${pasivo.acreedor}`)
+  const [motivo, setMotivo] = useState(`Cancelación de deuda con ${deuda.nombre}`)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
@@ -367,14 +448,27 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
   const montoNum = chequeSeleccionado ? parseFloat(chequeSeleccionado.monto) : 0
   const pctNum = parseFloat(porcentajeVenta) || 0
   const valorNeto = montoNum > 0 ? parseFloat((montoNum * (100 - pctNum) / 100).toFixed(2)) : null
-  const diferencia = valorNeto !== null ? parseFloat((valorNeto - saldo).toFixed(2)) : null
+  const diferencia = valorNeto !== null ? parseFloat((valorNeto - deuda.saldo).toFixed(2)) : null
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!chequeSeleccionado) return
     setError(null)
     setLoading(true)
-    try { await cancelarPasivoConCheque(pasivo.id, { cheque_id: chequeSeleccionado.id, porcentaje_venta: pctNum, operador_id: operadorId.trim(), motivo: motivo.trim(), vuelto_modo: diferencia !== null && diferencia > 0 ? vueltoModo : null }); toast('success', 'Deuda pagada con cheque'); onSuccess() }
+    try {
+      const r = await cancelarAcreedorConCheque({
+        acreedor: deuda.nombre,
+        cheque_id: chequeSeleccionado.id,
+        porcentaje_venta: pctNum,
+        operador_id: operadorId.trim(),
+        motivo: motivo.trim(),
+        vuelto_modo: diferencia !== null && diferencia > 0 ? vueltoModo : null,
+      })
+      toast('success', r.cancelados > 0
+        ? `Pagado con cheque — ${r.cancelados} deuda(s) saldada(s)`
+        : 'Pagado con cheque')
+      onSuccess()
+    }
     catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
   }
@@ -389,8 +483,8 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
           <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', borderRadius: 'var(--r-md)', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
             {[
-              { label: 'Acreedor', value: pasivo.acreedor, color: 'var(--text-1)' },
-              { label: 'Saldo pendiente', value: fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda), color: '#f87171' },
+              { label: 'Acreedor', value: deuda.nombre, color: 'var(--text-1)' },
+              { label: `Le debés (${deuda.operaciones} deuda${deuda.operaciones > 1 ? 's' : ''})`, value: fmtARS(deuda.saldo), color: '#f87171' },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
                 <span style={{ color: 'rgba(100,116,139,0.65)' }}>{label}</span>
@@ -427,7 +521,7 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
                 </div>
               ))}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.3rem', borderTop: '1px solid var(--bd-006)' }}>
-                <span style={{ fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#fbbf24' }}>{diferencia >= 0 ? 'Cancela la deuda completamente' : 'Saldo restante'}</span>
+                <span style={{ fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#fbbf24' }}>{diferencia >= 0 ? 'Cancela todo lo que le debés' : 'Le seguirías debiendo'}</span>
                 <span style={{ fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#fbbf24' }}>{diferencia >= 0 ? (diferencia > 0 ? `+${fmtARS(diferencia)}` : '✓') : fmtARS(-diferencia)}</span>
               </div>
             </div>
@@ -458,16 +552,139 @@ function ModalCancelarCheque({ pasivo, onClose, onSuccess }: { pasivo: Pasivo; o
   )
 }
 
+// ── Tarjeta de un acreedor ────────────────────────────────────────────
+
+// El total de una moneda y los botones que lo saldan. Es el corazón de esta
+// pantalla: el operador no elige contra qué deuda va la plata —el backend la
+// imputa de la más vieja a la más nueva—, así que los botones viven acá y no en
+// cada renglón.
+function TotalMoneda({
+  grupo,
+  moneda,
+  total,
+  onPagar,
+  onCheque,
+  onCompensar,
+}: {
+  grupo: GrupoAcreedor
+  moneda: Moneda
+  total: number
+  onPagar: (d: DeudaAcreedor) => void
+  onCheque: (d: DeudaAcreedor) => void
+  onCompensar: (p: Pasivo) => void
+}) {
+  const deLaMoneda = grupo.deudas.filter((p) => p.estado === 'PENDIENTE' && p.moneda === moneda)
+  const operaciones = deLaMoneda.length
+  const color = moneda === 'USD' ? '#38bdf8' : '#fbbf24'
+  const objetivo: DeudaAcreedor = {
+    nombre: grupo.nombre,
+    moneda,
+    saldo: total,
+    operaciones,
+    cotizacionPrevia: deLaMoneda.find((p) => p.cotizacion_pago)?.cotizacion_pago ?? null,
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+      <div>
+        <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)' }}>
+          Total {moneda} · {operaciones} deuda{operaciones > 1 ? 's' : ''}
+        </p>
+        <p style={{ fontFamily: FN, fontSize: '1.45rem', color, lineHeight: 1.1, overflowWrap: 'anywhere' }}>{fmtMoneda(total, moneda)}</p>
+      </div>
+      <button onClick={() => onPagar(objetivo)} style={{ ...btnSolid('success'), fontSize: '0.78rem', padding: '0.5rem 1.15rem' }}>
+        Pagar
+      </button>
+      {/* Un cheque es un instrumento en pesos: contra una deuda en dólares no hay
+          con qué imputarlo sin una cotización que nadie dictó. */}
+      {moneda === 'ARS' && (
+        <button onClick={() => onCheque(objetivo)} style={{ ...btnBordered('primary'), fontSize: '0.78rem', padding: '0.5rem 1rem' }}>
+          Con cheque
+        </button>
+      )}
+      <button
+        onClick={() => onCompensar(deLaMoneda[0])}
+        title="Se la cubrió un cliente que te debe"
+        style={{ ...btnBordered('neutral'), fontSize: '0.78rem', padding: '0.5rem 1rem' }}
+      >
+        Compensar
+      </button>
+    </div>
+  )
+}
+
+function AcreedorCard({
+  grupo, onPagar, onCheque, onCompensar, onSumar, onEditar, onEliminar,
+}: {
+  grupo: GrupoAcreedor
+  onPagar: (d: DeudaAcreedor) => void
+  onCheque: (d: DeudaAcreedor) => void
+  onCompensar: (p: Pasivo) => void
+  onSumar: (nombre: string) => void
+  onEditar: (p: Pasivo) => void
+  onEliminar: (p: Pasivo) => void
+}) {
+  return (
+    <div className="lift" style={{ ...CARD, padding: '1rem 1.15rem' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <h3 style={{ fontFamily: FM, fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word' }}>{grupo.nombre}</h3>
+        <button onClick={() => onSumar(grupo.nombre)} style={{ ...btnFlat('primary'), display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', padding: '0.3rem 0.7rem' }}>
+          <IconPlus size={13} />Sumar deuda
+        </button>
+      </div>
+
+      {/* Detalle: de dónde sale el total. Sin botón de pago por renglón —acá se
+          le paga al acreedor, no a una deuda—; Editar y Eliminar sí, porque
+          corrigen la carga de esa deuda puntual. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--bd-006)' }}>
+        {grupo.deudas.map((p) => (
+          <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flex: 1 }}>
+              <EstadoBadge estado={p.estado} />
+              <span style={{ fontFamily: FM, fontSize: '0.76rem', color: 'rgba(100,116,139,0.85)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {p.concepto}
+                {p.ingreso_caja && <span title={`La plata entró a la caja el ${fmtDate(p.fecha_ingreso ?? '')}`} style={{ color: 'rgba(52,211,153,0.85)', marginLeft: '0.35rem' }}>· entró a caja</span>}
+                {p.fecha_vencimiento && <span style={{ color: 'rgba(100,116,139,0.5)', marginLeft: '0.35rem' }}>· vence {fmtDate(p.fecha_vencimiento)}</span>}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+              <span style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 700, color: p.estado === 'PENDIENTE' ? 'var(--text-1)' : 'rgba(100,116,139,0.5)', whiteSpace: 'nowrap' }}>
+                {fmtMoneda(p.saldo_pendiente, p.moneda)}
+              </span>
+              <button onClick={() => onEditar(p)} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>Editar</button>
+              <button onClick={() => onEliminar(p)} style={{ ...btnBordered('danger'), fontSize: '0.68rem', padding: '2px 8px' }}>Eliminar</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* El total y sus botones, una fila por moneda: ARS y USD son cajas
+          distintas y no se suman entre sí. */}
+      {(grupo.saldoARS > 0.009 || grupo.saldoUSD > 0.009) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid var(--bd-006)' }}>
+          {grupo.saldoARS > 0.009 && (
+            <TotalMoneda grupo={grupo} moneda="ARS" total={grupo.saldoARS} onPagar={onPagar} onCheque={onCheque} onCompensar={onCompensar} />
+          )}
+          {grupo.saldoUSD > 0.009 && (
+            <TotalMoneda grupo={grupo} moneda="USD" total={grupo.saldoUSD} onPagar={onPagar} onCheque={onCheque} onCompensar={onCompensar} />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Página principal ──────────────────────────────────────────────────
 
 export default function Pasivos() {
   const [filtro, setFiltro] = useState<Filtro>('PENDIENTE')
-  const [pasivoEfectivo, setPasivoEfectivo] = useState<Pasivo | null>(null)
-  const [pasivoCheque, setPasivoCheque] = useState<Pasivo | null>(null)
+  const [pagando, setPagando] = useState<DeudaAcreedor | null>(null)
+  const [conCheque, setConCheque] = useState<DeudaAcreedor | null>(null)
   const [pasivoEditar, setPasivoEditar] = useState<Pasivo | null>(null)
   const [pasivoEliminar, setPasivoEliminar] = useState<Pasivo | null>(null)
   const [pasivoCompensar, setPasivoCompensar] = useState<Pasivo | null>(null)
-  const [mostrarNueva, setMostrarNueva] = useState(false)
+  // `''` = alta suelta (el operador tipea el acreedor); un nombre = "Sumar deuda"
+  // desde la tarjeta de ese acreedor.
+  const [creando, setCreando] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   const estado = filtro === 'todos' ? undefined : filtro as PasivoEstado
@@ -477,19 +694,26 @@ export default function Pasivos() {
     refetchInterval: 30_000,
   })
 
+  const grupos = useMemo(() => agrupar(pasivos ?? []), [pasivos])
+
   const pendientes = pasivos?.filter((p) => p.estado === 'PENDIENTE') ?? []
   const totalARS = pendientes.filter((p) => p.moneda === 'ARS').reduce((acc, p) => acc + parseFloat(p.saldo_pendiente), 0)
   const totalUSD = pendientes.filter((p) => p.moneda === 'USD').reduce((acc, p) => acc + parseFloat(p.saldo_pendiente), 0)
+  const conSaldo = grupos.filter((g) => g.pendientes > 0).length
 
-  function handleSuccess() {
-    setPasivoEfectivo(null); setPasivoCheque(null); setPasivoEditar(null)
-    setPasivoEliminar(null); setMostrarNueva(false)
+  function invalidar() {
     queryClient.invalidateQueries({ queryKey: ['pasivos'] })
     queryClient.invalidateQueries({ queryKey: ['cheques'] })
-    // La baja revierte líneas de caja: el reporte y el feed quedan desactualizados.
+    // Pagar y anular mueven líneas de caja: el reporte y el feed quedan desactualizados.
     queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
     queryClient.invalidateQueries({ queryKey: ['reporte'] })
     queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
+  }
+
+  function handleSuccess() {
+    setPagando(null); setConCheque(null); setPasivoEditar(null)
+    setPasivoEliminar(null); setCreando(null)
+    invalidar()
   }
 
   return (
@@ -498,10 +722,10 @@ export default function Pasivos() {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
           <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Deudas</h1>
-          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Deudas del negocio con clientes y proveedores</p>
+          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Lo que el negocio le debe a cada uno: compras a deber, plata prestada y vueltos, en una sola cuenta</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button onClick={() => setMostrarNueva(true)} style={{ ...btnSolid('primary'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', padding: '0.45rem 0.875rem' }}><IconPlus size={15} />Nueva deuda</button>
+          <button onClick={() => setCreando('')} style={{ ...btnSolid('primary'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', padding: '0.45rem 0.875rem' }}><IconPlus size={15} />Nueva deuda</button>
           <button onClick={() => refetch()} style={{ ...btnBordered('neutral'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600, padding: '0.45rem 0.875rem' }}><IconRefresh size={14} />Actualizar</button>
         </div>
       </div>
@@ -510,13 +734,13 @@ export default function Pasivos() {
       {filtro !== 'CANCELADA' && (
         <div className="grid grid-cols-2 gap-3 sm:max-w-xl" style={{ marginBottom: '1.25rem' }}>
           {[
-            { label: 'Saldo pendiente ARS', value: fmtARS(totalARS), sub: `${pendientes.filter((p) => p.moneda === 'ARS').length} deuda(s)` },
-            { label: 'Saldo pendiente USD', value: fmtUSD(totalUSD), sub: `${pendientes.filter((p) => p.moneda === 'USD').length} deuda(s)` },
-          ].map(({ label, value, sub }) => (
+            { label: 'Saldo pendiente ARS', value: fmtARS(totalARS) },
+            { label: 'Saldo pendiente USD', value: fmtUSD(totalUSD) },
+          ].map(({ label, value }) => (
             <div key={label} className="lift" style={{ ...CARD, padding: '0.8rem 1rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
               <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: '#f87171', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere' }}>{value}</p>
-              <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
+              <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{conSaldo} acreedor(es)</p>
             </div>
           ))}
         </div>
@@ -537,105 +761,34 @@ export default function Pasivos() {
       </div>
 
       {/* Lista */}
-      <div style={{ ...CARD, overflow: 'hidden' }}>
-        {isLoading && <SkeletonRows rows={6} />}
-        {error && <div style={{ padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar las deudas.</div>}
-        {pasivos && pasivos.length === 0 && (
-          <div style={{ padding: '3rem', textAlign: 'center' }}>
-            <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✅</p>
-            <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Sin deudas registradas</p>
-          </div>
-        )}
-        {pasivos && pasivos.length > 0 && (
-          <>
-          {/* Mobile: tarjetas */}
-          <div className="sm:hidden">
-            {pasivos.map((pasivo) => (
-              <div key={`m-${pasivo.id}`} style={{ padding: '0.85rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.4rem' }}>
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: FM, fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word' }}>{pasivo.acreedor}</p>
-                    <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(148,163,184,0.7)', wordBreak: 'break-word', marginTop: '1px' }}>{pasivo.concepto}</p>
-                  </div>
-                  <EstadoBadge estado={pasivo.estado} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.75rem' }}>
-                  <span style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)' }}>
-                    Original {fmtMoneda(pasivo.monto, pasivo.moneda)}
-                    {pasivo.fecha_vencimiento && ` · vence ${fmtDate(pasivo.fecha_vencimiento)}`}
-                    {pasivo.ingreso_caja && pasivo.fecha_ingreso && ` · entró a caja ${fmtDate(pasivo.fecha_ingreso)}`}
-                  </span>
-                  <span style={{ fontFamily: FM, fontSize: '0.9rem', fontWeight: 700, color: '#f87171', whiteSpace: 'nowrap' }}>{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</span>
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem' }}>
-                  {pasivo.estado === 'PENDIENTE' && (
-                    <>
-                      <button onClick={() => setPasivoEfectivo(pasivo)} style={{ ...btnFlat('success'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Pagar</button>
-                      <button onClick={() => setPasivoCheque(pasivo)} style={{ ...btnFlat('primary'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Con cheque</button>
-                      <button onClick={() => setPasivoCompensar(pasivo)} title="Se la cubrió un cliente que te debe" style={{ ...btnFlat('warning'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Compensar</button>
-                    </>
-                  )}
-                  <button onClick={() => setPasivoEditar(pasivo)} style={{ ...btnBordered('neutral'), flex: pasivo.estado === 'PENDIENTE' ? '0 0 auto' : 1, fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}>Editar</button>
-                  <button onClick={() => setPasivoEliminar(pasivo)} style={{ ...btnBordered('danger'), flex: '0 0 auto', fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}>Eliminar</button>
-                </div>
-              </div>
-            ))}
-          </div>
-          {/* Desktop: tabla */}
-          <div className="hidden sm:block" style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '640px' }}>
-              <thead>
-                <tr>
-                  <th style={TH}>Acreedor</th>
-                  <th style={TH}>Concepto</th>
-                  <th style={{ ...TH, textAlign: 'right' }}>Original</th>
-                  <th style={{ ...TH, textAlign: 'right' }}>Saldo</th>
-                  <th style={TH}>Vencimiento</th>
-                  <th style={TH}>Estado</th>
-                  <th style={{ ...TH, padding: '0.625rem 1rem' }} />
-                </tr>
-              </thead>
-              <tbody>
-                {pasivos.map((pasivo) => (
-                  <tr key={pasivo.id}
-                    onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
-                    onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
-                    <td style={{ ...TD, fontWeight: 600 }}>{pasivo.acreedor}</td>
-                    <td style={{ ...TD, color: 'rgba(148,163,184,0.7)', maxWidth: '220px', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                      {pasivo.concepto}
-                      {pasivo.ingreso_caja && (
-                        <span title={`La plata entró a la caja el ${fmtDate(pasivo.fecha_ingreso ?? '')}`} style={{ fontFamily: FM, fontSize: '0.66rem', color: 'rgba(52,211,153,0.85)', marginLeft: '0.4rem', whiteSpace: 'nowrap' }}>· entró a caja</span>
-                      )}
-                    </td>
-                    <td style={{ ...TD, textAlign: 'right', color: 'rgba(100,116,139,0.6)' }}>{fmtMoneda(pasivo.monto, pasivo.moneda)}</td>
-                    <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#f87171' }}>{fmtMoneda(pasivo.saldo_pendiente, pasivo.moneda)}</td>
-                    <td style={{ ...TD, color: 'rgba(100,116,139,0.6)', fontSize: '0.72rem', whiteSpace: 'nowrap' }}>{pasivo.fecha_vencimiento ? fmtDate(pasivo.fecha_vencimiento) : '—'}</td>
-                    <td style={TD}><EstadoBadge estado={pasivo.estado} /></td>
-                    <td style={{ ...TD, textAlign: 'right' }}>
-                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                        {pasivo.estado === 'PENDIENTE' && (
-                          <>
-                            <button onClick={() => setPasivoEfectivo(pasivo)} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Pagar</button>
-                            <button onClick={() => setPasivoCheque(pasivo)} style={{ ...btnFlat('primary'), fontSize: '0.68rem', padding: '2px 8px' }}>Con cheque</button>
-                            <button onClick={() => setPasivoCompensar(pasivo)} title="Se la cubrió un cliente que te debe" style={{ ...btnFlat('warning'), fontSize: '0.68rem', padding: '2px 8px' }}>Compensar</button>
-                          </>
-                        )}
-                        <button onClick={() => setPasivoEditar(pasivo)} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>Editar</button>
-                        <button onClick={() => setPasivoEliminar(pasivo)} style={{ ...btnBordered('danger'), fontSize: '0.68rem', padding: '2px 8px' }}>Eliminar</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          </>
-        )}
-      </div>
+      {isLoading && <div style={{ ...CARD, overflow: 'hidden' }}><SkeletonRows rows={6} /></div>}
+      {error && <div style={{ ...CARD, padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar las deudas.</div>}
+      {!isLoading && !error && grupos.length === 0 && (
+        <div style={{ ...CARD, padding: '3rem', textAlign: 'center' }}>
+          <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✅</p>
+          <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Sin deudas registradas</p>
+        </div>
+      )}
+      {!isLoading && !error && grupos.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {grupos.map((g) => (
+            <AcreedorCard
+              key={g.clave}
+              grupo={g}
+              onPagar={setPagando}
+              onCheque={setConCheque}
+              onCompensar={setPasivoCompensar}
+              onSumar={setCreando}
+              onEditar={setPasivoEditar}
+              onEliminar={setPasivoEliminar}
+            />
+          ))}
+        </div>
+      )}
 
-      {mostrarNueva && <ModalNuevaDeuda onClose={() => setMostrarNueva(false)} onSuccess={handleSuccess} />}
-      {pasivoEfectivo && <ModalPagar pasivo={pasivoEfectivo} onClose={() => setPasivoEfectivo(null)} onSuccess={handleSuccess} />}
-      {pasivoCheque && <ModalCancelarCheque pasivo={pasivoCheque} onClose={() => setPasivoCheque(null)} onSuccess={handleSuccess} />}
+      {creando !== null && <ModalNuevaDeuda acreedorFijo={creando || undefined} onClose={() => setCreando(null)} onSuccess={handleSuccess} />}
+      {pagando && <ModalPagarAcreedor deuda={pagando} onClose={() => setPagando(null)} onSuccess={handleSuccess} />}
+      {conCheque && <ModalChequeAcreedor deuda={conCheque} onClose={() => setConCheque(null)} onSuccess={handleSuccess} />}
       {pasivoEditar && <ModalEditarDeuda pasivo={pasivoEditar} onClose={() => setPasivoEditar(null)} onSuccess={handleSuccess} />}
       {pasivoEliminar && <ModalEliminar entidad="pasivo" id={pasivoEliminar.id} onClose={() => setPasivoEliminar(null)} onSuccess={handleSuccess} />}
       {pasivoCompensar && (

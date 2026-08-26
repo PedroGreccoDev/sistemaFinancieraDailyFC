@@ -823,6 +823,7 @@ def cancelar_a_acreedor_con_cheque(
     operador_id: str,
     motivo: str,
     fecha: date | None = None,
+    vuelto_modo: str | None = None,
 ) -> PagoAcreedorResult:
     """Entrega un cheque de cartera para saldar deudas con un acreedor.
 
@@ -834,10 +835,11 @@ def cancelar_a_acreedor_con_cheque(
     Las deudas son las **en pesos**: un cheque es un instrumento en ARS y no hay
     con qué convertirlo sin una cotización que nadie dictó.
 
-    **Si el cheque cubre de más, no se entrega**: el vuelto del panel deja elegir
-    entre pagar la diferencia o quedar debiendo, y por WhatsApp esa elección no
-    está — inventar una de las dos mueve plata o crea una deuda que el operador
-    no pidió. Se avisa y se resuelve en el panel (decisión del dueño, 2026-08-24).
+    **Si el cheque cubre de más hay que decir qué hacer con el vuelto.** El panel
+    lo pregunta y lo manda en `vuelto_modo`; el bot no lo manda nunca —por
+    WhatsApp esa elección no está, e inventar una de las dos mueve plata o crea
+    una deuda que el operador no pidió—, así que sin él la entrega falla y se
+    avisa que eso se resuelve desde el panel (decisión del dueño, 2026-08-24).
     """
     acreedor = acreedor.strip()
     if cheque.estado != ChequeEstado.EN_CARTERA:
@@ -854,7 +856,10 @@ def cancelar_a_acreedor_con_cheque(
         cheque.monto * (Decimal("100") - porcentaje_venta) / Decimal("100")
     ).quantize(_CENTAVO)
     total = sum((p.saldo_pendiente for p in pasivos), _CERO).quantize(_CENTAVO)
-    if valor_neto - total > _CENTAVO:
+    # > 0: el cheque cubre de más y sobra un vuelto. La tolerancia de un centavo
+    # es la de siempre: ese resto se pierde en el redondeo, no es un vuelto.
+    diferencia = (valor_neto - total).quantize(_CENTAVO)
+    if diferencia > _CENTAVO and vuelto_modo is None:
         raise ValidationError(
             f"El cheque Nº {cheque.nro_cheque} vale ${valor_neto} netos y a "
             f"{pasivos[0].acreedor} le debés ${total}: cubre de más. El vuelto "
@@ -899,6 +904,14 @@ def cancelar_a_acreedor_con_cheque(
             imputaciones.append(
                 PasivoImputado(pasivo=pasivo, imputado=imputa, cancelo=cancelo)
             )
+
+        # El sobrante solo se resuelve si el operador dijo cómo: sin `vuelto_modo`
+        # no se llega acá con diferencia real (se rechazó arriba). El umbral es el
+        # MISMO de ese rechazo, y tiene que serlo: el centavo de redondeo que la
+        # entrega tolera desde siempre no es un vuelto, y con `> _CERO` se
+        # convertía en un pasivo de $0,01 a favor del cliente.
+        if vuelto_modo is not None and diferencia > _CENTAVO:
+            aplicar_vuelto_cheque(db, cheque, vuelto_modo, diferencia, fecha)
 
         db.commit()
     except (InvalidChequeStateTransition, ManualOperationRequired) as exc:
