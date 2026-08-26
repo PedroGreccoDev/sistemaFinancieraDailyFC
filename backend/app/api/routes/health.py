@@ -69,3 +69,55 @@ async def health_deep(
     diagnostico = await svc_health.diagnosticar()
     codigo = 503 if diagnostico.estado is svc_health.Estado.CAIDO else 200
     return JSONResponse(status_code=codigo, content=diagnostico.to_dict(detallado=detallado))
+
+
+@router.post("/health/telegram")
+async def health_telegram(
+    token: str | None = Query(default=None),
+    x_health_token: str | None = Header(default=None),
+) -> JSONResponse:
+    """Manda un mensaje de prueba y cuenta qué pasó. **Exige `HEALTH_TOKEN`.**
+
+    El canal de alertas tiene un problema de fondo: **solo se ejercita cuando
+    hay una caída**, que es justo el peor momento para descubrir que está roto.
+    Puede llevar meses sin funcionar —el chat viejo, el bot sacado del grupo,
+    el host inalcanzable— y nadie se entera, porque el silencio de Telegram se
+    lee igual que "todo bien".
+
+    Esto lo convierte en algo que se puede probar un martes cualquiera. Es POST
+    y no GET a propósito: manda un mensaje de verdad al chat del dueño, y eso no
+    puede pasar porque alguien abrió una URL de más.
+
+    A diferencia de `/health/deep`, acá el token **sí** decide si se responde:
+    sin él, cualquiera podría hacerle mandar mensajes al bot.
+    """
+    from app.services import telegram
+
+    esperado = get_settings().health_token
+    if not esperado or not _token_ok(esperado, (x_health_token, token)):
+        raise HTTPException(status_code=401, detail="Token de health inválido")
+
+    if not telegram.configurado():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "enviado": False,
+                "motivo": "Falta TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_IDS.",
+                "destinatarios": [],
+            },
+        )
+
+    enviado = await telegram.enviar_alerta(
+        "🧪 <b>Prueba del canal de alertas</b>\n\n"
+        "Si estás leyendo esto, los avisos del sistema llegan bien."
+    )
+    return JSONResponse(
+        status_code=200 if enviado else 502,
+        content={
+            "enviado": enviado,
+            # Los chat IDs no son secretos —el token sí— y saber a cuál se
+            # intentó es la mitad del diagnóstico cuando no llega nada.
+            "destinatarios": telegram.destinatarios(),
+            "motivo": None if enviado else "Falló el envío; el detalle está en los logs.",
+        },
+    )

@@ -69,6 +69,26 @@ async def enviar_alerta(texto: str) -> bool:
                 response.raise_for_status()
                 enviado = True
             except httpx.HTTPError as exc:
-                logger.error("No se pudo enviar la alerta a Telegram (chat %s): %s", chat_id, exc)
+                # El TIPO de excepción va explícito porque es lo único que
+                # distingue las tres causas, y varias de ellas tienen `str()`
+                # **vacío**: un `ReadTimeout` se logueaba como "…(chat 123): " y
+                # no había forma de saber si Telegram rechazó el mensaje, si no
+                # se llegó al host o si tardó de más. Un canal de alertas que
+                # falla sin decir por qué no se puede arreglar.
+                detalle = str(exc) or "(la excepción no trae mensaje)"
+                logger.error(
+                    "No se pudo enviar la alerta a Telegram (chat %s): %s: %s",
+                    chat_id,
+                    type(exc).__name__,
+                    detalle,
+                )
+                if isinstance(exc, httpx.HTTPStatusError):
+                    # Telegram sí contestó y dijo que no: el cuerpo trae el
+                    # motivo exacto ("chat not found", "bot was blocked").
+                    logger.error(
+                        "Telegram respondió %s: %s",
+                        exc.response.status_code,
+                        exc.response.text[:300],
+                    )
 
     return enviado
