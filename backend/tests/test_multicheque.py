@@ -8,7 +8,7 @@ para no obligar a repetir la foto entera por culpa de uno repetido.
 from __future__ import annotations
 
 from app.services.ia.claude import INTENTS, _SYSTEM_PROMPT
-from app.services.whatsapp.dispatcher import _items_o_uno
+from app.services.whatsapp.dispatcher import _hereda_abonado, _items_o_uno
 
 
 # ── Normalización del payload ─────────────────────────────────────────
@@ -346,3 +346,70 @@ def test_el_medio_de_pago_dicho_una_vez_baja_a_cada_cobro() -> None:
     }
     items = _items_o_uno(data, "cobros", heredar=("banco", "medio_pago"))
     assert [i["medio_pago"] for i in items] == ["TRANSFERENCIA", "TRANSFERENCIA"]
+
+
+# ── El alta, que era el único de los cinco sin heredar ────────────────
+
+def test_el_alta_hereda_banco_y_porcentaje() -> None:
+    """"Estos cuatro del Nación al 8%": sin heredar, el porcentaje tira abajo el
+    lote entero y el banco queda NULL — y con banco NULL la unicidad no bloquea
+    que el mismo cheque se cargue dos veces."""
+    data = {
+        "banco": "Nación",
+        "porcentaje_compra": 8,
+        "cheques": [{"nro_cheque": "1", "monto": 100}, {"nro_cheque": "2", "monto": 200}],
+    }
+    items = _items_o_uno(
+        data, "cheques",
+        heredar=("banco", "porcentaje_compra", "cliente_nombre",
+                 "fecha_emision", "fecha_pago", "medio_pago"),
+    )
+    assert all(i["banco"] == "Nación" and i["porcentaje_compra"] == 8 for i in items)
+
+
+def test_lo_que_el_cheque_ya_dice_no_se_pisa() -> None:
+    data = {"porcentaje_compra": 8, "cheques": [{"nro_cheque": "1", "porcentaje_compra": 10}]}
+    items = _items_o_uno(data, "cheques", heredar=("porcentaje_compra",))
+    assert items[0]["porcentaje_compra"] == 10
+
+
+def test_comprados_todos_a_deber_baja_el_cero() -> None:
+    """`monto_abonado: 0` es "los compré todos a deber" y no tiene ambigüedad de
+    reparto. Sin heredarlo, los cuatro entran como pagados enteros: sale de la
+    caja plata que no salió y no queda el pasivo con el vendedor."""
+    data = {"monto_abonado": 0, "cheques": [{"nro_cheque": "1"}, {"nro_cheque": "2"}]}
+    items = _items_o_uno(data, "cheques")
+    _hereda_abonado(data, items)
+    assert [i["monto_abonado"] for i in items] == [0, 0]
+
+
+def test_un_solo_cheque_hereda_el_abonado_cualquiera_sea() -> None:
+    """Con un cheque el monto es de ese cheque y de ninguno más."""
+    data = {"monto_abonado": 500000, "cheques": [{"nro_cheque": "1"}]}
+    items = _items_o_uno(data, "cheques")
+    _hereda_abonado(data, items)
+    assert items[0]["monto_abonado"] == 500000
+
+
+def test_un_abonado_ambiguo_no_se_reparte() -> None:
+    """"Le pagué 500 mil" por un fajo de cuatro puede ser el total o el de cada
+    uno. Copiarlo a cada ítem sacaría de la caja cuatro veces esa plata."""
+    data = {"monto_abonado": 500000, "cheques": [{"nro_cheque": "1"}, {"nro_cheque": "2"}]}
+    items = _items_o_uno(data, "cheques")
+    _hereda_abonado(data, items)
+    assert all(i.get("monto_abonado") is None for i in items)
+
+
+def test_el_abonado_del_cheque_manda_sobre_el_de_la_raiz() -> None:
+    data = {"monto_abonado": 0, "cheques": [{"nro_cheque": "1", "monto_abonado": 300}]}
+    items = _items_o_uno(data, "cheques")
+    _hereda_abonado(data, items)
+    assert items[0]["monto_abonado"] == 300
+
+
+def test_sin_abonado_en_la_raiz_no_inventa_ninguno() -> None:
+    """None sigue significando "se pagó todo", que es la compra normal."""
+    data = {"cheques": [{"nro_cheque": "1"}, {"nro_cheque": "2"}]}
+    items = _items_o_uno(data, "cheques")
+    _hereda_abonado(data, items)
+    assert all("monto_abonado" not in i for i in items)

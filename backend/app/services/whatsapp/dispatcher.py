@@ -92,6 +92,71 @@ _FRECUENCIA_PLURAL: dict[FrecuenciaCuotas, str] = {
 
 
 # ────────────────────────────────────────────────────────────────────────────
+# Guarda de lote
+# ────────────────────────────────────────────────────────────────────────────
+
+# Bajo qué clave acepta cada intent un LOTE de operaciones. El operador dicta
+# como habla —"cheques 9460 y 9461", "nafta y el kiosco"— y ahí el array existe.
+# Todo intent de escritura que NO figure acá carga UNA sola operación.
+_CLAVES_DE_LOTE: dict[str, tuple[str, ...]] = {
+    "REGISTRAR_CHEQUE": ("cheques",),
+    "VENDER_CHEQUE":    ("ventas",),
+    "FIAR_CHEQUE":      ("fiados",),
+    "COBRAR_CHEQUE":    ("cobros",),
+    "RECHAZAR_CHEQUE":  ("rechazos",),
+    "REGISTRAR_GASTO":  ("gastos",),
+}
+
+# Los intents que tocan la BD. La guarda no corre sobre las consultas ni sobre
+# ACLARACION_REQUERIDA/DESCONOCIDO: no cargan nada, así que no hay qué perder.
+_INTENTS_DE_ESCRITURA = frozenset({
+    "REGISTRAR_CHEQUE", "VENDER_CHEQUE", "FIAR_CHEQUE", "COBRAR_CHEQUE",
+    "RECHAZAR_CHEQUE", "NUEVO_PRESTAMO", "COBRAR_CUOTA", "COBRAR_FIADO_EFECTIVO",
+    "COBRAR_FIADO_CON_CHEQUE", "COBRAR_DEUDA_CLIENTE", "COMPENSAR_DEUDA",
+    "REGISTRAR_DEUDA", "REGISTRAR_DEUDA_CLIENTE", "PAGAR_PASIVO", "TRASPASO_CAJA",
+    "MOVIMIENTO_EFECTIVO", "REGISTRAR_GASTO", "EDITAR_OPERACION",
+    "REVERTIR_OPERACION",
+})
+
+
+def _lote_no_soportado(intent: str, data: dict[str, Any]) -> str | None:
+    """Aviso si el modelo mandó VARIAS operaciones a un intent que carga una sola.
+
+    El modo de falla que tapa es el peor de todos porque no se ve: con lugar para
+    una operación el modelo carga una y descarta el resto, nada falla, y el bot
+    contesta "listo". El operador da las dos por cargadas y la que se escapó no
+    aparece hasta que no cuadra la caja —o nunca—.
+
+    Frenar el lote entero es a propósito: cargar la primera y perder la segunda es
+    exactamente el bug. Que no se cargue nada deja al operador con las dos para
+    mandar de nuevo, en vez de con una cargada y otra invisible.
+
+    Es una red, no el arreglo: solo ve el caso en que el modelo SÍ entendió las
+    dos y las puso en un array. Cuando el contrato del intent no tiene dónde
+    ponerlas y el modelo elige una, acá no hay nada que detectar — eso lo ataja
+    la regla 16 del prompt, y lo arregla el array por intent.
+    """
+    if intent not in _INTENTS_DE_ESCRITURA:
+        return None
+    soportadas = _CLAVES_DE_LOTE.get(intent, ())
+    for clave, valor in data.items():
+        if clave in soportadas or not isinstance(valor, list):
+            continue
+        # Un solo ítem no pierde nada: los handlers leen la raíz y el modelo
+        # suele repetir ahí el mismo dato. Solo importa a partir de dos.
+        cuantas = len([i for i in valor if isinstance(i, dict)])
+        if cuantas < 2:
+            continue
+        return (
+            f"⚠️ *Entendí {cuantas} operaciones en un mismo mensaje, y esta va de a una.*\n"
+            "No cargué ninguna: cargar la primera y perder la otra es peor que no "
+            "cargar nada.\n\n"
+            "Mandámelas en mensajes separados y las cargo a las dos."
+        )
+    return None
+
+
+# ────────────────────────────────────────────────────────────────────────────
 # Entrypoint público
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -110,6 +175,12 @@ def dispatch(
     """
     intent = result.intent
     data = result.data
+
+    # Antes de tocar la BD: si el modelo mandó un lote a un intent que carga de a
+    # una, no se ejecuta nada y se avisa (ver `_lote_no_soportado`).
+    if aviso := _lote_no_soportado(intent, data):
+        logger.warning("Lote no soportado en %s (phone=%s) — no se cargó nada", intent, phone)
+        return False, aviso
 
     try:
         if intent == "REGISTRAR_CHEQUE":
@@ -201,6 +272,31 @@ def _items_o_uno(
     return [data]
 
 
+def _hereda_abonado(data: dict[str, Any], items: list[dict[str, Any]]) -> None:
+    """Baja el `monto_abonado` de la raíz a los ítems, cuando no es ambiguo.
+
+    Sin esto, lo comprado a deber entra como pagado entero: sale de la caja plata
+    que no salió y no queda el pasivo con el vendedor. Es el peor de los tres
+    modos de falla del alta, porque no lo denuncia nada.
+
+    Baja en dos casos, los dos sin ambigüedad de reparto:
+      - **un solo cheque**: ese monto es de ese cheque y de ninguno más;
+      - **cero**, con cuantos cheques sea: es "los compré todos a deber", y cero
+        por cheque es cero en total.
+
+    Cualquier otro monto dicho una vez para varios cheques puede ser el total del
+    fajo o el de cada uno —"le pagué 500 mil" por cuatro—, y las dos lecturas
+    mueven la caja distinto: eso se pregunta (ver `_registrar_cheque`)."""
+    abonado = _opt_decimal(data, "monto_abonado")
+    if abonado is None:
+        return
+    if abonado != 0 and len(items) > 1:
+        return
+    for item in items:
+        if item.get("monto_abonado") is None:
+            item["monto_abonado"] = data["monto_abonado"]
+
+
 def _registrar_cheque(
     db: Session,
     phone: str,
@@ -214,10 +310,42 @@ def _registrar_cheque(
     igual** y se informa cuál falló y por qué (decisión del dueño, 2026-08-06): así
     no hay que volver a sacar la foto de los cuatro por culpa de uno repetido.
     """
-    items = _items_o_uno(data, "cheques")
+    # Lo que se dice UNA VEZ para todo el fajo baja a cada cheque. "Estos cuatro
+    # del Nación al 8% a 30 días" nombra banco, porcentaje y fecha una sola vez, y
+    # el modelo los deja en la raíz: sin heredarlos, `porcentaje_compra` tira abajo
+    # el lote entero y `banco` queda en NULL — y con banco NULL la unicidad
+    # (banco, nro_cheque) no bloquea nada, así que el mismo cheque se puede cargar
+    # dos veces y después `resolve_cheque` no los puede distinguir.
+    #
+    # `monto_abonado` va aparte (`_hereda_abonado`): con varios cheques, "le pagué
+    # 500 mil" puede ser el total del fajo o el de cada uno, y copiarlo a cada ítem
+    # sacaría de la caja cuatro veces esa plata.
+    items = _items_o_uno(
+        data,
+        "cheques",
+        heredar=(
+            "banco", "porcentaje_compra", "cliente_nombre",
+            "fecha_emision", "fecha_pago", "medio_pago",
+        ),
+    )
+    _hereda_abonado(data, items)
 
     if len(items) == 1:
         return _registrar_un_cheque(db, items[0], msg_at, foto)
+
+    # Varios cheques y un solo monto abonado en la raíz: no se puede saber si son
+    # $500.000 en total o $500.000 por cheque, y las dos lecturas mueven la caja
+    # distinto. Se pregunta en vez de elegir (si se elige mal, sale de la caja
+    # plata que no salió y no queda el pasivo con el vendedor).
+    abonado_raiz = _opt_decimal(data, "monto_abonado")
+    if abonado_raiz is not None and abonado_raiz > 0 and all(
+        i.get("monto_abonado") is None for i in items
+    ):
+        return False, (
+            f"❓ Dijiste que abonaste {_ars(abonado_raiz)} por {len(items)} cheques, "
+            "y no sé si es el total del fajo o lo de cada uno.\n"
+            "No cargué ninguno. Decime cuánto pagaste de cada cheque."
+        )
 
     cargados: list[str] = []
     fallidos: list[str] = []

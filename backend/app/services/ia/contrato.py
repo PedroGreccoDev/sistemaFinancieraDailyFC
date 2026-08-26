@@ -717,6 +717,19 @@ REGLAS CRÍTICAS
     en el acto si hizo falta. Preguntarlo cada vez duplicaría cada mensaje, y una
     pregunta que se contesta siempre igual se termina contestando sin leer.
 
+16. UNA OPERACIÓN POR MENSAJE, salvo donde hay lista. Solo estos intents cargan
+    varias de una vez, cada uno con su array: REGISTRAR_CHEQUE (`cheques`),
+    VENDER_CHEQUE (`ventas`), FIAR_CHEQUE (`fiados`), COBRAR_CHEQUE (`cobros`),
+    RECHAZAR_CHEQUE (`rechazos`) y REGISTRAR_GASTO (`gastos`).
+    En TODOS los demás entra UNA sola: si el mensaje trae dos ("le pagué 500 a
+    Cuello y 300 a Pedro", "compré 1000 a 1250 y vendí 500 a 1300") NO elijas una
+    ni las mezcles → ACLARACION_REQUERIDA, repitiendo las dos que entendiste y
+    pidiendo que las mande en mensajes separados.
+    Elegir una es el peor error posible: se carga la primera, el bot contesta
+    "listo", el operador da las dos por hechas y la que se descartó no aparece
+    hasta que no cuadra la caja. Preguntar cuesta un mensaje; perder una operación
+    cuesta encontrarla.
+
 ═══════════════════════════════════════
 FORMATO DE RESPUESTA — SIEMPRE ESTE EXACTO
 ═══════════════════════════════════════

@@ -1495,6 +1495,32 @@ que sería un loop infinito).
     volver a dictar seis cobros porque uno ya estaba marcado. Cada operación commitea por
     separado, que es lo que hace posible ese comportamiento. **El que falla se nombra siempre**:
     un cheque que no entró y no se informa es indistinguible de uno que entró.
+  - **El alta hereda igual que los otros cuatro, pero el `monto_abonado` no siempre**
+    _(2026-08-26)_. `REGISTRAR_CHEQUE` era el único de los cinco sin `heredar`: "estos cuatro
+    del Nación al 8%" perdía el banco —y **con `banco` NULL la unicidad `(banco, nro_cheque)`
+    no bloquea nada**, así que el mismo cheque se cargaba dos veces y después `resolve_cheque`
+    no los podía distinguir—. El `monto_abonado` es distinto y **no se hereda sin más**: "le
+    pagué 500 mil" por un fajo de cuatro puede ser el total o el de cada uno, y copiarlo a
+    cada ítem sacaría de la caja cuatro veces esa plata. `_hereda_abonado()` lo baja solo
+    cuando no hay ambigüedad —**un solo cheque**, o **cero** con los que sean ("los compré
+    todos a deber")—; cualquier otro caso se pregunta. Sin nada de esto los cheques a deber
+    entran como **pagados enteros**: sale de la caja plata que no salió y no queda el pasivo
+    con el vendedor, que es el peor de los tres modos de falla porque no lo denuncia nada.
+- **Los intents que NO llevan array frenan el lote, no cargan uno**
+  (`_lote_no_soportado()`, red puesta 2026-08-26). Solo los seis de la lista cargan varias
+  operaciones: los cinco de cheques y `REGISTRAR_GASTO` (`gastos`). En todos los demás, si
+  el payload trae dos o más operaciones bajo una clave que ese intent no consume, **el
+  dispatcher no ejecuta nada** y avisa cuántas entendió. Cargar la primera y perder la
+  segunda es exactamente el bug que se quiere evitar: el operador se queda con las dos para
+  volver a mandar, en vez de con una cargada y otra invisible.
+  - **Es una red, no el arreglo.** Solo ve el caso en que el modelo entendió las dos y las
+    puso en un array. Cuando el contrato del intent no tiene dónde ponerlas y el modelo
+    elige una, no hay nada que detectar: eso lo ataja la **regla 16 del prompt** (una
+    operación por mensaje salvo donde hay lista → `ACLARACION_REQUERIDA`). El arreglo de
+    fondo es darle su array a cada intent, como se hizo con los cinco de cheques.
+  - `_CLAVES_DE_LOTE` y la regla 16 **tienen que decir lo mismo**: si se desincronizan, el
+    modelo manda un array donde el código lo frena — o deja de mandarlo donde sí se acepta.
+    `test_guarda_lote.py` los compara.
 - El bot opera vía WAHA (WhatsApp HTTP API) → webhook `POST /webhook/whatsapp`.
 - Solo el número configurado en `WHATSAPP_OPERATOR_PHONE` puede operar. **Ojo: si la env
   var está vacía el filtro NO se aplica** (`webhook.py`: `if operator_phone and ...`) y
@@ -1832,6 +1858,12 @@ que sería un loop infinito).
     bajen a cada cheque sin pisar los propios, y que un fallo parcial procese el resto
     **nombrando el que falló** — el que no se informa queda `EN_CARTERA` mientras el operador
     lo da por hecho. Custodia además que el prompt siga pidiendo todos los cheques de la foto.
+    Cubre también la herencia del alta y las dos reglas del `monto_abonado` (§Bot).
+  - **`test_guarda_lote.py`** — la red bajo los intents que todavía cargan de a una
+    operación: que un lote mandado a uno de ellos **no cargue nada** y avise, que los seis
+    que sí llevan array pasen derecho, y que `_CLAVES_DE_LOTE` y la regla 16 del prompt no
+    se desincronicen. Es la pieza que convierte el fallo silencioso en ruidoso mientras los
+    intents que faltan reciben su array.
 
 - **Convención:** mantené la lógica de negocio en funciones/métodos testeables sin BD; si una
   pieza nueva necesita una sesión, extraé la parte pura para poder cubrirla en este estilo.
