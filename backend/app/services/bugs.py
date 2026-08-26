@@ -264,7 +264,26 @@ def capturar_mensaje(
 def _encolar(evento: Evento) -> None:
     if not get_settings().bugs_activo:
         return
+    # La sesión de carga etiqueta todo lo que encuentre. Va acá y no en cada
+    # punto de captura porque los bugs que más interesan de una corrida son los
+    # que entran por el handler de logs, que no sabe nada de la sesión.
+    if evento.sesion_test is None and _sesion_actual is not None:
+        evento.sesion_test = _sesion_actual
     _COLA.append(evento)
+
+
+_sesion_actual: str | None = None
+
+
+def marcar_sesion(nombre: str | None) -> None:
+    """Etiqueta con `nombre` los bugs que se anoten de acá en más.
+
+    Es para la sesión de carga: sirve para separar en el documento lo que rompió
+    una corrida de lo que se rompió solo en producción. En el proceso web nadie
+    la llama y queda en `None`.
+    """
+    global _sesion_actual
+    _sesion_actual = nombre
 
 
 def pendientes() -> int:

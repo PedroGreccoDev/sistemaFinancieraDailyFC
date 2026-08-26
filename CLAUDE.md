@@ -1278,6 +1278,73 @@ no puede fallar nunca, mientras que esto se consulta a mano.
 `BUGS_INTERVALO_SEGUNDOS` (retardo real entre el error y el aviso),
 `BUGS_ESCALONES`, `BUGS_REPETIR_HORAS`. Usa el Telegram de §10.
 
+---
+
+## Sesión de carga — mil operaciones buscando lo que se rompe _(agregada 2026-08-25)_
+
+`backend/tests/carga/`, se lanza a mano:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m tests.carga.sesion --corridas 1000 --semilla 42
+```
+
+Encadena operaciones del negocio elegidas al azar con semilla fija —altas de
+cheques, ventas, fiados, cobros, préstamos, divisas, traspasos, gastos,
+consultas y reportes— y después de cada tanda pregunta si el negocio sigue
+siendo coherente. Mil operaciones tardan unos **ocho segundos**.
+
+**Busca dos cosas, y la segunda es la que justifica todo.** Lo que revienta ya
+lo anota el registro de bugs solo (§Registro de bugs). Lo que **no** revienta y
+sin embargo está mal —la caja que no cuadra contra el stock, el fiado cancelado
+que sigue debiendo, la línea de caja de una operación anulada— no da ninguna
+señal hasta el cierre del mes, y eso lo cazan los **invariantes**.
+
+- **El freno de producción es la pieza más importante** (`guardas.py`). El
+  `.env` del repo apunta a Railway, así que correr esto sin exportar
+  `DATABASE_URL` escribiría en la base real. El criterio está al revés de lo
+  natural a propósito: **no busca señales de producción para bloquear, exige la
+  prueba de que es local** —lista blanca de hosts— y además mira el nombre de la
+  base, porque un túnel SSH publica producción en `127.0.0.1` y pasaría el
+  chequeo de host. Aflojar cualquiera de las dos deja pasar el único caso que no
+  se puede permitir.
+- **Una sesión de base por operación, igual que el webhook.** Con una sola
+  sesión para toda la corrida, una operación **rechazada** deja sus escrituras
+  pendientes y **el commit de la siguiente las escribe**: la primera versión de
+  esto reportó descuadres que en producción no existen (líneas de caja de cobros
+  que el sistema había rechazado). En producción cada mensaje abre y cierra la
+  suya, y el banco de pruebas tiene que hacer lo mismo o miente.
+- **Por el bot se entra por `dispatcher.dispatch` con el `IntentResult` ya
+  armado**, no por el modelo. `dispatch` es exactamente lo que corre una vez que
+  la IA tradujo el mensaje, y saltearla hace la sesión reproducible y gratis.
+- **`--ia-real N` prueba el modelo de verdad** con las frases de `frases.py`, que
+  son las que ya salieron mal alguna vez ("me pagó" contra "le pagué" contra "le
+  transfirió", editar contra revertir, las que hay que preguntar en vez de
+  asumir). Son pocas y elegidas porque cada una cuesta plata: gastarlas en las
+  frases fáciles no diría nada. Una clasificación equivocada es un bug — el
+  intent decide para qué lado se mueve la caja.
+- **Un invariante nuevo se da de alta en `invariantes.TODOS`**, o no se corre
+  nunca — y la sesión termina en verde sin haber mirado lo que custodiaba. Mismo
+  riesgo que `_ENTIDADES` en la anulación; hay un test que lo compara.
+- **No manda los bugs por Telegram uno por uno**: una sesión provoca cientos de
+  errores a propósito. Se escriben con `drenar_sync` y al final sale **un**
+  mensaje con el resumen (`--telegram`). Un chat con mil avisos no lo lee nadie.
+- Vive fuera de `tests/` como paquete sin archivos `test_*.py` para que pytest
+  no lo levante: necesita Postgres y rompería el CI.
+
+**El invariante que más encontró es `caja_usd_contra_stock`**, y es el que cruza
+dos caminos distintos: desde §Stock de dólares **toda** entrada o salida de
+dólares mueve la caja *y* los lotes, así que si se separan una de las dos miente
+—con el stock corto la venta falla teniendo los billetes; con el stock largo se
+vende contra un costo que no existió—. También es el más frágil: si aparece una
+operación legítima que mueva una sola de las dos, marca un falso positivo.
+
+**Tests:** `test_carga_guardas.py`, unitario puro — que la URL de producción se
+rechace (con la real del `.env` como caso), que la lista blanca no deje pasar un
+host desconocido, que un túnel a producción no se cuele por dar local, que el
+mensaje diga qué hacer, que el catálogo de invariantes esté completo y que un
+invariante que revienta no corte la sesión.
+
 **Tests:** `test_bugs.py`, unitario puro — qué junta y qué separa la huella, que un
 error de negocio no abra bug pero uno de 5xx sí, que la misma excepción no se cuente
 dos veces, que **el traceback no aparezca en el texto del aviso**, la máquina del
