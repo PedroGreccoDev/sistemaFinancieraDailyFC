@@ -437,6 +437,12 @@ OPERACIONES DISPONIBLES
      - nro_cheque: string (el cheque que entregó)
      - banco: string o null (para desambiguar números repetidos entre bancos)
      - porcentaje_venta: number (% de descuento con el que se lo entregó)
+     - vuelto_modo: "SALDAR_EFECTIVO" o "QUEDA_DEBIENDO" o null — SOLO si el cheque
+       cubre de más y el operador dice qué hace con la diferencia: "me devolvió el
+       vuelto" / "me dio la diferencia" → SALDAR_EFECTIVO; "me la queda a favor" /
+       "queda debiéndomela" → QUEDA_DEBIENDO. Si no lo dice, null: el sistema
+       pregunta. Es la misma pregunta que el cheque de un cliente (§9), del otro
+       lado del mostrador.
    Reglas:
      - NO lleva `monto` ni `medio_pago`: el cheque vale su neto (nominal menos el %)
        y no mueve efectivo — esa plata salió cuando se compró el cheque.

@@ -173,9 +173,23 @@ faltaba la punta del chat.
   `_resolver_acreedor`, que ya lo hacía bien para cobrar.
 - **Pagar de más falla, no se acomoda** _(decisión del dueño, 2026-08-25)_. Por WhatsApp
   el monto viene dictado y de más suele ser un dedazo o el acreedor equivocado; un pasivo
-  a favor inventado hay que ir a borrarlo a mano. Con cheque, igual: si el neto cubre de
-  más **no se entrega** —el vuelto del panel deja elegir entre pagar la diferencia o
-  quedar debiendo, y esa elección por chat no está—.
+  a favor inventado hay que ir a borrarlo a mano. **Con cheque ya no**: ver abajo.
+- **El vuelto del cheque se pregunta por chat** _(decisión del dueño, 2026-08-26)_. Hasta
+  esa fecha, un cheque que cubría de más **no se entregaba**: se cortaba con "el vuelto se
+  resuelve desde el panel" y el operador tenía que rehacer la entrega entera allá. El
+  motivo registrado era que esa elección por chat "no está" — pero **del lado del cliente
+  sí estaba y funcionaba** desde siempre (§2.b): un cheque que cubre de más se pregunta y
+  se contesta en castellano. La diferencia no era el canal sino que ese camino se había
+  construido y este no. Ahora `vuelto_modo` viaja también en `PAGAR_PASIVO` con cheque,
+  con **el mismo texto de pregunta** que el otro lado —el operador tiene que reconocerla
+  venga de donde venga— y lo lee el mismo `_vuelto_modo()`, que ante un valor que no
+  reconoce devuelve `None` y hace que se vuelva a pedir.
+  - **La respuesta dice el valor del CHEQUE, no lo imputado.** Cuando hay vuelto los dos
+    números difieren, y mostrar el imputado haría parecer que el papel valía menos.
+  - **Y no dice "no movió la caja" cuando el vuelto salió en efectivo**, que es lo único
+    de esta operación que sí la mueve. Es el control inmediato del operador (§Caja
+    paralela): una respuesta que miente sobre por dónde salió la plata es peor que no
+    decir nada.
 - **La respuesta dice por qué caja salió.** Es el control inmediato del operador de que
   el bot no lo mandó al lado equivocado, el mismo criterio que el "no movió la caja" de
   la compensación.
@@ -945,8 +959,8 @@ el mismo agujero de los dólares de apertura y de los ajustes que suman USD.
 - **Alta** via bot de WhatsApp (intent `REGISTRAR_DEUDA`) o desde el panel web (botón "Nueva deuda").
 - El bot **exige** que el operador indique el concepto; si falta, responde con `ACLARACION_REQUERIDA`.
 - **Cancelación:** desde el panel (por acreedor o por deuda puntual) y **también desde el
-  bot** con `PAGAR_PASIVO` desde 2026-08-25 (§Las dos cajas: "El bot paga los pasivos"). Lo
-  único que sigue siendo exclusivo del panel es el **vuelto** de un cheque que cubre de más.
+  bot** con `PAGAR_PASIVO` desde 2026-08-25 (§Las dos cajas: "El bot paga los pasivos"),
+  incluido el **vuelto** de un cheque que cubre de más desde 2026-08-26.
 - Estados: `PENDIENTE` → `CANCELADA` (transición única, irreversible).
 - **Pagos parciales:** el pasivo tiene `saldo_pendiente` (migración `0007`); se puede cancelar en partes, en efectivo/transferencia o con un cheque de cartera. Pasa a `CANCELADA` cuando el saldo llega a 0.
 - **Pago en efectivo o transferencia (`POST /pasivos/{id}/pagar`, `svc_pasivos.pagar_pasivo`, régimen definido 2026-06-25):**

@@ -835,11 +835,17 @@ def cancelar_a_acreedor_con_cheque(
     Las deudas son las **en pesos**: un cheque es un instrumento en ARS y no hay
     con qué convertirlo sin una cotización que nadie dictó.
 
-    **Si el cheque cubre de más hay que decir qué hacer con el vuelto.** El panel
-    lo pregunta y lo manda en `vuelto_modo`; el bot no lo manda nunca —por
-    WhatsApp esa elección no está, e inventar una de las dos mueve plata o crea
-    una deuda que el operador no pidió—, así que sin él la entrega falla y se
-    avisa que eso se resuelve desde el panel (decisión del dueño, 2026-08-24).
+    **Si el cheque cubre de más hay que decir qué hacer con el vuelto**, y sin
+    `vuelto_modo` la entrega falla pidiéndolo. Lo mandan los dos: el panel con su
+    desplegable y el bot con lo que el operador contesta en castellano. Es la
+    misma pregunta que el cheque de un cliente que cubre de más (§2.b) y se
+    resuelve con la misma función, porque es la misma situación de los dos lados
+    del mostrador: el cheque no se puede recortar a medida.
+
+    Hasta 2026-08-26 acá se rechazaba mandando al panel —la elección por chat "no
+    estaba"—, pero del lado del cliente sí estaba y funcionaba: la diferencia no
+    era el canal sino que ese camino se había construido y este no (decisión del
+    dueño, 2026-08-26).
     """
     acreedor = acreedor.strip()
     if cheque.estado != ChequeEstado.EN_CARTERA:
@@ -860,10 +866,14 @@ def cancelar_a_acreedor_con_cheque(
     # es la de siempre: ese resto se pierde en el redondeo, no es un vuelto.
     diferencia = (valor_neto - total).quantize(_CENTAVO)
     if diferencia > _CENTAVO and vuelto_modo is None:
+        # Se pide, no se elige: qué se hace con plata a favor es una decisión de
+        # negocio. El texto es el mismo que el del cheque de un cliente (§2.b)
+        # para que el operador reconozca la pregunta venga del lado que venga.
         raise ValidationError(
             f"El cheque Nº {cheque.nro_cheque} vale ${valor_neto} netos y a "
-            f"{pasivos[0].acreedor} le debés ${total}: cubre de más. El vuelto "
-            "se resuelve desde el panel."
+            f"{pasivos[0].acreedor} le debés ${total}: cubre ${diferencia} de "
+            "más. Indicá qué hacer con el vuelto: pagarlo en efectivo o quedar "
+            "debiéndolo."
         )
 
     if valor_neto <= _CERO:

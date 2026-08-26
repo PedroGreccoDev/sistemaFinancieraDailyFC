@@ -127,15 +127,38 @@ def test_el_cheque_sale_de_cartera() -> None:
 
 # ── El vuelto: lo que el panel puede y el bot no ─────────────────────────────
 
-def test_sin_vuelto_modo_el_cheque_que_cubre_de_mas_se_rechaza() -> None:
-    # Es el camino del bot: por WhatsApp no hay dónde elegir qué hacer con la
-    # diferencia, e inventar una de las dos mueve plata que nadie pidió mover.
+def test_sin_vuelto_modo_el_cheque_que_cubre_de_mas_se_pregunta() -> None:
+    # No se elige por el operador: qué se hace con plata a favor es una decisión
+    # de negocio. Se pide y no se entrega nada hasta tenerla.
     db = FakeDB([_pasivo("Lote de dólares", "100000")])
 
-    with pytest.raises(ValidationError, match="cubre de más"):
+    with pytest.raises(ValidationError, match="Indicá qué hacer con el vuelto"):
         _entregar(db, _cheque("150000"))
 
     assert db.commits == 0
+
+
+def test_el_bot_manda_el_vuelto_que_contesta_el_operador() -> None:
+    """La pregunta del vuelto se contesta por chat, igual que del lado del cliente.
+
+    Hasta 2026-08-26 este camino cortaba mandando al panel. Lo que lo habilita es
+    que `_pagar_pasivo_con_cheque` pase `_vuelto_modo(data)`: si dejara de
+    pasarlo, el bot volvería a cortar sin que falle nada más.
+    """
+    import inspect
+
+    from app.services.whatsapp import dispatcher
+
+    fuente = inspect.getsource(dispatcher._pagar_pasivo_con_cheque)
+    assert "vuelto_modo=_vuelto_modo(data)" in fuente
+
+    # Y el contrato tiene que dejarle lugar, o el modelo no lo manda nunca.
+    from app.services.ia.contrato import _SYSTEM_PROMPT
+
+    bloque = _SYSTEM_PROMPT[_SYSTEM_PROMPT.index("10d. PAGAR_PASIVO CON CHEQUE"):]
+    bloque = bloque[: bloque.index("11. TRASPASO_CAJA")]
+    assert "vuelto_modo" in bloque
+    assert "SALDAR_EFECTIVO" in bloque and "QUEDA_DEBIENDO" in bloque
 
 
 def test_queda_debiendo_crea_el_pasivo_a_favor_por_la_diferencia() -> None:

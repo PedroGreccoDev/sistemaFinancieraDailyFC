@@ -3417,6 +3417,13 @@ def _pagar_pasivo_con_cheque(
 
     No mueve efectivo: el desembolso ocurrió al comprar el cheque. Lo que cambia
     de manos es el papel.
+
+    Si el cheque cubre de más, el servicio pide qué hacer con el vuelto. **Es la
+    misma pregunta que el cheque de un cliente** (§2.b), del otro lado del
+    mostrador: la contesta el operador diciendo "me devolvió la diferencia" o "me
+    la queda a favor", y el modelo la manda en `vuelto_modo`. Hasta 2026-08-26
+    acá se cortaba mandando al panel, y el operador tenía que rehacer la entrega
+    entera allá.
     """
     nro = _req_str(data, "nro_cheque")
     banco = (str(data["banco"]).strip() or None) if data.get("banco") else None
@@ -3431,13 +3438,22 @@ def _pagar_pasivo_con_cheque(
         operador_id=phone,
         motivo=f"Entregado a {acreedor} para pagar deuda (bot)",
         fecha=fecha_local(msg_at),
+        vuelto_modo=_vuelto_modo(data),
     )
 
-    neto = sum((i.imputado for i in r.imputaciones), Decimal("0.00"))
+    # Lo que vale el papel, no lo que se imputó: cuando cubre de más los dos
+    # números difieren, y decir el imputado haría parecer que el cheque valía
+    # menos de lo que valía.
+    valor_neto = (
+        cheque.monto * (Decimal("100") - porcentaje) / Decimal("100")
+    ).quantize(Decimal("0.01"))
+    imputado = sum((i.imputado for i in r.imputaciones), Decimal("0.00"))
+    vuelto = (valor_neto - imputado).quantize(Decimal("0.01"))
+
     lines = [
         "✅ *Deuda pagada con cheque*",
         f"Le entregaste el cheque Nº {cheque.nro_cheque} a {r.acreedor} "
-        f"al {_fmt_num(porcentaje)}% — vale {_ars(neto)} netos",
+        f"al {_fmt_num(porcentaje)}% — vale {_ars(valor_neto)} netos",
         "",
         "*Se imputó a:*",
     ]
@@ -3448,8 +3464,29 @@ def _pagar_pasivo_con_cheque(
         lines.append("  🎉 No le debés más nada.")
     else:
         lines.append(f"  Le seguís debiendo: {_ars(r.saldo_restante)}")
+
+    modo = _vuelto_modo(data)
+    if vuelto > Decimal("0.00") and modo is not None:
+        lines.append("")
+        lines.append(
+            f"↩️ Sobraron {_ars(vuelto)}: "
+            + (
+                "se pagaron en efectivo."
+                if modo == "SALDAR_EFECTIVO"
+                else "quedan como deuda a favor del cliente del cheque."
+            )
+        )
     lines.append("")
-    lines.append("⚠️ No movió la caja: esa plata salió cuando compraste el cheque.")
+    # El vuelto en efectivo es lo único de esta operación que sale de la caja:
+    # decir "no movió la caja" cuando sí se movió es peor que no decir nada
+    # (§Caja paralela — la respuesta es el control inmediato del operador).
+    if vuelto > Decimal("0.00") and modo == "SALDAR_EFECTIVO":
+        lines.append(
+            "⚠️ El cheque no movió la caja —esa plata salió cuando lo compraste—, "
+            "pero el vuelto sí salió en efectivo."
+        )
+    else:
+        lines.append("⚠️ No movió la caja: esa plata salió cuando compraste el cheque.")
     return True, "\n".join(lines)
 
 
