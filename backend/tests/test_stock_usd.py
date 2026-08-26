@@ -244,3 +244,50 @@ def test_el_handler_del_bot_pregunta_en_vez_de_asumir() -> None:
     codigo = inspect.getsource(dispatcher._cobrar_deuda_cliente)
     assert "cotizacion_stock" in codigo
     assert "¿A cuánto tomás el dólar" in codigo
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Los lotes internos no son operaciones del operador
+# ══════════════════════════════════════════════════════════════════════
+#
+# `movimientos_efectivo` guarda dos cosas mezcladas: las compras y ventas de
+# divisas que carga el operador, y los lotes que el sistema se crea solo para
+# llevar el stock (la apertura, un ajuste de caja en USD, un cobro en dólares).
+# Los segundos NO se muestran ni se dejan deshacer como si fueran operaciones:
+# borrar uno deja los dólares en la caja y cero stock vendible, así que venderlos
+# falla con "no hay stock" teniendo los billetes — y nada avisa.
+#
+# Lo encontró la sesión de carga (§Sesión de carga, semilla 1): "borrá la última
+# operación de dólares" por el chat se llevaba el lote de apertura.
+
+def test_el_resolvedor_del_bot_ignora_los_lotes_internos() -> None:
+    """"La última operación de dólares" es la última que cargó el operador."""
+    import inspect
+
+    from app.services.whatsapp import dispatcher
+
+    fuente = inspect.getsource(dispatcher._resolver_para_anular)
+    rama = fuente.split('if tipo == "MOVIMIENTO":')[1].split("if tipo ==")[0]
+
+    assert "es_apertura.is_(False)" in rama, (
+        "sin esto, 'borrá la última operación de dólares' anula el lote de "
+        "apertura y el stock inicial del negocio desaparece en silencio"
+    )
+    assert "es_ajuste.is_(False)" in rama, (
+        "sin esto se lleva el lote de un ajuste en USD o de un cobro en dólares"
+    )
+
+
+def test_el_panel_no_lista_los_lotes_internos_como_divisas() -> None:
+    """Listarlos los haría pasar por compras que nunca ocurrieron.
+
+    Y no es solo cosmético: la fila trae los botones de editar y eliminar al
+    lado, así que desde ahí se puede borrar el stock de apertura.
+    """
+    import inspect
+
+    from app.services import movimientos
+
+    fuente = inspect.getsource(movimientos.list_movimientos)
+    assert "es_ajuste.is_(False)" in fuente
+    assert "es_apertura.is_(False)" in fuente

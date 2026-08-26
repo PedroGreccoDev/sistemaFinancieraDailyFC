@@ -1234,9 +1234,24 @@ def _resolver_para_anular(db: Session, tipo: str, identificador: str):
         return "gasto", gasto
 
     if tipo == "MOVIMIENTO":
+        # "La última operación de dólares" es la última que **cargó el operador**,
+        # no el último renglón de la tabla. Ahí adentro conviven las compras y
+        # ventas de divisas con los lotes que el sistema se crea solo para llevar
+        # el stock: el de la apertura, los de un ajuste de caja en USD, los de un
+        # cobro en dólares (§Stock de dólares).
+        #
+        # Sin excluirlos, "borrá la última operación de dólares" se llevaba el
+        # **lote de apertura**: quedaban los dólares en la caja y cero stock
+        # vendible, así que venderlos fallaba con "no hay stock" teniendo los
+        # billetes — y sin que nada avisara. Lo encontró la sesión de carga
+        # (semilla 1, §Sesión de carga); `_consulta_divisas` ya filtraba así.
         mov = db.scalars(
             select(MovimientoEfectivo)
-            .where(MovimientoEfectivo.anulado_at.is_(None))
+            .where(
+                MovimientoEfectivo.anulado_at.is_(None),
+                MovimientoEfectivo.es_apertura.is_(False),
+                MovimientoEfectivo.es_ajuste.is_(False),
+            )
             .order_by(MovimientoEfectivo.created_at.desc())
             .limit(1)
         ).first()

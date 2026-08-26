@@ -232,12 +232,19 @@ def list_movimientos(db: Session) -> list[MovimientoEfectivo]:
     # Los lotes creados por un ajuste manual de caja aportan stock al FIFO pero no
     # son operaciones de divisas: mostrarlos acá los haría pasar por compras que
     # nunca ocurrieron. El ajuste ya se ve como ajuste (§Ajustes de caja).
+    #
+    # **El de la apertura es el mismo caso** y quedó afuera del filtro cuando se
+    # agregó (migración `0019`, posterior a este código): el stock con el que
+    # arrancó el negocio figuraba en Movimientos como una compra de divisas, con
+    # sus botones de editar y eliminar al lado. Borrarlo deja los dólares de
+    # apertura en la caja sin stock vendible.
     return list(
         db.scalars(
             select(MovimientoEfectivo)
             .where(
                 MovimientoEfectivo.anulado_at.is_(None),
                 MovimientoEfectivo.es_ajuste.is_(False),
+                MovimientoEfectivo.es_apertura.is_(False),
             )
             .order_by(MovimientoEfectivo.created_at.desc())
         )
