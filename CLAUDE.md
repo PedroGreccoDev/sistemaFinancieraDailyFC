@@ -1495,17 +1495,26 @@ que sería un loop infinito).
     volver a dictar seis cobros porque uno ya estaba marcado. Cada operación commitea por
     separado, que es lo que hace posible ese comportamiento. **El que falla se nombra siempre**:
     un cheque que no entró y no se informa es indistinguible de uno que entró.
-  - **El alta hereda igual que los otros cuatro, pero el `monto_abonado` no siempre**
+  - **El alta hereda igual que los otros cuatro, y el pago del fajo se imputa FIFO**
     _(2026-08-26)_. `REGISTRAR_CHEQUE` era el único de los cinco sin `heredar`: "estos cuatro
     del Nación al 8%" perdía el banco —y **con `banco` NULL la unicidad `(banco, nro_cheque)`
     no bloquea nada**, así que el mismo cheque se cargaba dos veces y después `resolve_cheque`
-    no los podía distinguir—. El `monto_abonado` es distinto y **no se hereda sin más**: "le
-    pagué 500 mil" por un fajo de cuatro puede ser el total o el de cada uno, y copiarlo a
-    cada ítem sacaría de la caja cuatro veces esa plata. `_hereda_abonado()` lo baja solo
-    cuando no hay ambigüedad —**un solo cheque**, o **cero** con los que sean ("los compré
-    todos a deber")—; cualquier otro caso se pregunta. Sin nada de esto los cheques a deber
-    entran como **pagados enteros**: sale de la caja plata que no salió y no queda el pasivo
-    con el vendedor, que es el peor de los tres modos de falla porque no lo denuncia nada.
+    no los podía distinguir—.
+  - **`monto_abonado` no se copia a cada cheque: se reparte** (`_repartir_abonado`). "Le pagué
+    500 mil" por un fajo es el **total del fajo**, no el de cada uno; copiarlo sacaría de la
+    caja cuatro veces esa plata. Se imputa **de a un cheque, del primero al último** —el
+    primero entero, lo que sobra al siguiente, el resto a deber— que es la misma regla con la
+    que ya se imputan los pagos a un acreedor y los cobros a un cliente _(decisión del dueño,
+    2026-08-26: **FIFO y no preguntar**; una pregunta que se contesta siempre igual se termina
+    contestando sin leer, y era volver al callejón que se está sacando del bot)_. El reparto
+    **se informa cheque por cheque** en la respuesta: es el control inmediato del operador.
+    - **Abonar más que el neto de todo el fajo no se reparte: se rechaza el lote entero.** No
+      hay dónde imputar el sobrante y es un dedazo (un cero de más, o el fajo equivocado);
+      cargar igual dejaría en la caja un egreso que no se puede explicar.
+    - Un `monto_abonado` **por cheque** manda sobre el del fajo, como toda la herencia.
+    - Sin esto los cheques a deber entraban como **pagados enteros**: salía de la caja plata
+      que no salió y no se creaba el pasivo con el vendedor — el peor de los tres modos de
+      falla del alta, porque no lo denuncia nada.
 - **Los intents que NO llevan array frenan el lote, no cargan uno**
   (`_lote_no_soportado()`, red puesta 2026-08-26). Solo los seis de la lista cargan varias
   operaciones: los cinco de cheques y `REGISTRAR_GASTO` (`gastos`). En todos los demás, si

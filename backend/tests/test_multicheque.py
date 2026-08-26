@@ -7,8 +7,10 @@ para no obligar a repetir la foto entera por culpa de uno repetido.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from app.services.ia.claude import INTENTS, _SYSTEM_PROMPT
-from app.services.whatsapp.dispatcher import _hereda_abonado, _items_o_uno
+from app.services.whatsapp.dispatcher import _items_o_uno, _repartir_abonado
 
 
 # ── Normalización del payload ─────────────────────────────────────────
@@ -373,43 +375,79 @@ def test_lo_que_el_cheque_ya_dice_no_se_pisa() -> None:
     assert items[0]["porcentaje_compra"] == 10
 
 
+def _cheque(nro: str, monto: int, pct: int = 10) -> dict:
+    return {"nro_cheque": nro, "monto": monto, "porcentaje_compra": pct}
+
+
 def test_comprados_todos_a_deber_baja_el_cero() -> None:
-    """`monto_abonado: 0` es "los compré todos a deber" y no tiene ambigüedad de
-    reparto. Sin heredarlo, los cuatro entran como pagados enteros: sale de la
-    caja plata que no salió y no queda el pasivo con el vendedor."""
-    data = {"monto_abonado": 0, "cheques": [{"nro_cheque": "1"}, {"nro_cheque": "2"}]}
+    """`monto_abonado: 0` es "los compré todos a deber". Sin bajarlo, los cuatro
+    entran como pagados enteros: sale de la caja plata que no salió y no queda el
+    pasivo con el vendedor."""
+    data = {"monto_abonado": 0, "cheques": [_cheque("1", 100000), _cheque("2", 200000)]}
     items = _items_o_uno(data, "cheques")
-    _hereda_abonado(data, items)
+    _repartir_abonado(data, items)
     assert [i["monto_abonado"] for i in items] == [0, 0]
 
 
-def test_un_solo_cheque_hereda_el_abonado_cualquiera_sea() -> None:
-    """Con un cheque el monto es de ese cheque y de ninguno más."""
-    data = {"monto_abonado": 500000, "cheques": [{"nro_cheque": "1"}]}
+def test_un_solo_cheque_se_lleva_el_abonado_entero() -> None:
+    """Con un cheque el monto es de ese cheque y no hay nada que repartir."""
+    data = {"monto_abonado": 400000, "cheques": [_cheque("1", 1000000, 9)]}
     items = _items_o_uno(data, "cheques")
-    _hereda_abonado(data, items)
-    assert items[0]["monto_abonado"] == 500000
+    _repartir_abonado(data, items)
+    assert items[0]["monto_abonado"] == 400000
 
 
-def test_un_abonado_ambiguo_no_se_reparte() -> None:
-    """"Le pagué 500 mil" por un fajo de cuatro puede ser el total o el de cada
-    uno. Copiarlo a cada ítem sacaría de la caja cuatro veces esa plata."""
-    data = {"monto_abonado": 500000, "cheques": [{"nro_cheque": "1"}, {"nro_cheque": "2"}]}
+def test_el_pago_del_fajo_se_imputa_fifo() -> None:
+    """"Le pagué 500 mil" por un fajo es el TOTAL del fajo _(decisión del dueño,
+    2026-08-26)_: cubre el primer cheque entero, lo que sobra va al siguiente y el
+    resto queda a deber. Misma regla que los pagos a un acreedor."""
+    data = {
+        "monto_abonado": 500000,
+        "cheques": [_cheque("1", 400000), _cheque("2", 300000), _cheque("3", 200000)],
+    }
     items = _items_o_uno(data, "cheques")
-    _hereda_abonado(data, items)
-    assert all(i.get("monto_abonado") is None for i in items)
+    sobra = _repartir_abonado(data, items)
+    # netos: 360.000, 270.000, 180.000 → el primero entero, 140.000 al segundo, 0 al tercero
+    assert [i["monto_abonado"] for i in items] == [
+        Decimal("360000.00"), Decimal("140000.00"), Decimal("0.00")
+    ]
+    assert sobra == 0
+
+
+def test_abonar_de_mas_deja_sobrante_y_no_se_carga() -> None:
+    """Un cero de más al dictar: no hay dónde imputar el resto. `_registrar_cheque`
+    corta con el sobrante en la mano y no carga ninguno."""
+    data = {"monto_abonado": 5000000, "cheques": [_cheque("1", 100000), _cheque("2", 200000)]}
+    items = _items_o_uno(data, "cheques")
+    sobra = _repartir_abonado(data, items)
+    assert sobra == Decimal("4730000.00")   # 5.000.000 - (90.000 + 180.000)
 
 
 def test_el_abonado_del_cheque_manda_sobre_el_de_la_raiz() -> None:
-    data = {"monto_abonado": 0, "cheques": [{"nro_cheque": "1", "monto_abonado": 300}]}
+    """Un monto por cheque es más específico que el del fajo: no se pisa."""
+    data = {
+        "monto_abonado": 500000,
+        "cheques": [{"nro_cheque": "1", "monto": 100000, "porcentaje_compra": 10,
+                     "monto_abonado": 300}, _cheque("2", 200000)],
+    }
     items = _items_o_uno(data, "cheques")
-    _hereda_abonado(data, items)
+    _repartir_abonado(data, items)
     assert items[0]["monto_abonado"] == 300
 
 
 def test_sin_abonado_en_la_raiz_no_inventa_ninguno() -> None:
     """None sigue significando "se pagó todo", que es la compra normal."""
-    data = {"cheques": [{"nro_cheque": "1"}, {"nro_cheque": "2"}]}
+    data = {"cheques": [_cheque("1", 100000), _cheque("2", 200000)]}
     items = _items_o_uno(data, "cheques")
-    _hereda_abonado(data, items)
+    assert _repartir_abonado(data, items) is None
     assert all("monto_abonado" not in i for i in items)
+
+
+def test_un_cheque_incompleto_no_rompe_el_reparto() -> None:
+    """Al que le falta el monto lo rechaza `_registrar_un_cheque` con su mensaje;
+    el reparto lo saltea en vez de explotar y llevarse el lote entero."""
+    data = {"monto_abonado": 500000,
+            "cheques": [{"nro_cheque": "1"}, _cheque("2", 200000)]}
+    items = _items_o_uno(data, "cheques")
+    _repartir_abonado(data, items)
+    assert items[1]["monto_abonado"] == Decimal("180000.00")

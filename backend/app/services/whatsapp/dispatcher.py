@@ -272,29 +272,61 @@ def _items_o_uno(
     return [data]
 
 
-def _hereda_abonado(data: dict[str, Any], items: list[dict[str, Any]]) -> None:
-    """Baja el `monto_abonado` de la raíz a los ítems, cuando no es ambiguo.
+def _neto_de(item: dict[str, Any]) -> Decimal | None:
+    """El valor neto de un cheque del payload, o None si le faltan datos.
+
+    Devuelve None en vez de romper: el ítem incompleto lo rechaza después
+    `_registrar_un_cheque` con su mensaje, que nombra el campo que falta."""
+    try:
+        monto = _req_decimal(item, "monto")
+        pct = _req_decimal(item, "porcentaje_compra")
+    except (ValueError, KeyError):
+        return None
+    cien = Decimal("100")
+    return (monto * (cien - pct) / cien).quantize(Decimal("0.01"))
+
+
+def _repartir_abonado(data: dict[str, Any], items: list[dict[str, Any]]) -> Decimal | None:
+    """Reparte el `monto_abonado` dicho UNA vez para todo el fajo, de a un cheque.
 
     Sin esto, lo comprado a deber entra como pagado entero: sale de la caja plata
     que no salió y no queda el pasivo con el vendedor. Es el peor de los tres
     modos de falla del alta, porque no lo denuncia nada.
 
-    Baja en dos casos, los dos sin ambigüedad de reparto:
-      - **un solo cheque**: ese monto es de ese cheque y de ninguno más;
-      - **cero**, con cuantos cheques sea: es "los compré todos a deber", y cero
-        por cheque es cero en total.
+    **Se reparte FIFO, no se pregunta** _(decisión del dueño, 2026-08-26)_: el
+    primer cheque se cubre entero, lo que sobra va al siguiente y el resto queda a
+    deber. Es la misma regla con la que ya se imputan los pagos a un acreedor y
+    los cobros a un cliente —de lo más viejo a lo más nuevo—, así que el operador
+    no tiene que aprender nada nuevo. Preguntar "¿cuánto de cada uno?" era volver
+    al callejón que se está sacando del bot: una pregunta que se contesta siempre
+    igual termina contestándose sin leer.
 
-    Cualquier otro monto dicho una vez para varios cheques puede ser el total del
-    fajo o el de cada uno —"le pagué 500 mil" por cuatro—, y las dos lecturas
-    mueven la caja distinto: eso se pregunta (ver `_registrar_cheque`)."""
+    El reparto se informa cheque por cheque en la respuesta, que es el control
+    inmediato del operador: si el bot lo entendió al revés, el número lo delata.
+
+    Devuelve lo que sobró después de cubrir todos los cheques —dinero abonado de
+    más, que es un dedazo— o None si no había nada que repartir."""
     abonado = _opt_decimal(data, "monto_abonado")
     if abonado is None:
-        return
-    if abonado != 0 and len(items) > 1:
-        return
+        return None
+    # Un solo cheque: ese monto es de ese cheque y no hay nada que repartir.
+    if len(items) == 1:
+        if items[0].get("monto_abonado") is None:
+            items[0]["monto_abonado"] = data["monto_abonado"]
+        return None
+
+    restante = abonado
     for item in items:
-        if item.get("monto_abonado") is None:
-            item["monto_abonado"] = data["monto_abonado"]
+        if item.get("monto_abonado") is not None:
+            # El modelo ya dijo cuánto va en este cheque: manda lo específico.
+            continue
+        neto = _neto_de(item)
+        if neto is None:
+            continue
+        cubre = min(restante, neto) if restante > 0 else Decimal("0.00")
+        item["monto_abonado"] = cubre
+        restante -= cubre
+    return restante
 
 
 def _registrar_cheque(
@@ -317,9 +349,9 @@ def _registrar_cheque(
     # (banco, nro_cheque) no bloquea nada, así que el mismo cheque se puede cargar
     # dos veces y después `resolve_cheque` no los puede distinguir.
     #
-    # `monto_abonado` va aparte (`_hereda_abonado`): con varios cheques, "le pagué
-    # 500 mil" puede ser el total del fajo o el de cada uno, y copiarlo a cada ítem
-    # sacaría de la caja cuatro veces esa plata.
+    # `monto_abonado` va aparte (`_repartir_abonado`): "le pagué 500 mil" por un
+    # fajo es el total, así que se imputa FIFO —el primero entero, lo que sobra al
+    # siguiente— en vez de copiarse a cada ítem, que sacaría esa plata cuatro veces.
     items = _items_o_uno(
         data,
         "cheques",
@@ -328,24 +360,25 @@ def _registrar_cheque(
             "fecha_emision", "fecha_pago", "medio_pago",
         ),
     )
-    _hereda_abonado(data, items)
+    sobrante = _repartir_abonado(data, items)
 
     if len(items) == 1:
         return _registrar_un_cheque(db, items[0], msg_at, foto)
 
-    # Varios cheques y un solo monto abonado en la raíz: no se puede saber si son
-    # $500.000 en total o $500.000 por cheque, y las dos lecturas mueven la caja
-    # distinto. Se pregunta en vez de elegir (si se elige mal, sale de la caja
-    # plata que no salió y no queda el pasivo con el vendedor).
-    abonado_raiz = _opt_decimal(data, "monto_abonado")
-    if abonado_raiz is not None and abonado_raiz > 0 and all(
-        i.get("monto_abonado") is None for i in items
-    ):
+    # Abonó más de lo que valen todos los cheques juntos: no hay dónde imputar el
+    # resto y es un dedazo (un cero de más, o el fajo equivocado). No se carga
+    # nada — repartir igual dejaría en la caja un egreso que no se puede explicar.
+    if sobrante is not None and sobrante > 0:
+        abonado = _opt_decimal(data, "monto_abonado")
         return False, (
-            f"❓ Dijiste que abonaste {_ars(abonado_raiz)} por {len(items)} cheques, "
-            "y no sé si es el total del fajo o lo de cada uno.\n"
-            "No cargué ninguno. Decime cuánto pagaste de cada cheque."
+            f"‼️ Abonaste {_ars(abonado)} y los {len(items)} cheques valen "
+            f"{_ars(abonado - sobrante)} netos: sobran {_ars(sobrante)}.\n"
+            "No cargué ninguno. Revisá el monto o los cheques."
         )
+
+    # Con un pago repartido, cuánto le tocó a cada uno es el control inmediato del
+    # operador: si el bot lo entendió al revés, el número lo delata en la respuesta.
+    reparto_visible = _opt_decimal(data, "monto_abonado") is not None
 
     cargados: list[str] = []
     fallidos: list[str] = []
@@ -356,7 +389,15 @@ def _registrar_cheque(
             banco = f" — {item['banco']}" if item.get("banco") else ""
             monto = item.get("monto")
             monto_txt = f" · {_ars(Decimal(str(monto)))}" if monto is not None else ""
-            cargados.append(f"  • Nº {nro}{banco}{monto_txt}")
+            ab_txt = ""
+            ab = item.get("monto_abonado")
+            if reparto_visible and ab is not None:
+                ab_dec, neto_item = Decimal(str(ab)), _neto_de(item)
+                if neto_item is not None and ab_dec < neto_item:
+                    ab_txt = f" — abonado {_ars(ab_dec)}, a deber {_ars(neto_item - ab_dec)}"
+                else:
+                    ab_txt = f" — abonado {_ars(ab_dec)}"
+            cargados.append(f"  • Nº {nro}{banco}{monto_txt}{ab_txt}")
         except (ServiceError, ValueError) as exc:
             motivo = getattr(exc, "message", None) or str(exc)
             fallidos.append(f"  • Nº {item.get('nro_cheque', '?')}: {motivo}")
