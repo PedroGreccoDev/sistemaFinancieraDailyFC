@@ -19,6 +19,7 @@ from app.services.whatsapp import client as wa_client
 from app.services.whatsapp import confirmacion as wa_confirmacion
 from app.services.whatsapp import dispatcher as wa_dispatcher
 from app.services.whatsapp import parser as wa_parser
+from app.services.whatsapp import procesados
 from app.services.whatsapp import session as wa_session
 
 logger = logging.getLogger(__name__)
@@ -154,7 +155,17 @@ async def recibir_mensaje(request: Request, background_tasks: BackgroundTasks) -
         logger.warning("Mensaje de número no autorizado: %s", msg.phone)
         return JSONResponse(content={"ok": True})
 
-    # ── 3. Encolar procesamiento y responder 200 de inmediato ────────────────
+    # ── 3. Descartar lo que ya se atendió ────────────────────────────────────
+    # WAHA reintenta el webhook que no le contesta a tiempo, y una config con el
+    # webhook duplicado entrega cada mensaje dos veces. Sin esto, las dos
+    # entregas son indistinguibles de dos pedidos idénticos y la operación se
+    # carga dos veces. Va DESPUÉS del filtro de operador para no llenar el
+    # registro con mensajes de números que ni siquiera se procesan.
+    if procesados.ya_procesado(msg.message_id):
+        logger.info("Mensaje repetido de %s (id=%s) — descartado", msg.phone, msg.message_id)
+        return JSONResponse(content={"ok": True})
+
+    # ── 4. Encolar procesamiento y responder 200 de inmediato ────────────────
     background_tasks.add_task(_procesar_mensaje_safe, msg, settings)
     return JSONResponse(content={"ok": True})
 
