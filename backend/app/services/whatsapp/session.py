@@ -57,7 +57,15 @@ def set_pending_intent(phone: str, intent: Any) -> None:
 
 
 def get_pending_intent(phone: str) -> Any:
-    """Devuelve el intent pendiente de confirmación, o None si no hay."""
+    """Devuelve el intent pendiente de confirmación, o None si no hay.
+
+    **Purga primero, igual que `get_history`.** El webhook consulta lo pendiente
+    ANTES que el historial, así que sin esta purga una sesión vencida devolvía el
+    intent viejo aunque su historial ya se hubiera ido: el primer mensaje de la
+    mañana se leía como respuesta a la pregunta de ayer a la tarde, y un
+    veredicto `confirm` **ejecutaba una operación del día anterior**.
+    """
+    _purge_expired()
     session = _sessions.get(phone)
     return session.pending_intent if session is not None else None
 
@@ -79,7 +87,12 @@ def set_pending_foto(phone: str, foto: tuple[bytes, str] | None) -> None:
 
 
 def get_pending_foto(phone: str) -> tuple[bytes, str] | None:
-    """Devuelve la foto del intent pendiente, o None si no hay."""
+    """Devuelve la foto del intent pendiente, o None si no hay.
+
+    Purga por el mismo motivo que `get_pending_intent`: la foto y el intent son
+    las dos mitades de lo pendiente y tienen que vencer juntas.
+    """
+    _purge_expired()
     session = _sessions.get(phone)
     return session.pending_foto if session is not None else None
 

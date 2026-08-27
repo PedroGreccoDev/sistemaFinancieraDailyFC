@@ -17,6 +17,7 @@ registros en memoria.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -289,3 +290,44 @@ def test_dolares_se_miden_con_su_propio_umbral(banco, monkeypatch) -> None:
 
     assert banco.ejecutados == [], "900 USD supera el umbral en dólares"
     assert "¿Confirmás?" in banco.enviados[0]
+
+
+# ── Lo pendiente no sobrevive la noche ─────────────────────────────────
+
+def test_lo_pendiente_de_ayer_no_confirma_el_mensaje_de_la_manana(banco, monkeypatch) -> None:
+    """El primer mensaje del día es el único que siempre llega con la sesión vencida.
+
+    Bug real: `get_pending_intent` leía `_sessions` sin purgar, así que una
+    operación que quedó esperando "dale" ayer a la tarde seguía viva a la mañana
+    siguiente — el historial ya se había ido, pero ella no. El mensaje nuevo se
+    clasificaba como respuesta a esa pregunta y un veredicto `confirm` **cargaba
+    la operación del día anterior**, que el operador nunca confirmó.
+    """
+    ayer = _con_pendiente()
+    # La sesión quedó inactiva desde ayer a la tarde.
+    wa_session._sessions[TELEFONO].last_active = datetime.now(UTC) - timedelta(hours=14)
+
+    # El clasificador diría "confirm" — es justo el caso que no puede ejecutar nada.
+    hoy = IntentResult(
+        intent="REGISTRAR_GASTO",
+        data={"monto": 30_000, "concepto": "nafta"},
+        confirmacion_requerida=False,
+        respuesta_usuario="Anoté la nafta",
+    )
+    _responde(monkeypatch, veredicto="confirm", intent=hoy)
+
+    _procesar("buen día, cargá la nafta 30 mil")
+
+    assert ayer not in banco.ejecutados, "lo de ayer no se confirmó nunca"
+    assert banco.ejecutados == [hoy], "y el mensaje de hoy se procesa como lo que es"
+
+
+def test_lo_pendiente_sigue_vivo_dentro_de_la_ventana(banco, monkeypatch) -> None:
+    """El fix no puede comerse el caso normal: contestar un rato después sigue valiendo."""
+    pendiente = _con_pendiente()
+    wa_session._sessions[TELEFONO].last_active = datetime.now(UTC) - timedelta(minutes=5)
+    _responde(monkeypatch, veredicto="confirm", intent=IntentResult())
+
+    _procesar("dale")
+
+    assert banco.ejecutados == [pendiente]
