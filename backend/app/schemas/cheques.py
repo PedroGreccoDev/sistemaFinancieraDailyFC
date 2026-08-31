@@ -6,18 +6,24 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.db.models import ChequeEstado, MedioPago
+from app.db.models import ChequeEstado, ChequeTipo, MedioPago
 from app.schemas.fiados import FiadoRead
 
 
 class ChequeCreate(BaseModel):
-    nro_cheque: str = Field(min_length=1, max_length=64)
+    # Opcional: el comprobante de emisión de un e-cheq no trae número (§E-cheq).
+    # Se carga sin él y se completa después; el bot avisa cuando falta.
+    nro_cheque: str | None = Field(default=None, min_length=1, max_length=64)
     banco: str | None = Field(default=None, max_length=120)
     monto: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
     fecha_emision: date | None = None
     fecha_pago: date | None = None
     porcentaje_compra: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
     cliente_origen_id: UUID | None = None
+    # Papel o e-cheq. Etiqueta: entra a la misma cartera y suma al mismo total.
+    # Default PAPEL porque es el caso normal y porque así ninguna carga existente
+    # —ni un cliente viejo de la API— cambia de significado al agregarse el campo.
+    tipo: ChequeTipo = ChequeTipo.PAPEL
     # Pesos efectivamente abonados por el cheque. None = se pagó todo, la operación
     # normal. Si es menor al valor neto (`monto × (1 − %compra)`), la diferencia
     # queda a deber: no sale de la caja y genera el pasivo con quien lo vendió
@@ -84,6 +90,9 @@ class ChequeUpdate(BaseModel):
     )
     cliente_origen_id: UUID | None = None
     cliente_destino_id: UUID | None = None
+    # Editable en cualquier estado no terminal: el tipo es una etiqueta y no mueve
+    # plata, así que corregir un e-cheq cargado como papel no recalcula nada.
+    tipo: ChequeTipo | None = None
 
 
 class ChequeManualTransition(BaseModel):
@@ -121,6 +130,7 @@ class ChequeRead(BaseModel):
     porcentaje_venta: Decimal | None
     ganancia: Decimal
     estado: ChequeEstado
+    tipo: ChequeTipo
     ultimo_evento_manual_at: datetime | None
     ultimo_operador_id: str | None
     ultimo_motivo_manual: str | None

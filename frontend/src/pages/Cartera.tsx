@@ -2,13 +2,13 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getChequeCartera, getCheques, chequeFotoUrl, editarCheque, crearCheque } from '../api/cheques'
 import { getClientes } from '../api/clientes'
-import { fmtARS, fmtDate, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
+import { fmtARS, fmtDate, fmtNroCheque, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
 import { btnBordered, btnSolid } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconRefresh, IconCamera } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
 import ChequeFotoModal from '../components/ChequeFotoModal'
-import type { Cheque, MedioPago } from '../types'
+import type { Cheque, ChequeTipo, MedioPago } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
 import DateRangePicker from '../components/DateRangePicker'
 import ModalEliminar from '../components/ModalEliminar'
@@ -30,6 +30,7 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
   const [fechaEmision, setFechaEmision] = useState('')
   const [fechaPago, setFechaPago] = useState('')
   const [clienteOrigenId, setClienteOrigenId] = useState('')
+  const [tipo, setTipo] = useState<ChequeTipo>('PAPEL')
   const [aDeber, setADeber] = useState(false)
   const [montoAbonado, setMontoAbonado] = useState('')
   // Por dónde pagaste el cheque. Solo importa si algo se abonó: una compra
@@ -58,7 +59,7 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
     setLoading(true)
     try {
       await crearCheque({
-        nro_cheque: nroCheque.trim(),
+        nro_cheque: nroCheque.trim() || null,
         banco: banco.trim() || null,
         monto: montoNum,
         porcentaje_compra: compraNum,
@@ -66,10 +67,12 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
         fecha_pago: fechaPago || null,
         cliente_origen_id: clienteOrigenId || null,
         medio_pago: medioPago,
+        tipo,
         // Sin la marca no viaja el campo: el backend lo lee como compra pagada.
         ...(aDeber ? { monto_abonado: abonadoNum } : {}),
       })
-      toast('success', aDeber ? 'Cheque cargado en cartera (queda a deber)' : 'Cheque cargado en cartera')
+      const nombre = tipo === 'ELECTRONICO' ? 'E-cheq' : 'Cheque'
+      toast('success', aDeber ? `${nombre} cargado en cartera (queda a deber)` : `${nombre} cargado en cartera`)
       onSuccess()
     } catch (err) { setError((err as Error).message) }
     finally { setLoading(false) }
@@ -84,8 +87,26 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-            <div><label style={LABEL_STYLE}>Nº de cheque</label><input type="text" value={nroCheque} onChange={(e) => setNroCheque(e.target.value)} required autoFocus style={INPUT_STYLE} /></div>
+            {/* Obligatorio en papel —una lámina siempre lo tiene—, opcional en
+                e-cheq: el comprobante de emisión no lo trae. */}
+            <div><label style={LABEL_STYLE}>Nº de cheque {tipo === 'ELECTRONICO' && <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opc.)</span>}</label><input type="text" value={nroCheque} onChange={(e) => setNroCheque(e.target.value)} required={tipo === 'PAPEL'} autoFocus style={INPUT_STYLE} /></div>
             <div><label style={LABEL_STYLE}>Banco <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opc.)</span></label><input type="text" value={banco} onChange={(e) => setBanco(e.target.value)} style={INPUT_STYLE} /></div>
+          </div>
+          {/* Papel o e-cheq. Solo cambia la etiqueta: entra a la misma cartera y
+              sale la misma plata de la caja. */}
+          <div>
+            <label style={LABEL_STYLE}>Tipo</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+              {(['PAPEL', 'ELECTRONICO'] as ChequeTipo[]).map((t) => (
+                <button key={t} type="button" onClick={() => setTipo(t)}
+                  style={{ ...INPUT_STYLE, cursor: 'pointer', textAlign: 'center', fontWeight: tipo === t ? 700 : 400,
+                    color: tipo === t ? 'var(--text-1)' : 'rgba(100,116,139,0.7)',
+                    borderColor: tipo === t ? '#a78bfa55' : 'var(--bd-012)',
+                    background: tipo === t ? '#a78bfa14' : 'var(--bg)' }}>
+                  {t === 'PAPEL' ? 'Papel' : 'E-cheq'}
+                </button>
+              ))}
+            </div>
           </div>
           <div><label style={LABEL_STYLE}>Monto nominal</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required placeholder="0.00" style={INPUT_STYLE} /></div>
           <div><label style={LABEL_STYLE}>% compra</label><input type="number" step="0.0001" min="0" max="100" value={pctCompra} onChange={(e) => setPctCompra(e.target.value)} required placeholder="0" style={INPUT_STYLE} /></div>
@@ -146,7 +167,9 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
 
 function ModalEditarCheque({ cheque, onClose, onSuccess }: { cheque: Cheque; onClose: () => void; onSuccess: () => void }) {
   const tieneVenta = cheque.estado === 'VENDIDO' || cheque.estado === 'FIADO'
-  const [nroCheque, setNroCheque] = useState(cheque.nro_cheque)
+  // Puede venir vacío: un e-cheq cargado desde un comprobante de emisión no trae
+  // número. Este modal es justamente donde se lo completa.
+  const [nroCheque, setNroCheque] = useState(cheque.nro_cheque ?? '')
   const [banco, setBanco] = useState(cheque.banco ?? '')
   const [monto, setMonto] = useState(cheque.monto)
   const [pctCompra, setPctCompra] = useState(cheque.porcentaje_compra)
@@ -172,7 +195,7 @@ function ModalEditarCheque({ cheque, onClose, onSuccess }: { cheque: Cheque; onC
     setLoading(true)
     try {
       await editarCheque(cheque.id, {
-        nro_cheque: nroCheque.trim(),
+        nro_cheque: nroCheque.trim() || null,
         banco: banco.trim() || null,
         monto: montoNum,
         porcentaje_compra: compraNum,
@@ -193,11 +216,13 @@ function ModalEditarCheque({ cheque, onClose, onSuccess }: { cheque: Cheque; onC
       <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '420px', maxHeight: '92dvh', overflowY: 'auto' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)', position: 'sticky', top: 0, background: MODAL_BG, zIndex: 10 }}>
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Editar cheque</h2>
-          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>Nº {cheque.nro_cheque} · {cheque.estado.replace('_', ' ').toLowerCase()}</p>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{fmtNroCheque(cheque.nro_cheque)} · {cheque.estado.replace('_', ' ').toLowerCase()}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-            <div><label style={LABEL_STYLE}>Nº de cheque</label><input type="text" value={nroCheque} onChange={(e) => setNroCheque(e.target.value)} required style={INPUT_STYLE} /></div>
+            {/* Sin `required`: un e-cheq puede estar cargado sin número, y este es
+                el lugar donde se lo completa. Vacío se manda como null. */}
+            <div><label style={LABEL_STYLE}>Nº de cheque {!cheque.nro_cheque && <span style={{ fontWeight: 400, color: '#fbbf24' }}>(falta)</span>}</label><input type="text" value={nroCheque} onChange={(e) => setNroCheque(e.target.value)} style={INPUT_STYLE} /></div>
             <div><label style={LABEL_STYLE}>Banco <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opc.)</span></label><input type="text" value={banco} onChange={(e) => setBanco(e.target.value)} style={INPUT_STYLE} /></div>
           </div>
           <div><label style={LABEL_STYLE}>Monto nominal</label><input type="number" step="0.01" min="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} required style={INPUT_STYLE} /></div>
@@ -271,6 +296,28 @@ function diasBadge(dias: number | null) {
 
 function totalCartera(cheques: Cheque[]): number {
   return cheques.reduce((acc, c) => acc + parseFloat(c.monto), 0)
+}
+
+/**
+ * Marca los e-cheq. Los de papel no llevan nada: son el caso normal y un badge en
+ * todas las filas no distingue nada. Va antes del número porque lo que responde es
+ * "¿qué estoy mirando?", no "¿qué le pasó a esto?".
+ */
+function TipoBadge({ tipo }: { tipo: ChequeTipo }) {
+  if (tipo !== 'ELECTRONICO') return null
+  const color = '#a78bfa'
+  return (
+    <span
+      title="E-cheq: cheque electrónico, sin lámina de papel. Va a la misma cartera que los demás."
+      style={{
+        fontFamily: FM, fontSize: '0.62rem', fontWeight: 700, color,
+        background: `${color}18`, border: `1px solid ${color}35`,
+        padding: '0px 5px', marginRight: '0.4rem', whiteSpace: 'nowrap',
+      }}
+    >
+      E-CHEQ
+    </span>
+  )
 }
 
 /**
@@ -428,7 +475,7 @@ export default function Cartera() {
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', minWidth: 0 }}>
                     {cheque.tiene_foto && <FotoThumb cheque={cheque} onOpen={setFotoCheque} size={60} />}
                     <div style={{ minWidth: 0 }}>
-                      <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{cheque.nro_cheque}<VueltaBadge vuelta={cheque.vuelta} /></p>
+                      <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}><TipoBadge tipo={cheque.tipo} />{fmtNroCheque(cheque.nro_cheque)}<VueltaBadge vuelta={cheque.vuelta} /></p>
                       <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>Pago {fmtDate(cheque.fecha_pago)}</p>
                     </div>
                   </div>
@@ -471,7 +518,7 @@ export default function Cartera() {
                       <td style={{ ...TD, width: '76px', padding: '0.5rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'center' }}><FotoThumb cheque={cheque} onOpen={setFotoCheque} /></div>
                       </td>
-                      <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{cheque.nro_cheque}<VueltaBadge vuelta={cheque.vuelta} /></td>
+                      <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}><TipoBadge tipo={cheque.tipo} />{fmtNroCheque(cheque.nro_cheque)}<VueltaBadge vuelta={cheque.vuelta} /></td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(cheque.monto)}</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.7)' }} className="hidden sm:table-cell">{parseFloat(cheque.porcentaje_compra).toFixed(2)}%</td>
                       <td style={{ ...TD, textAlign: 'center', color: 'rgba(148,163,184,0.7)' }}>{fmtDate(cheque.fecha_pago)}</td>
@@ -547,7 +594,7 @@ export default function Cartera() {
               return (
                 <div key={c.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{c.nro_cheque}<VueltaBadge vuelta={c.vuelta} /></p>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}><TipoBadge tipo={c.tipo} />{fmtNroCheque(c.nro_cheque)}<VueltaBadge vuelta={c.vuelta} /></p>
                     <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>
                       {fmtARS(c.monto)} · {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
                     </p>
@@ -589,7 +636,7 @@ export default function Cartera() {
                     <tr key={c.id}
                       onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
-                      <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{c.nro_cheque}<VueltaBadge vuelta={c.vuelta} /></td>
+                      <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}><TipoBadge tipo={c.tipo} />{fmtNroCheque(c.nro_cheque)}<VueltaBadge vuelta={c.vuelta} /></td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(c.monto)}</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">{parseFloat(c.porcentaje_compra).toFixed(2)}%</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">

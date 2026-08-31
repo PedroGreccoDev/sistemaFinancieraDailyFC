@@ -15,6 +15,7 @@ from app.db.models import (
     CajaTipo,
     Cheque,
     ChequeEstado,
+    ChequeTipo,
     Cliente,
     Compensacion,
     Cuota,
@@ -358,6 +359,9 @@ def _registrar_cheque(
         heredar=(
             "banco", "porcentaje_compra", "cliente_nombre",
             "fecha_emision", "fecha_pago", "medio_pago",
+            # "me mandaron 4 echeqs" dice el tipo una sola vez, arriba: sin
+            # heredarlo, los 4 entrarían como papel.
+            "tipo",
         ),
     )
     sobrante = _repartir_abonado(data, items)
@@ -422,7 +426,10 @@ def _registrar_un_cheque(
     msg_at: datetime | None = None,
     foto: tuple[bytes, str] | None = None,
 ) -> DispatchResult:
-    nro = _req_str(data, "nro_cheque")
+    # El número NO es obligatorio para dar de alta: el comprobante de emisión de un
+    # e-cheq no lo trae y el operador no elige qué le reenvía el cliente (§E-cheq).
+    # Se carga con el resto de los datos —que es lo que mueve la plata— y se avisa.
+    nro = (str(data["nro_cheque"]).strip() or None) if data.get("nro_cheque") else None
     banco = (str(data["banco"]).strip() or None) if data.get("banco") else None
     monto = _req_decimal(data, "monto")
     pct_compra = _req_decimal(data, "porcentaje_compra")
@@ -448,15 +455,18 @@ def _registrar_un_cheque(
         cliente_origen_id=cliente_id,
         monto_abonado=monto_abonado,
         medio_pago=_medio(data),
+        tipo=_tipo_cheque(data),
     )
     foto_bytes, foto_mime = foto if foto else (None, None)
     cheque = svc_cheques.create_cheque(
         db, payload, created_at=msg_at, foto=foto_bytes, foto_mime=foto_mime
     )
 
+    es_echeq = cheque.tipo == ChequeTipo.ELECTRONICO
+    banco_txt = f" — {cheque.banco}" if cheque.banco else ""
     lines = [
-        f"✅ *Cheque registrado en cartera*",
-        f"Nº {cheque.nro_cheque}" + (f" — {cheque.banco}" if cheque.banco else ""),
+        "✅ *E-cheq registrado en cartera*" if es_echeq else "✅ *Cheque registrado en cartera*",
+        f"Nº {cheque.nro_cheque}{banco_txt}" if cheque.nro_cheque else f"Sin número{banco_txt}",
         f"Monto: {_ars(cheque.monto)}",
         f"Compra: {_pct(cheque.porcentaje_compra)}%",
     ]
@@ -473,6 +483,14 @@ def _registrar_un_cheque(
 
     # Se registra igual (human in the loop); solo avisamos para que el operador revise.
     advertencias = _aviso_recompra(db, cheque) + _advertencias_cheque(fecha_emision, fecha_pago)
+    if cheque.nro_cheque is None:
+        # Este aviso tiene una consecuencia concreta, no es cosmético: sin número
+        # el cheque no se puede nombrar por chat, así que el operador tiene que
+        # saber en el momento que ese cheque va a necesitar el panel.
+        advertencias.append(
+            "⚠️ *Sin número*: lo cargué igual, pero no vas a poder nombrarlo por "
+            "acá para venderlo. Pasame el número cuando lo tengas y te lo completo."
+        )
     if cheque.banco is None:
         # Sin banco el cheque queda a medio identificar: el número solo no distingue
         # dos láminas de bancos distintos. Se carga igual —decisión del dueño: el bot
@@ -3387,6 +3405,32 @@ def _medio(data: dict[str, Any], clave: str = "medio_pago") -> MedioPago:
 def _texto_medio(medio: MedioPago) -> str:
     """Cómo se nombra la caja en la respuesta al operador."""
     return "efectivo" if medio == MedioPago.EFECTIVO else "transferencia"
+
+
+# Cómo nombra el operador un cheque electrónico. El modelo ya lo normaliza a
+# "ELECTRONICO" (contrato §1), pero mandarlo en castellano es el error probable,
+# y equivocarse acá etiquetaría mal sin que nadie lo note: no rompe nada, no
+# aparece en ningún total, y solo se descubre buscando el cheque meses después.
+_ECHEQ_SINONIMOS = frozenset(
+    {"ELECTRONICO", "ELECTRÓNICO", "ECHEQ", "E-CHEQ", "ECHEQUE", "E-CHEQUE", "DIGITAL"}
+)
+
+
+def _tipo_cheque(data: dict[str, Any]) -> ChequeTipo:
+    """Papel o e-cheq. Papel si el mensaje no dice otra cosa.
+
+    Mismo criterio que `_medio`: el caso normal se asume y la respuesta al operador
+    dice qué se entendió, así que un tipo que no se reconoce se carga como papel en
+    vez de frenar la operación entera por una palabra."""
+    valor = data.get("tipo")
+    if not valor:
+        return ChequeTipo.PAPEL
+    if str(valor).strip().upper() in _ECHEQ_SINONIMOS:
+        return ChequeTipo.ELECTRONICO
+    if str(valor).strip().upper() == ChequeTipo.PAPEL.value:
+        return ChequeTipo.PAPEL
+    logger.warning("tipo de cheque desconocido: %r. Se toma PAPEL.", valor)
+    return ChequeTipo.PAPEL
 
 
 def _pagar_pasivo(

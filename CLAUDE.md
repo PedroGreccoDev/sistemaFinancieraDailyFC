@@ -685,6 +685,56 @@ y el operador corrige si quiere. Misma línea que el resto del bot —avisa, no 
 La unicidad sí protege igual gracias al `COALESCE`; lo único que se rechaza es el
 duplicado, nunca la falta de banco.
 
+#### 1.c E-cheq — el cheque sin lámina _(régimen definido 2026-08-31)_
+
+El e-cheq es **una etiqueta, no un compartimento**: vive en la misma cartera que
+los de papel y suma al mismo total, porque es la misma plata. Columna `tipo`
+(`PAPEL` | `ELECTRONICO`, migración `0029`), con `PAPEL` de default —es lo que era
+todo hasta acá, así que ninguna carga vieja cambia de significado—.
+
+**Cómo entra.** El cliente reenvía la captura del comprobante del home banking. No
+es un cheque impreso: es una lista de campos con etiquetas, y suele llegar como
+foto de la pantalla de otro celular. Hay **dos formatos** y el operador no elige
+cuál le mandan:
+
+| Formato | Se reconoce por | Trae número |
+|---|---|---|
+| **Endoso** — el cheque pasa a ser tuyo | "Endosar Echeq", "Tipo de operación: Endoso" | Sí (`Nro ECHEQ`, `Número de cheque`) |
+| **Emisión** — alguien lo crea | "Tipo de eCheq: Pago diferido", "Cuenta a debitar" | **No** |
+
+**El número puede faltar, y se carga igual** (migración `0030`, mismo régimen que
+el banco): se avisa y entran el resto de los datos, que son los que mueven la
+plata. **Lo que se pierde:** un cheque sin número **no se puede nombrar por
+WhatsApp** —`resolve_cheque` busca por número—, así que se opera desde el panel o
+se le completa el número antes. El aviso del bot lo dice con esas palabras, y
+`resolve_cheque` menciona cuántos hay en cartera sin número cuando una búsqueda
+falla, para que el operador no crea que el cheque se perdió.
+
+**Por qué el índice único NO aplica COALESCE al número** (sí al banco): dos e-cheq
+sin número son cheques **distintos**, no el mismo dos veces. Sin número no hay con
+qué afirmar que son la misma lámina, así que no se comparan entre sí —`_mismo_papel`
+devuelve `false()` explícito—. El precio es que ahí no hay protección contra el
+duplicado, y por eso el bot avisa.
+
+**Las tres trampas del OCR** (todas en el contrato, §REGISTRAR_CHEQUE):
+
+1. **Las dos fechas.** Estas pantallas traen la fecha de la operación —etiquetada
+   "Fecha de ejecución", o directamente **con hora y sin etiqueta** arriba de
+   todo— y la fecha de pago. Confundirlas carga un cheque a 15 días cuando vence a
+   60, y le desarma la proyección de cartera al dueño. `fecha_pago` es **solo** la
+   etiquetada así; ante la duda, la más lejana en el futuro.
+2. **El beneficiario no es el cliente.** Es el **intermediario** a cuyo nombre
+   entra el cheque, nunca quien se lo vendió al negocio. Usarlo como
+   `cliente_nombre` crearía un cliente fantasma. El origen sale **solo** del
+   mensaje del operador, igual que con los de papel.
+3. **"echeq" no es un número.** Es la palabra que nombra el instrumento. Si no hay
+   número, va `null` —nunca la palabra—. Esto ya pasó: quedaron tres cheques cuyo
+   `nro_cheque` era literalmente `"echeq"`, con el número real perdido.
+
+Tampoco vienen nunca en el comprobante el **porcentaje de compra** (sale del
+mensaje del operador) ni el **banco** de forma confiable (solo si se ve el nombre
+de la entidad; no se deduce de los colores de la app).
+
 ### 2. Fiados _(módulo agregado 2026-06-09)_
 
 Cuando se **fía** un cheque se genera una **deuda abierta** del cliente, sin cuotas fijas.

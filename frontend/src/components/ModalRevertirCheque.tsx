@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { revertirCheque } from '../api/anulacion'
 import { useAuth } from '../auth/AuthContext'
-import { fmtARS } from '../lib/fmt'
+import { fmtARS, fmtNroCheque } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import type { Cheque } from '../types'
@@ -75,7 +75,7 @@ export default function ModalRevertirCheque({
           <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.75rem 1rem' }}>
             <p style={{ ...LABEL_STYLE, marginBottom: '0.35rem' }}>Cheque</p>
             <p style={{ fontFamily: FM, fontSize: '0.85rem', color: 'var(--text-1)', fontWeight: 600 }}>
-              Nº {cheque.nro_cheque}{cheque.banco ? ` — ${cheque.banco}` : ''}
+              {fmtNroCheque(cheque.nro_cheque)}{cheque.banco ? ` — ${cheque.banco}` : ''}
             </p>
             <p style={{ fontFamily: FM, fontSize: '0.75rem', color: 'rgba(100,116,139,0.75)', marginTop: '0.2rem' }}>
               {fmtARS(cheque.monto)} · hoy está {cheque.estado.replace('_', ' ')}

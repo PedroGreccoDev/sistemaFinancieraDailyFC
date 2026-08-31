@@ -1,4 +1,8 @@
 export type ChequeEstado = 'EN_CARTERA' | 'VENDIDO' | 'FIADO' | 'COBRADO' | 'RECHAZADO'
+
+// Lámina de papel o e-cheq del home banking. Es una etiqueta: las dos viven en la
+// misma cartera y suman al mismo total, porque es la misma plata.
+export type ChequeTipo = 'PAPEL' | 'ELECTRONICO'
 export type CuotaEstado = 'PENDIENTE' | 'COBRADA' | 'EN_MORA'
 export type PrestamoEstado = 'ACTIVO' | 'CANCELADO' | 'EN_MORA'
 export type Moneda = 'ARS' | 'USD'
@@ -9,7 +13,9 @@ export type DeudaSimpleEstado = 'ABIERTA' | 'CANCELADA'
 
 export interface Cheque {
   id: string
-  nro_cheque: string
+  // Opcional: el comprobante de emisión de un e-cheq no trae número. Se carga sin
+  // él y se completa después; un cheque sin número no se puede nombrar por el bot.
+  nro_cheque: string | null
   banco: string | null
   monto: string
   fecha_emision: string | null
@@ -21,6 +27,7 @@ export interface Cheque {
   porcentaje_venta: string | null
   ganancia: string
   estado: ChequeEstado
+  tipo: ChequeTipo
   ultimo_evento_manual_at: string | null
   ultimo_operador_id: string | null
   ultimo_motivo_manual: string | null

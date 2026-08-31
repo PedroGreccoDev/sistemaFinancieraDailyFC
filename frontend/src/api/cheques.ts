@@ -1,5 +1,5 @@
 import { apiFetch, API_BASE } from './client'
-import type { Cheque, Fiado, MedioPago } from '../types'
+import type { Cheque, ChequeTipo, Fiado, MedioPago } from '../types'
 
 /** URL directa a la foto del cheque (misma-origen: sirve para <img>, descarga y compartir). */
 export const chequeFotoUrl = (cheque_id: string): string =>
@@ -14,7 +14,8 @@ export const getCheques = (estado?: string): Promise<Cheque[]> =>
 // Alta manual de un cheque desde el panel (equivale al REGISTRAR_CHEQUE del bot).
 // El cheque entra siempre EN_CARTERA y su compra descuenta la caja ARS en el backend.
 export interface ChequeCreatePayload {
-  nro_cheque: string
+  /** Opcional: el comprobante de emisión de un e-cheq no trae número. */
+  nro_cheque?: string | null
   banco?: string | null
   monto: number
   fecha_emision?: string | null
@@ -23,6 +24,8 @@ export interface ChequeCreatePayload {
   cliente_origen_id?: string | null
   /** Por cuál de las dos cajas salió lo abonado. Efectivo si no se manda. */
   medio_pago?: MedioPago
+  /** Papel o e-cheq. Papel si no se manda: es el caso normal. */
+  tipo?: ChequeTipo
   // Cuánto se abonó por el cheque. Omitir = se pagó todo (la compra normal).
   // Menos que el valor neto deja el resto a deber: no descuenta la caja y genera
   // la deuda con el vendedor, que pasa a ser obligatorio (§Comprar sin abonar).
@@ -55,7 +58,7 @@ export const fiarCheque = (cheque_id: string, payload: FiarChequePayload): Promi
 
 // Corrección de la carga de un cheque. Solo se mandan los campos a cambiar.
 export interface ChequeUpdatePayload {
-  nro_cheque?: string
+  nro_cheque?: string | null
   banco?: string | null
   monto?: number
   fecha_emision?: string | null

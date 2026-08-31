@@ -41,6 +41,10 @@ _CL = ["id", "nombre", "cuit", "telefono", "created_at", "updated_at"]
 _CH = [
     "id", "nro_cheque", "banco", "monto", "fecha_emision", "fecha_pago",
     "porcentaje_compra", "porcentaje_venta", "ganancia", "estado",
+    # Papel o e-cheq. No mueve plata, pero sin él un backup restaurado devuelve
+    # todos los e-cheq como cheques de papel y esa distinción no se puede
+    # reconstruir de ningún otro campo.
+    "tipo",
     # Cuánto se abonó al comprarlo (§Comprar sin abonar). Sin este dato el import
     # devuelve un cheque comprado a deber como pagado, y al editarlo el resync le
     # asienta el egreso entero que nunca salió de la caja.

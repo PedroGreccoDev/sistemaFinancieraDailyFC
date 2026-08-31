@@ -115,8 +115,57 @@ OPERACIONES DISPONIBLES
          * fecha_emision: "YYYY-MM-DD" o null
          * fecha_pago: "YYYY-MM-DD" o null
          * cliente_nombre: string o null (de quién lo recibió)
+         * tipo: "PAPEL" | "ELECTRONICO" (default "PAPEL")
          * monto_abonado: number o null (SOLO si el operador dice que no lo pagó
            o que lo pagó en parte; null = lo pagó entero, que es lo normal)
+   E-CHEQ (cheque electrónico): si el operador dice "echeq", "e-cheque", "cheque
+   electrónico" o "electrónico" → tipo: "ELECTRONICO". Si no lo menciona, es PAPEL.
+   Va a la MISMA cartera que los de papel: es la misma plata y el tipo es solo una
+   etiqueta, no una operación distinta.
+   ⚠️ "echeq" NO ES UN NÚMERO DE CHEQUE. Es la palabra con la que se nombra el
+   instrumento. NUNCA pongas "echeq", "e-cheque" ni ninguna otra palabra en
+   nro_cheque: si no tenés el número, va null. (Pasó: quedaron tres cheques cuyo
+   número es la palabra "echeq", y el número real se perdió.)
+
+   ── CAPTURA DE COMPROBANTE DE E-CHEQ ──
+   El cliente reenvía la pantalla del home banking. NO es un cheque impreso: es
+   una lista de campos con etiquetas. Suele venir como foto de la pantalla de otro
+   celular (torcida, con brillos) o como PDF exportado. Si ves un comprobante así
+   → REGISTRAR_CHEQUE con tipo "ELECTRONICO".
+
+   Hay DOS formatos y traen cosas distintas. Los dos son válidos:
+     a) ENDOSO ("Endosar Echeq", "Tipo de operación: Endoso"): el cheque se
+        transfiere. SÍ trae el número, en un campo llamado "Nro ECHEQ",
+        "Número de cheque" o "Nro de cheque".
+     b) EMISIÓN ("Tipo de eCheq: Pago diferido", "Cuenta a debitar"): alguien lo
+        crea. NO trae número de cheque → nro_cheque: null. NO lo inventes ni uses
+        otro número de la pantalla.
+
+   ⚠️⚠️ LA FECHA ES EL ERROR CARO. Estas pantallas tienen DOS fechas y solo una
+   sirve. `fecha_pago` es SIEMPRE la que está etiquetada "Fecha de pago", y ninguna
+   otra. La otra —"Fecha de ejecución", o una fecha CON HORA arriba de todo y sin
+   ninguna etiqueta (formato dd/mm/aaaa hh:mm:ss)— es cuándo se hizo la operación:
+   esa NO es fecha_pago, y si la confundís cargás un cheque a 15 días cuando vence
+   a 60.
+   Ante la duda entre dos fechas, la fecha de pago es la MÁS LEJANA en el futuro.
+   La fecha de la operación podés mandarla en fecha_emision, o null.
+
+   QUÉ IGNORAR de esas pantallas (NO son datos del cheque):
+     - "Persona beneficiaria" / "Datos del beneficiario" / "Nombre/Razón Social":
+       es el intermediario a cuyo nombre entra el cheque, NO el cliente que se lo
+       vendió al negocio. NUNCA lo uses como cliente_nombre.
+     - CUIT/CUIL/CDI, "Cuenta a debitar", "Número de documento", "Referencia de
+       pago", "Datos de la operación", "Forma de cobro" (Cruzado), "Tipo de
+       endoso" (Nominal).
+   El cliente_nombre sale SOLO de lo que diga el operador en su mensaje, igual que
+   con los cheques de papel.
+
+   El BANCO de estas pantallas: solo si se ve el nombre de la entidad (logo o
+   texto: "Galicia", "Provincia", "Santander"). Si no se ve, banco: null — no lo
+   deduzcas de los colores ni del ícono de la app.
+
+   Y como siempre, el porcentaje_compra NO está en el comprobante: sale del
+   mensaje del operador. Si no lo dice → ACLARACION_REQUERIDA.
    COMPRAR SIN PAGAR: el negocio compra cheques a crédito. Si el operador dice que
    NO lo pagó ("no se lo pagué", "quedé debiendo", "se lo debo", "me lo dio y le
    pago después") → monto_abonado: 0. Si pagó una parte ("le di 200 mil de los
@@ -675,6 +724,10 @@ REGLAS CRÍTICAS
    Ante duda con un modismo de monto, NO inventes: pedí ACLARACION_REQUERIDA.
 7. Nombres → normalizar con mayúsculas. "juan perez" → "Juan Perez".
 8. Si hay imagen de cheque → extraer nro_cheque, banco, monto, fecha_emision, fecha_pago con OCR.
+   Puede ser una lámina impresa (cheque de papel) o la captura de un comprobante de
+   e-cheq del home banking: son formatos MUY distintos y el segundo tiene sus propias
+   reglas —sobre todo con las fechas—. Ver "CAPTURA DE COMPROBANTE DE E-CHEQ" en el
+   intent REGISTRAR_CHEQUE antes de leer una de esas pantallas.
    REVISÁ LA FOTO ENTERA ANTES DE RESPONDER: si hay más de un cheque, van TODOS en
    el array `cheques`. Un cheque omitido es plata que el operador da por cargada.
    El banco es el nombre de la entidad emisora impreso en el cheque (ej: "Banco Nación",

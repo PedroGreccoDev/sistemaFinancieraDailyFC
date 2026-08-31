@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import false as sa_false, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -14,6 +14,7 @@ from app.db.models import (
     Cliente,
     Cheque,
     ChequeEstado,
+    ChequeTipo,
     Fiado,
     FiadoEstado,
     InvalidChequeStateTransition,
@@ -39,6 +40,21 @@ from app.services.exceptions import (
 )
 
 _CIEN = Decimal("100")
+
+
+def describir(cheque: Cheque) -> str:
+    """Cómo se nombra un cheque en un texto para el operador (caja, avisos, errores).
+
+    Sale de un solo lado porque el número puede faltar —un e-cheq cargado desde un
+    comprobante de emisión no lo trae (§E-cheq)—, y sin esto cada call site
+    escribiría "cheque Nº None" a su manera. Cuando no hay número se lo nombra por
+    lo que sí tiene, que es lo que le permite al operador reconocerlo en el panel.
+    """
+    banco_txt = f" — {cheque.banco}" if cheque.banco else ""
+    clase = "e-cheq" if cheque.tipo == ChequeTipo.ELECTRONICO else "cheque"
+    if cheque.nro_cheque:
+        return f"{clase} Nº {cheque.nro_cheque}{banco_txt}"
+    return f"{clase} sin número (${cheque.monto:,.2f}){banco_txt}"
 
 
 def _nombre_vendedor(db: Session, cliente_id: uuid.UUID | None) -> str:
@@ -88,8 +104,7 @@ def create_cheque(
         db.flush()
         # Comprar el cheque saca plata de la caja ARS: lo pagado = monto·(1−%compra).
         pagado = (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(Decimal("0.01"))
-        banco_txt = f" — {cheque.banco}" if cheque.banco else ""
-        detalle = f"Compra cheque Nº {cheque.nro_cheque}{banco_txt}"
+        detalle = f"Compra {describir(cheque)}"
         abonado, a_deber = svc_pasivos.repartir_compra(pagado, cheque.monto_abonado)
 
         if abonado > 0 and not cheque.es_carga_inicial:
@@ -124,13 +139,21 @@ def create_cheque(
         raise DatabaseWriteError("No se pudo crear el cheque.") from exc
 
 
-def _mismo_papel(nro_cheque: str, banco: str | None):
+def _mismo_papel(nro_cheque: str | None, banco: str | None):
     """Criterio de "es la misma lámina": mismo número y mismo banco.
 
     `banco` NULL se compara como cadena vacía, igual que el índice único
     (migración 0028): en Postgres NULL ≠ NULL, así que comparar la columna cruda
     dejaría fuera justo a los cheques sin banco —que son los que más necesitan
-    que alguien los mire—."""
+    que alguien los mire—.
+
+    El **número** no recibe ese trato, a propósito: dos cheques sin número son
+    cheques distintos, no el mismo dos veces (§0030). Sin número no hay con qué
+    afirmar que son la misma lámina, así que no se comparan entre sí."""
+    if not nro_cheque:
+        # `false()` en vez de una comparación con NULL: deja explícito que "sin
+        # número no matchea con nada", incluido otro sin número.
+        return (sa_false(),)
     return (
         Cheque.nro_cheque == nro_cheque,
         func.coalesce(Cheque.banco, "") == (banco or ""),
@@ -139,7 +162,7 @@ def _mismo_papel(nro_cheque: str, banco: str | None):
 
 def pasadas_anteriores(
     db: Session,
-    nro_cheque: str,
+    nro_cheque: str | None,
     banco: str | None,
     excluir_id: uuid.UUID | None = None,
 ) -> list[Cheque]:
@@ -162,7 +185,7 @@ def pasadas_anteriores(
     return list(db.scalars(query.order_by(Cheque.created_at)))
 
 
-def verificar_no_esta_en_cartera(db: Session, nro_cheque: str, banco: str | None) -> None:
+def verificar_no_esta_en_cartera(db: Session, nro_cheque: str | None, banco: str | None) -> None:
     """Corta si ese mismo papel YA está en cartera. Usado al recibir un cheque como pago.
 
     Cuando un cheque entra pagando una deuda no pasa por `create_cheque` (recibirlo
@@ -191,7 +214,7 @@ def verificar_no_esta_en_cartera(db: Session, nro_cheque: str, banco: str | None
     )
 
 
-def _msg_duplicado(db: Session, nro_cheque: str, banco: str | None) -> str:
+def _msg_duplicado(db: Session, nro_cheque: str | None, banco: str | None) -> str:
     """Mensaje informativo cuando choca la unicidad (banco, nro_cheque) en cartera.
 
     Desde la migración 0028 la unicidad solo rige entre los cheques EN CARTERA, así
@@ -267,6 +290,30 @@ def resolve_cheque(db: Session, nro: str, banco: str | None = None) -> Cheque:
             )
         )
     if not matches:
+        # Un e-cheq cargado desde un comprobante de emisión no tiene número, así
+        # que no hay forma de que aparezca en esta búsqueda (§0030). Si hay alguno
+        # en cartera, mencionarlo evita que el operador crea que se perdió: el
+        # cheque está, lo que falta es con qué nombrarlo.
+        sin_numero = list(
+            db.scalars(
+                select(Cheque).where(
+                    Cheque.nro_cheque.is_(None),
+                    Cheque.anulado_at.is_(None),
+                    Cheque.estado == ChequeEstado.EN_CARTERA,
+                )
+            )
+        )
+        if sin_numero:
+            cuantos = (
+                "hay 1 cheque en cartera sin número cargado"
+                if len(sin_numero) == 1
+                else f"hay {len(sin_numero)} cheques en cartera sin número cargado"
+            )
+            raise NotFoundError(
+                f"No encontré ningún cheque con el número '{nro}'. Ojo: {cuantos} "
+                "(e-cheq cargados desde un comprobante que no lo traía). Si es uno "
+                "de esos, completale el número desde el panel y volvé a intentar."
+            )
         raise NotFoundError(f"No encontré ningún cheque con el número '{nro}'.")
 
     if banco:
@@ -340,6 +387,13 @@ def _anotar_vuelta(db: Session, cheques: list[Cheque]) -> None:
     for cheque in cheques:
         cheque.vuelta = 1
 
+    # Los cheques sin número quedan siempre en vuelta 1: no se los puede agrupar
+    # con nada, porque sin número no hay con qué decir que son la misma lámina
+    # (§0030). Además un `IN (NULL, …)` no matchearía igual.
+    numeros = {c.nro_cheque for c in cheques if c.nro_cheque}
+    if not numeros:
+        return
+
     papel = func.coalesce(Cheque.banco, "")
     # Un número puede aparecer entre los repetidos por una recompra o porque son
     # dos láminas distintas de bancos distintos; agrupar por (papel, nro) separa
@@ -348,7 +402,7 @@ def _anotar_vuelta(db: Session, cheques: list[Cheque]) -> None:
         select(papel.label("papel"), Cheque.nro_cheque)
         .where(
             Cheque.anulado_at.is_(None),
-            Cheque.nro_cheque.in_({c.nro_cheque for c in cheques}),
+            Cheque.nro_cheque.in_(numeros),
         )
         .group_by(papel, Cheque.nro_cheque)
         .having(func.count() > 1)
@@ -546,6 +600,10 @@ def editar_cheque(db: Session, cheque_id: uuid.UUID, payload: ChequeUpdate) -> C
         cheque.fecha_pago = data["fecha_pago"]
     if "cliente_origen_id" in data:
         cheque.cliente_origen_id = data["cliente_origen_id"]
+    # El tipo es una etiqueta: no entra en ningún cálculo, así que corregir un
+    # e-cheq cargado como papel no dispara el resync de caja de más abajo.
+    if data.get("tipo") is not None:
+        cheque.tipo = data["tipo"]
     if tiene_venta and data.get("porcentaje_venta") is not None:
         cheque.porcentaje_venta = data["porcentaje_venta"]
     if tiene_venta and "cliente_destino_id" in data:

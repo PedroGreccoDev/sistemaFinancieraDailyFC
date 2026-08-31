@@ -50,3 +50,14 @@ export function monthStartISO(): string {
 export function yearStartISO(): string {
   return `${new Date().getFullYear()}-01-01`
 }
+
+/**
+ * Cómo se muestra el número de un cheque, que puede faltar.
+ *
+ * Un e-cheq cargado desde un comprobante de emisión no trae número: el
+ * comprobante simplemente no lo tiene. Se muestra "Sin número" en vez de un
+ * hueco, para que se lea como un dato que falta y no como un error de la tabla.
+ */
+export function fmtNroCheque(nro: string | null): string {
+  return nro || 'Sin número'
+}

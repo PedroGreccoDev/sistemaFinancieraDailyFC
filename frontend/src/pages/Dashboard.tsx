@@ -5,7 +5,7 @@ import { getFiados } from '../api/fiados'
 import { getPrestamos } from '../api/prestamos'
 import { getClientes } from '../api/clientes'
 import { getReporteCaja } from '../api/reportes'
-import { fmtARS, fmtMonto, fmtDate, daysUntil, monthStartISO, todayISO } from '../lib/fmt'
+import { fmtARS, fmtMonto, fmtDate, fmtNroCheque, daysUntil, monthStartISO, todayISO } from '../lib/fmt'
 import type { Cheque, Prestamo } from '../types'
 import { FinanceDashboardCard } from '../components/FinanceDashboardCard'
 import { SkeletonKpis, Skeleton } from '../components/Skeleton'
@@ -229,7 +229,7 @@ export default function Dashboard() {
   const proximos         = chequesPorVencer(cheques ?? [], 7)
 
   const actividad = [
-    ...(cheques  ?? []).map((c) => ({ tipo: 'cheque'   as const, id: c.id,          label: `Cheque ${c.nro_cheque}`,                           sub: fmtARS(c.monto),              date: c.created_at })),
+    ...(cheques  ?? []).map((c) => ({ tipo: 'cheque'   as const, id: c.id,          label: `Cheque ${fmtNroCheque(c.nro_cheque)}`,                           sub: fmtARS(c.monto),              date: c.created_at })),
     ...(prestamos ?? []).map((p) => ({ tipo: 'prestamo' as const, id: p.id,          label: `Préstamo — ${clienteMap.get(p.cliente_id) ?? '…'}`, sub: fmtMonto(p.credito, p.moneda), date: p.created_at })),
   ]
     .sort((a, b) => b.date.localeCompare(a.date))
@@ -360,7 +360,7 @@ export default function Dashboard() {
               return (
                 <RowItem
                   key={c.id}
-                  primary={c.nro_cheque}
+                  primary={fmtNroCheque(c.nro_cheque)}
                   secondary={dias === 0 ? 'Vence hoy' : `Vence en ${dias}d · ${fmtDate(c.fecha_pago)}`}
                   value={fmtARS(c.monto)}
                   valueColor="#fde047"

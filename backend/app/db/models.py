@@ -27,6 +27,23 @@ class ChequeEstado(str, enum.Enum):
     RECHAZADO  = "RECHAZADO"
 
 
+class ChequeTipo(str, enum.Enum):
+    """Si el cheque es una lámina de papel o un e-cheq del home banking.
+
+    Es una **etiqueta, no un compartimento** (decisión del dueño, 2026-08-31): las
+    dos clases viven en la misma cartera y suman al mismo total, porque es la misma
+    plata. Lo que cambia es cómo entra al sistema —el de papel por foto del cheque,
+    el electrónico por el comprobante de transferencia que reenvía el cliente— y
+    que un e-cheq no tiene lámina que presentar.
+
+    `PAPEL` es el default: es lo que era todo hasta acá y lo que sigue siendo el
+    caso normal, así que la carga vieja no cambia de significado.
+    """
+
+    PAPEL       = "PAPEL"
+    ELECTRONICO = "ELECTRONICO"
+
+
 class Moneda(str, enum.Enum):
     ARS = "ARS"
     USD = "USD"
@@ -290,7 +307,11 @@ class Cheque(AnulableMixin, Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    nro_cheque:        Mapped[str]           = mapped_column(sa.String(64), nullable=False, index=True)
+    # Opcional desde la 0030: el comprobante de EMISIÓN de un e-cheq no trae el
+    # número, y el operador no elige qué formato le reenvía el cliente. Se carga
+    # sin él y se completa después; el precio es que un cheque sin número no se
+    # puede nombrar por WhatsApp (`resolve_cheque` busca por número).
+    nro_cheque:        Mapped[str | None]    = mapped_column(sa.String(64), nullable=True, index=True)
     banco:             Mapped[str | None]    = mapped_column(sa.String(120), nullable=True)
     monto:             Mapped[Decimal]        = mapped_column(sa.Numeric(18, 2))
     fecha_emision:     Mapped[date | None]    = mapped_column(sa.Date(),        nullable=True)
@@ -306,6 +327,15 @@ class Cheque(AnulableMixin, Base):
     ganancia:          Mapped[Decimal]        = mapped_column(sa.Numeric(18, 2), default=Decimal("0.00"))
     estado:            Mapped[ChequeEstado]   = mapped_column(
         sa.Enum(ChequeEstado, name="cheque_estado", create_type=False), index=True
+    )
+    # Papel o e-cheq. Etiqueta: no separa carteras ni cambia un solo cálculo de
+    # caja. Sin índice a propósito —no se filtra por acá en ninguna consulta
+    # caliente y casi todo el padrón es PAPEL, así que no sería selectivo—.
+    tipo: Mapped[ChequeTipo] = mapped_column(
+        sa.Enum(ChequeTipo, name="cheque_tipo", create_type=False),
+        nullable=False,
+        server_default=ChequeTipo.PAPEL.value,
+        default=ChequeTipo.PAPEL,
     )
     ultimo_evento_manual_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     ultimo_operador_id:      Mapped[str | None]      = mapped_column(sa.String(80), nullable=True)
