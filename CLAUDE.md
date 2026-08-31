@@ -2076,6 +2076,43 @@ que sería un loop infinito).
 - **Convención:** mantené la lógica de negocio en funciones/métodos testeables sin BD; si una
   pieza nueva necesita una sesión, extraé la parte pura para poder cubrirla en este estilo.
 
+### Lo que los unitarios NO pueden ver: el OCR _(scripts, 2026-08-31)_
+
+La suite verifica el prompt **como texto** —que diga lo que tiene que decir—, pero no
+que el modelo lo **obedezca mirando una foto**. Eso solo se sabe llamándolo, así que
+vive en dos scripts fuera de `pytest` (cuestan llamadas reales a la API; son centavos,
+pero no es gratis y no puede correr en cada commit):
+
+| Script | Qué prueba |
+|---|---|
+| `backend/scripts/probar_ocr.py` | Que el modelo **lea** bien la captura: campo por campo contra lo esperado |
+| `backend/scripts/smoke_echeq.py` | Lo que pasa **después**: que el cheque quede en la base, que la caja salga por el neto y que el comprobante avise lo que tiene que avisar |
+
+```bash
+# Qué lee, comparado contra el .json de al lado de cada imagen
+backend\.venv\Scripts\python.exe scripts/probar_ocr.py <carpeta> --verificar
+
+# El modelo no es determinista: una corrida no prueba nada, tres muestran si es estable
+backend\.venv\Scripts\python.exe scripts/probar_ocr.py <carpeta> --verificar -n 3
+
+# Camino completo, contra una base local que se crea y se borra al momento
+backend\.venv\Scripts\python.exe scripts/smoke_echeq.py <carpeta>
+```
+
+Las capturas reales y sus expectativas están **fuera del repo** (`~/echeques-ejemplos/`):
+tienen CUIT y razones sociales de clientes, y lo que entra al repo termina en GitHub.
+
+**Corridas del 2026-08-31 (e-cheq):** 12/12 lecturas correctas —tres corridas de cuatro
+capturas, resultado idéntico en las tres— y el camino completo carga los cuatro con la
+caja cuadrada. Cubre Galicia (endoso, PDF), Provincia (emisión, ×2) y una pantalla de
+endoso fotografiada de otro celular.
+
+**Lo que esa corrida NO cubre, y hay que cerrar cuando aparezca el caso:** otros bancos
+(Santander, BBVA, Macro…), varios e-cheq en un mismo mensaje, y —el riesgo más
+concreto— un **comprobante de transferencia común** que el modelo podría confundir con
+un cheque. Cuando llegue una captura nueva, el camino es sumarla a la carpeta con su
+`.json` y volver a correr los dos scripts.
+
 ---
 
 ## Migraciones (Alembic)
