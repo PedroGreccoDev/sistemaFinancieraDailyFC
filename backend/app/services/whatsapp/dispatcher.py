@@ -472,7 +472,15 @@ def _registrar_un_cheque(
         lines.append(f"⚠️ Queda a deber: {_ars(a_deber)}")
 
     # Se registra igual (human in the loop); solo avisamos para que el operador revise.
-    advertencias = _advertencias_cheque(fecha_emision, fecha_pago)
+    advertencias = _aviso_recompra(db, cheque) + _advertencias_cheque(fecha_emision, fecha_pago)
+    if cheque.banco is None:
+        # Sin banco el cheque queda a medio identificar: el número solo no distingue
+        # dos láminas de bancos distintos. Se carga igual —decisión del dueño: el bot
+        # avisa, no frena— pero el operador tiene que enterarse para poder corregirlo.
+        advertencias.append(
+            "⚠️ Sin banco: no voy a poder distinguirlo de otro cheque con el mismo "
+            "número. Decime de qué banco es y te lo corrijo."
+        )
     if advertencias:
         lines.append("")
         lines.extend(advertencias)
@@ -3298,6 +3306,59 @@ def _advertencias_cheque(fecha_emision: date | None, fecha_pago: date | None) ->
         avisos.append(f"⚠️ La fecha de emisión ({_fmt_date(fecha_emision)}) es futura.")
 
     return avisos
+
+
+def _texto_pasada(cheque: Cheque) -> str:
+    """Una vuelta anterior del cheque, contada en una línea."""
+    fecha = cheque.created_at.strftime("%d/%m/%y") if cheque.created_at else "—"
+    destino = cheque.cliente_destino.nombre if cheque.cliente_destino else None
+    verbo = {
+        ChequeEstado.VENDIDO: "vendido",
+        ChequeEstado.FIADO: "fiado",
+        ChequeEstado.COBRADO: "cobrado",
+        ChequeEstado.RECHAZADO: "rechazado",
+        ChequeEstado.EN_CARTERA: "en cartera",
+    }[cheque.estado]
+    a_quien = f" a {destino}" if destino and cheque.estado in (
+        ChequeEstado.VENDIDO, ChequeEstado.FIADO
+    ) else ""
+    return f"{verbo}{a_quien} el {fecha}"
+
+
+def _aviso_recompra(db: Session, cheque: Cheque) -> list[str]:
+    """Avisa que este cheque ya pasó por el negocio (§Recompra). Nunca bloquea.
+
+    El tono depende de qué tan seguro es que sea la misma lámina:
+      - Con banco cargado, (banco, nro) ya identifica el papel: se afirma.
+      - Sin banco, el número solo no alcanza —dos cheques de bancos distintos
+        pueden compartirlo—, así que se apoya en monto y fecha de pago: si las
+        tres coinciden es la misma lámina a todos los efectos prácticos; si solo
+        coincide el número, se avisa como sospecha y se pide el banco.
+    """
+    pasadas = svc_cheques.pasadas_anteriores(
+        db, cheque.nro_cheque, cheque.banco, excluir_id=cheque.id
+    )
+    if not pasadas:
+        return []
+
+    detalle = "; ".join(_texto_pasada(c) for c in pasadas[-3:])
+    vuelta = len(pasadas) + 1
+
+    if cheque.banco:
+        return [f"🔄 *Este cheque ya pasó por el negocio* ({vuelta}ª vuelta): {detalle}."]
+
+    coincide_todo = any(
+        c.monto == cheque.monto and c.fecha_pago == cheque.fecha_pago for c in pasadas
+    )
+    if coincide_todo:
+        return [
+            f"🔄 *Este cheque ya pasó por el negocio* ({vuelta}ª vuelta): {detalle}. "
+            "(Mismo número, monto y fecha de pago.)"
+        ]
+    return [
+        f"🔄 Ojo: ya hubo un cheque Nº {cheque.nro_cheque} sin banco ({detalle}). "
+        "Si es el mismo, cargale el banco para no confundirlos."
+    ]
 
 
 # ────────────────────────────────────────────────────────────────────────────

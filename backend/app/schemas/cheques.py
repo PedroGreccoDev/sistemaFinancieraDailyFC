@@ -127,6 +127,12 @@ class ChequeRead(BaseModel):
     cliente_origen_id: UUID | None
     cliente_destino_id: UUID | None
     tiene_foto: bool
+    # Qué vuelta de este mismo papel por el negocio es esta fila (§Recompra). 1 = la
+    # primera y única, que es el caso normal; 2 o más significa que el cheque se
+    # vendió, siguió girando en plaza y el negocio lo volvió a comprar. Lo calcula
+    # `list_cheques` en una sola consulta —no está en la tabla— y por eso vale 1
+    # cuando el cheque llega por un endpoint que no lo computa.
+    vuelta: int = 1
     created_at: datetime
     updated_at: datetime
 

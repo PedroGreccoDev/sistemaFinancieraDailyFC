@@ -20,6 +20,7 @@ from app.db.models import (
 )
 from app.core.fechas import hoy_local
 from app.services import caja as svc_caja
+from app.services import cheques as svc_cheques
 from app.services import stock_usd as svc_stock
 from app.services.conversion import calcular_reduccion_saldo
 from app.schemas.cheques import ChequeRead, FiadoCobrarConChequeResponse
@@ -174,21 +175,10 @@ def cobrar_con_cheque(
         raise NotFoundError("Fiado no encontrado.")
     if fiado.estado == FiadoEstado.CANCELADO:
         raise ConflictError("El fiado ya está cancelado.")
-    # Solo choca contra cheques VIVOS: uno anulado libera su número (índice único
-    # parcial, migración 0017). Sin este filtro, un cheque dado de baja seguiría
-    # bloqueando la recarga aunque la BD ya lo permita.
-    ya_existe = db.scalar(
-        select(Cheque).where(
-            Cheque.nro_cheque == payload.nro_cheque_pago,
-            Cheque.banco == payload.banco_pago,
-            Cheque.anulado_at.is_(None),
-        )
-    )
-    if ya_existe is not None:
-        banco_txt = f" del banco {payload.banco_pago}" if payload.banco_pago else ""
-        raise ConflictError(
-            f"Ya existe un cheque Nº '{payload.nro_cheque_pago}'{banco_txt}."
-        )
+    # Solo choca contra un cheque del mismo papel que esté EN CARTERA: uno anulado
+    # libera su número, y uno que ya se vendió puede volver por el circuito y
+    # entrar de nuevo (§Recompra, migración 0028).
+    svc_cheques.verificar_no_esta_en_cartera(db, payload.nro_cheque_pago, payload.banco_pago)
 
     valor_neto = (
         payload.monto_cheque * (Decimal("100") - payload.porcentaje_compra_cheque) / Decimal("100")

@@ -34,7 +34,7 @@ function enCartera(id: string, nro: string, banco: string | null, monto: string,
     porcentaje_compra: compra, monto_abonado: null, porcentaje_venta: null, ganancia: '0.00',
     estado: 'EN_CARTERA', ultimo_evento_manual_at: null, ultimo_operador_id: null,
     ultimo_motivo_manual: null, cliente_origen_id: origen, cliente_destino_id: null,
-    tiene_foto: false, created_at: ts(createdOff), updated_at: ts(createdOff),
+    tiene_foto: false, vuelta: 1, created_at: ts(createdOff), updated_at: ts(createdOff),
   }
 }
 
@@ -45,7 +45,7 @@ function vendido(id: string, nro: string, banco: string, monto: string, compra: 
     porcentaje_compra: compra, monto_abonado: null, porcentaje_venta: venta, ganancia,
     estado: 'VENDIDO', ultimo_evento_manual_at: ts(ventaOff), ultimo_operador_id: 'panel-web',
     ultimo_motivo_manual: 'Venta a financiera', cliente_origen_id: origen, cliente_destino_id: destino,
-    tiene_foto: false, created_at: ts(ventaOff - 20), updated_at: ts(ventaOff),
+    tiene_foto: false, vuelta: 1, created_at: ts(ventaOff - 20), updated_at: ts(ventaOff),
   }
 }
 

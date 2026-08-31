@@ -27,6 +27,11 @@ export interface Cheque {
   cliente_origen_id: string | null
   cliente_destino_id: string | null
   tiene_foto: boolean
+  // Qué vuelta de este mismo papel por el negocio es esta fila (§Recompra). 1 es
+  // el caso normal; 2 o más significa que el cheque se vendió, siguió girando en
+  // plaza y el negocio lo volvió a comprar. Cada vuelta es una fila propia, con
+  // su compra, su venta y su ganancia.
+  vuelta: number
   created_at: string
   updated_at: string
 }

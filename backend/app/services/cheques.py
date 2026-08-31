@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -124,27 +124,103 @@ def create_cheque(
         raise DatabaseWriteError("No se pudo crear el cheque.") from exc
 
 
-def _msg_duplicado(db: Session, nro_cheque: str, banco: str | None) -> str:
-    """Mensaje informativo cuando choca la unicidad (banco, nro_cheque).
+def _mismo_papel(nro_cheque: str, banco: str | None):
+    """Criterio de "es la misma lámina": mismo número y mismo banco.
 
-    En vez de un escueto "ya existe", devolvemos los datos del cheque que ya estaba
-    cargado para que el operador distinga un duplicado real de un cheque homónimo de
-    otro banco o de data vieja."""
+    `banco` NULL se compara como cadena vacía, igual que el índice único
+    (migración 0028): en Postgres NULL ≠ NULL, así que comparar la columna cruda
+    dejaría fuera justo a los cheques sin banco —que son los que más necesitan
+    que alguien los mire—."""
+    return (
+        Cheque.nro_cheque == nro_cheque,
+        func.coalesce(Cheque.banco, "") == (banco or ""),
+    )
+
+
+def pasadas_anteriores(
+    db: Session,
+    nro_cheque: str,
+    banco: str | None,
+    excluir_id: uuid.UUID | None = None,
+) -> list[Cheque]:
+    """Vueltas anteriores de este mismo cheque por el negocio, de la más vieja a la más nueva.
+
+    Un cheque vendido sigue girando en plaza y puede volver: recomprarlo es una
+    compra nueva y real, y cada pasada es una fila propia (§Recompra). Esto
+    devuelve las pasadas que ya cerraron, para poder avisarle al operador que el
+    papel que tiene en la mano ya pasó por acá.
+
+    No filtra por estado a propósito: si hubiera otra pasada EN CARTERA, el índice
+    único ya la habría frenado, y si igual existiera es justo lo que hay que
+    mostrar."""
+    query = select(Cheque).where(
+        *_mismo_papel(nro_cheque, banco),
+        Cheque.anulado_at.is_(None),
+    )
+    if excluir_id is not None:
+        query = query.where(Cheque.id != excluir_id)
+    return list(db.scalars(query.order_by(Cheque.created_at)))
+
+
+def verificar_no_esta_en_cartera(db: Session, nro_cheque: str, banco: str | None) -> None:
+    """Corta si ese mismo papel YA está en cartera. Usado al recibir un cheque como pago.
+
+    Cuando un cheque entra pagando una deuda no pasa por `create_cheque` (recibirlo
+    no es comprarlo), así que no lo cubre el índice único hasta el commit. Estos
+    call sites lo chequean antes para poder dar un mensaje claro en vez de un
+    IntegrityError.
+
+    **Solo mira la cartera**, no todos los cheques vivos: un cheque que ya se vendió
+    puede volver por el circuito y entrar de nuevo como pago (§Recompra). Lo único
+    imposible es tener el mismo papel dos veces en cartera a la vez."""
     existente = db.scalar(
         select(Cheque).where(
-            Cheque.nro_cheque == nro_cheque,
-            Cheque.banco == banco,
+            *_mismo_papel(nro_cheque, banco),
             Cheque.anulado_at.is_(None),
+            Cheque.estado == ChequeEstado.EN_CARTERA,
         )
     )
     if existente is None:
-        return "Ya existe un cheque con ese número y banco."
-    banco_txt = f" del banco {existente.banco}" if existente.banco else ""
+        return
+    banco_txt = f" del banco {existente.banco}" if existente.banco else " (sin banco)"
     fecha = existente.created_at.strftime("%d/%m/%y") if existente.created_at else "—"
+    raise ConflictError(
+        f"El cheque Nº {existente.nro_cheque}{banco_txt} ya está en cartera "
+        f"(${existente.monto:,.2f}, cargado el {fecha}). "
+        "Si es otro cheque distinto, indicá el banco para diferenciarlos."
+    )
+
+
+def _msg_duplicado(db: Session, nro_cheque: str, banco: str | None) -> str:
+    """Mensaje informativo cuando choca la unicidad (banco, nro_cheque) en cartera.
+
+    Desde la migración 0028 la unicidad solo rige entre los cheques EN CARTERA, así
+    que llegar acá significa una cosa sola: **ese mismo papel ya está en cartera**.
+    No es la recompra —esa pasa sin problema cuando la pasada anterior cerró—, es el
+    duplicado real: cargar dos veces el cheque que se tiene en la mano."""
+    existente = db.scalar(
+        select(Cheque).where(
+            *_mismo_papel(nro_cheque, banco),
+            Cheque.anulado_at.is_(None),
+            Cheque.estado == ChequeEstado.EN_CARTERA,
+        )
+    )
+    if existente is None:
+        return "Ya existe un cheque con ese número y banco en cartera."
+
+    fecha = existente.created_at.strftime("%d/%m/%y") if existente.created_at else "—"
+    if existente.banco:
+        return (
+            f"El cheque Nº {existente.nro_cheque} del banco {existente.banco} ya está "
+            f"en cartera: ${existente.monto:,.2f}, cargado el {fecha}. "
+            "Si ya lo vendiste y lo estás recomprando, registrá primero esa venta."
+        )
+    # Sin banco no hay con qué distinguir dos láminas homónimas, y la salida es
+    # justo el dato que falta: cargarle el banco a alguna de las dos.
     return (
-        f"Ya existe el cheque Nº {existente.nro_cheque}{banco_txt}: "
-        f"${existente.monto:,.2f}, estado {existente.estado.value}, cargado el {fecha}. "
-        "Si es otro cheque distinto, indicá el banco para diferenciarlo."
+        f"Ya hay un cheque Nº {existente.nro_cheque} sin banco en cartera: "
+        f"${existente.monto:,.2f}, cargado el {fecha}. "
+        "Si es otro cheque distinto, indicá el banco para diferenciarlos."
     )
 
 
@@ -162,24 +238,32 @@ def resolve_cheque(db: Session, nro: str, banco: str | None = None) -> Cheque:
     dígitos). Como el número ya NO es único entre bancos, esta función:
       1. Busca por número exacto; si no hay, por sufijo ("el 681" → "…03789681").
       2. Si se indicó banco, filtra por él.
-      3. Si queda exactamente uno, lo devuelve; si hay varios, pide desambiguar por banco.
+      3. Si queda uno, lo devuelve. Si hay varios, prefiere el que está EN CARTERA
+         —el único operable— y recién ahí pide desambiguar por banco.
     """
     nro = (nro or "").strip()
     if not nro:
         raise ValidationError("Indicá el número de cheque.")
 
+    # Orden por antigüedad: con la recompra un mismo número puede tener varias
+    # pasadas, y abajo se elige "la última" cuando todas cerraron. Sin ORDER BY,
+    # cuál devuelve Postgres es capricho del plan de ejecución.
+    orden = Cheque.created_at
+
     # Los cheques anulados no se resuelven: para el operador dejaron de existir.
     matches = list(
         db.scalars(
-            select(Cheque).where(Cheque.nro_cheque == nro, Cheque.anulado_at.is_(None))
+            select(Cheque)
+            .where(Cheque.nro_cheque == nro, Cheque.anulado_at.is_(None))
+            .order_by(orden)
         )
     )
     if not matches:
         matches = list(
             db.scalars(
-                select(Cheque).where(
-                    Cheque.nro_cheque.endswith(nro), Cheque.anulado_at.is_(None)
-                )
+                select(Cheque)
+                .where(Cheque.nro_cheque.endswith(nro), Cheque.anulado_at.is_(None))
+                .order_by(orden)
             )
         )
     if not matches:
@@ -193,9 +277,27 @@ def resolve_cheque(db: Session, nro: str, banco: str | None = None) -> Cheque:
     if len(matches) == 1:
         return matches[0]
 
-    detalle = ", ".join(f"{c.nro_cheque} ({c.banco or 'sin banco'})" for c in matches[:5])
+    # Varias filas con el mismo número: desde la recompra (§0028) el caso normal ya
+    # no es "dos bancos distintos" sino **el mismo papel en su segunda vuelta**. Ahí
+    # pedir el banco es un callejón —es el mismo banco en las dos—, así que se
+    # resuelve por estado, que es lo que de verdad las distingue.
+    en_cartera = [c for c in matches if c.estado == ChequeEstado.EN_CARTERA]
+    if len(en_cartera) == 1:
+        # El único operable: las pasadas cerradas no admiten más movimientos.
+        return en_cartera[0]
+
+    if not en_cartera:
+        # Ninguno en cartera: todas las pasadas cerraron. El operador se refiere a
+        # la última, y devolverla hace que el error sea el útil ("ese cheque ya está
+        # VENDIDO") en vez de un pedido de desambiguación que no tiene respuesta.
+        return matches[-1]
+
+    # Varios EN CARTERA con el mismo número: son cheques distintos de bancos
+    # distintos (el índice único impide dos del mismo papel), así que acá el banco
+    # SÍ desambigua.
+    detalle = ", ".join(f"{c.nro_cheque} ({c.banco or 'sin banco'})" for c in en_cartera[:5])
     raise ValidationError(
-        f"Hay {len(matches)} cheques con ese número: {detalle}. "
+        f"Hay {len(en_cartera)} cheques en cartera con ese número: {detalle}. "
         "Indicá el banco para distinguirlos."
     )
 
@@ -218,7 +320,60 @@ def list_cheques(db: Session, estado: ChequeEstado | None = None) -> list[Cheque
     query = select(Cheque).where(Cheque.anulado_at.is_(None))
     if estado is not None:
         query = query.where(Cheque.estado == estado)
-    return list(db.scalars(query.order_by(Cheque.created_at.desc())))
+    cheques = list(db.scalars(query.order_by(Cheque.created_at.desc())))
+    _anotar_vuelta(db, cheques)
+    return cheques
+
+
+def _anotar_vuelta(db: Session, cheques: list[Cheque]) -> None:
+    """Le pega a cada cheque el atributo `vuelta`: qué pasada por el negocio es (§Recompra).
+
+    Va en UNA consulta para todo el listado, no una por fila. El filtro por estado
+    obliga a computarlo aparte: en la pestaña de cartera se ve la segunda vuelta
+    pero no la primera —ya vendida—, así que la posición no se puede deducir de las
+    filas que se están mostrando; hay que preguntarle a la tabla entera.
+
+    Casi ningún cheque tiene más de una pasada, así que la consulta trae solo los
+    números repetidos y el resto queda en 1 sin costo."""
+    if not cheques:
+        return
+    for cheque in cheques:
+        cheque.vuelta = 1
+
+    papel = func.coalesce(Cheque.banco, "")
+    # Un número puede aparecer entre los repetidos por una recompra o porque son
+    # dos láminas distintas de bancos distintos; agrupar por (papel, nro) separa
+    # los dos casos, y `nro_cheque` solo acota el universo a lo que estamos viendo.
+    repetidos = (
+        select(papel.label("papel"), Cheque.nro_cheque)
+        .where(
+            Cheque.anulado_at.is_(None),
+            Cheque.nro_cheque.in_({c.nro_cheque for c in cheques}),
+        )
+        .group_by(papel, Cheque.nro_cheque)
+        .having(func.count() > 1)
+        .subquery()
+    )
+    filas = db.execute(
+        select(Cheque.id, papel, Cheque.nro_cheque, Cheque.created_at)
+        .join(
+            repetidos,
+            (papel == repetidos.c.papel) & (Cheque.nro_cheque == repetidos.c.nro_cheque),
+        )
+        .where(Cheque.anulado_at.is_(None))
+        .order_by(Cheque.created_at)
+    ).all()
+
+    vueltas: dict[uuid.UUID, int] = {}
+    contador: dict[tuple[str, str], int] = {}
+    for cheque_id, banco_papel, nro, _creado in filas:
+        clave = (banco_papel, nro)
+        contador[clave] = contador.get(clave, 0) + 1
+        vueltas[cheque_id] = contador[clave]
+
+    for cheque in cheques:
+        if (n := vueltas.get(cheque.id)) is not None:
+            cheque.vuelta = n
 
 
 def transition_cheque(

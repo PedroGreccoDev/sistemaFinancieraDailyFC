@@ -61,6 +61,7 @@ from app.schemas.deudores import (
     RenglonImputado,
     RenglonPendiente,
 )
+from app.services import cheques as svc_cheques
 from app.services import deudas_simples as svc_deudas_simples
 from app.services import fiados as svc_fiados
 from app.services import pasivos as svc_pasivos
@@ -452,19 +453,10 @@ def cobrar_cliente_con_cheque(
             f"{cliente_nombre} no tiene deuda abierta en {payload.moneda_deuda.value}."
         )
 
-    # Solo choca contra cheques vivos: uno anulado libera su número (migración 0017).
-    ya_existe = db.scalar(
-        select(Cheque).where(
-            Cheque.nro_cheque == payload.nro_cheque_pago,
-            Cheque.banco == payload.banco_pago,
-            Cheque.anulado_at.is_(None),
-        )
-    )
-    if ya_existe is not None:
-        banco_txt = f" del banco {payload.banco_pago}" if payload.banco_pago else ""
-        raise ConflictError(
-            f"Ya existe un cheque Nº '{payload.nro_cheque_pago}'{banco_txt}."
-        )
+    # Solo choca contra un cheque del mismo papel que esté EN CARTERA: uno anulado
+    # libera su número, y uno que ya se vendió puede volver por el circuito y
+    # entrar de nuevo (§Recompra, migración 0028).
+    svc_cheques.verificar_no_esta_en_cartera(db, payload.nro_cheque_pago, payload.banco_pago)
 
     saldo_total = sum((r.saldo for r in renglones), _CERO).quantize(Decimal("0.01"))
     valor_neto = (

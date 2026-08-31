@@ -273,6 +273,31 @@ function totalCartera(cheques: Cheque[]): number {
   return cheques.reduce((acc, c) => acc + parseFloat(c.monto), 0)
 }
 
+/**
+ * Marca que este cheque ya pasó antes por el negocio (§Recompra).
+ *
+ * Se vendió, siguió girando en plaza y se volvió a comprar: cada vuelta es una
+ * fila propia, con su compra, su venta y su ganancia. En la primera vuelta —el
+ * caso normal— no muestra nada, para no ensuciar la tabla con un badge que
+ * estaría en todas las filas.
+ */
+function VueltaBadge({ vuelta }: { vuelta: number }) {
+  if (!vuelta || vuelta < 2) return null
+  const color = '#38bdf8'
+  return (
+    <span
+      title={`Este cheque ya pasó ${vuelta - 1} ${vuelta === 2 ? 'vez' : 'veces'} por el negocio. Cada vuelta es una compra distinta.`}
+      style={{
+        fontFamily: FM, fontSize: '0.62rem', fontWeight: 700, color,
+        background: `${color}18`, border: `1px solid ${color}35`,
+        padding: '0px 5px', marginLeft: '0.4rem', whiteSpace: 'nowrap',
+      }}
+    >
+      {vuelta}ª vuelta
+    </span>
+  )
+}
+
 /** Miniatura clickeable de la foto del cheque (solo si tiene_foto). */
 function FotoThumb({ cheque, onOpen, size = 52 }: { cheque: Cheque; onOpen: (c: Cheque) => void; size?: number }) {
   if (!cheque.tiene_foto) {
@@ -403,7 +428,7 @@ export default function Cartera() {
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', minWidth: 0 }}>
                     {cheque.tiene_foto && <FotoThumb cheque={cheque} onOpen={setFotoCheque} size={60} />}
                     <div style={{ minWidth: 0 }}>
-                      <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{cheque.nro_cheque}</p>
+                      <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{cheque.nro_cheque}<VueltaBadge vuelta={cheque.vuelta} /></p>
                       <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>Pago {fmtDate(cheque.fecha_pago)}</p>
                     </div>
                   </div>
@@ -446,7 +471,7 @@ export default function Cartera() {
                       <td style={{ ...TD, width: '76px', padding: '0.5rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'center' }}><FotoThumb cheque={cheque} onOpen={setFotoCheque} /></div>
                       </td>
-                      <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{cheque.nro_cheque}</td>
+                      <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{cheque.nro_cheque}<VueltaBadge vuelta={cheque.vuelta} /></td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(cheque.monto)}</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.7)' }} className="hidden sm:table-cell">{parseFloat(cheque.porcentaje_compra).toFixed(2)}%</td>
                       <td style={{ ...TD, textAlign: 'center', color: 'rgba(148,163,184,0.7)' }}>{fmtDate(cheque.fecha_pago)}</td>
@@ -522,7 +547,7 @@ export default function Cartera() {
               return (
                 <div key={c.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{c.nro_cheque}</p>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}>{c.nro_cheque}<VueltaBadge vuelta={c.vuelta} /></p>
                     <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>
                       {fmtARS(c.monto)} · {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
                     </p>
@@ -564,7 +589,7 @@ export default function Cartera() {
                     <tr key={c.id}
                       onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
-                      <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{c.nro_cheque}</td>
+                      <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}>{c.nro_cheque}<VueltaBadge vuelta={c.vuelta} /></td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(c.monto)}</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">{parseFloat(c.porcentaje_compra).toFixed(2)}%</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">

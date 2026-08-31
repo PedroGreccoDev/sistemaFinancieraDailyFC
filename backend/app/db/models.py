@@ -263,16 +263,29 @@ class Cheque(AnulableMixin, Base):
         # El número de cheque NO es único globalmente: solo lo es dentro de un mismo
         # banco. Dos cheques de bancos distintos pueden compartir número. Por eso la
         # identidad es la PK subrogada `id` y la unicidad es (banco, nro_cheque).
-        # Nota: en Postgres NULL es distinto de NULL, así que cheques sin banco
-        # detectado no chocan entre sí (se permiten cargar igual).
-        # La unicidad es un índice ÚNICO PARCIAL sobre los cheques vivos
-        # (migración 0017): un cheque anulado libera su número para que se pueda
-        # volver a cargar corregido con el mismo (banco, nro).
+        #
+        # La unicidad vale entre los cheques **vivos y EN CARTERA** (migración 0028):
+        #   - Un cheque anulado libera su número, para volver a cargarlo corregido.
+        #   - Un cheque cuya pasada ya cerró (VENDIDO/FIADO/COBRADO/RECHAZADO) también:
+        #     el papel sigue girando en plaza y el negocio puede **recomprarlo**. Cada
+        #     vuelta es una fila propia, con su compra, su venta y su caja; las pasadas
+        #     se relacionan por (banco, nro_cheque). Ver §Recompra.
+        #   - Lo que sigue prohibido es tener DOS del mismo papel en cartera a la vez,
+        #     que es el duplicado real contra el que esto protege.
+        #
+        # Va sobre COALESCE(banco, '') y no sobre `banco` a secas porque en Postgres
+        # NULL ≠ NULL: con la columna cruda, un cheque sin banco detectado no chocaba
+        # con NADA y podía cargarse repetido en silencio. Con el COALESCE, "sin banco"
+        # es un valor más y también protege.
+        #
+        # Se declara en SQL plano (migración 0028) porque es un índice de EXPRESIÓN:
+        # este `sa.Index` existe para que el modelo describa lo que hay en la base
+        # —autogenerate no lo reproduce igual, no lo tomes como fuente—.
         sa.Index(
-            "uq_cheques_banco_nro_vivos",
-            "banco", "nro_cheque",
+            "uq_cheques_banco_nro_en_cartera",
+            sa.text("COALESCE(banco, '')"), "nro_cheque",
             unique=True,
-            postgresql_where=sa.text("anulado_at IS NULL"),
+            postgresql_where=sa.text("anulado_at IS NULL AND estado = 'EN_CARTERA'"),
         ),
     )
 

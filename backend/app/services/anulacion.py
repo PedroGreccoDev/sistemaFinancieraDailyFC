@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, time
 from decimal import Decimal
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -709,6 +709,30 @@ def revertir_cheque(
         raise ConflictError("El cheque ya está EN_CARTERA: no hay nada que revertir.")
     if cheque.estado not in _REVERTIBLES:
         raise ConflictError(f"No se puede revertir un cheque en estado {cheque.estado.value}.")
+
+    # El papel puede haber vuelto: si el negocio lo recompró, esa pasada nueva ya
+    # está en cartera y revertir la vieja dejaría el mismo cheque dos veces en
+    # cartera —lo que el índice único prohíbe (§0028)—. Sin este corte, el commit
+    # explota con un IntegrityError opaco. Y de fondo casi nunca es lo que se
+    # quiere: la venta que se está por borrar ocurrió de verdad, es la que hizo
+    # que el cheque saliera y pudiera volver.
+    recompra = db.scalar(
+        select(Cheque).where(
+            Cheque.nro_cheque == cheque.nro_cheque,
+            func.coalesce(Cheque.banco, "") == (cheque.banco or ""),
+            Cheque.id != cheque.id,
+            Cheque.anulado_at.is_(None),
+            Cheque.estado == ChequeEstado.EN_CARTERA,
+        )
+    )
+    if recompra is not None:
+        fecha = recompra.created_at.strftime("%d/%m/%y") if recompra.created_at else "—"
+        raise ConflictError(
+            f"No se puede revertir: este cheque volvió a comprarse el {fecha} y esa "
+            "pasada ya está en cartera. Si lo que querés es deshacer la recompra, "
+            "eliminá esa carga; si la venta que estás revirtiendo nunca ocurrió, "
+            "eliminá este cheque en vez de revertirlo."
+        )
 
     fiado = cheque.fiado_originado
     if cheque.estado == ChequeEstado.FIADO and fiado is not None and fiado.anulado_at is None:

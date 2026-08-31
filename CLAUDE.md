@@ -608,10 +608,12 @@ imposible esa reconstrucción.
 
 - **Identidad:** la PK de `cheques` es la subrogada `id` (UUID). El `nro_cheque` **no es
   único globalmente** (solo lo es dentro de un banco); por eso la unicidad real es
-  `(banco, nro_cheque)`. El operador/OCR registra el `banco`; si no se detecta queda
-  `NULL` y la unicidad no bloquea (en Postgres NULL ≠ NULL). Las referencias del bot por
-  número se resuelven con `svc_cheques.resolve_cheque`, que pide desambiguar por banco si
-  hay varios candidatos. La API identifica cheques por `id`, no por número.
+  `(banco, nro_cheque)`, y solo **entre los cheques vivos que están `EN_CARTERA`**
+  (§Recompra). Va sobre `COALESCE(banco, '')`, no sobre `banco` a secas: en Postgres
+  NULL ≠ NULL, así que con la columna cruda un cheque **sin banco no chocaba con nada**
+  y podía cargarse repetido en silencio —pasó: tres `echeq` de $3.000.000 con tres
+  minutos de diferencia el 28/08/26—. La API identifica cheques por `id`, no por número.
+  Las referencias del bot por número se resuelven con `svc_cheques.resolve_cheque`.
 - Un cheque nuevo **siempre** entra en estado `EN_CARTERA`.
 - La máquina de estados es **estricta**: `EN_CARTERA` → `VENDIDO | FIADO | COBRADO | RECHAZADO`.
 - Los estados `VENDIDO`, `FIADO`, `COBRADO` y `RECHAZADO` son **terminales**: no admiten más cambios.
@@ -623,6 +625,65 @@ imposible esa reconstrucción.
 - **Editar carga (panel + bot):** `PATCH /cheques/{id}` (`svc_cheques.editar_cheque`) corrige la carga y resincroniza la caja (`resync_caja_cheque`). Reglas: `COBRADO`/`RECHAZADO` son terminales y NO editables; `EN_CARTERA` edita campos base; `VENDIDO`/`FIADO` además `porcentaje_venta` (recalcula ganancia, y el saldo del fiado solo si aún no recibió cobros parciales). En el panel está el botón "Editar" por fila en Cartera (en cartera y en el historial de ventas); el modal permite además reasignar cliente origen/destino (con alta de cliente inline).
 - **Eliminar y Revertir (panel):** botones por fila en Cartera. Eliminar **anula** (no borra) y revierte la caja; Revertir devuelve un cheque terminal a `EN_CARTERA` dejándolo disponible para volver a operarse. Ver §Anulación y reversión.
 - **Cartera preexistente (`es_carga_inicial`):** un cheque cargado dentro del período de apertura **no asienta el egreso de compra** —ya estaba comprado antes de que el sistema existiera—. Ver §Apertura del sistema.
+
+#### 1.b Recompra — el cheque que vuelve _(régimen definido 2026-08-31)_
+
+Un cheque que el negocio vendió **sigue girando en plaza**, y por el mismo circuito
+puede volver a ofrecérsele. Recomprarlo es una **compra nueva y real**: su precio, su
+salida de caja y su ganancia propios. No es revertir la venta anterior —esa ocurrió—
+ni un duplicado a bloquear.
+
+**Cada vuelta es una fila propia.** El cheque Nº 12345 del Banco X puede tener 1, 2 o
+7 pasadas por el negocio; ninguna toca ni reescribe a la anterior. Se relacionan por
+`(banco, nro_cheque)`, sin columna de vínculo que después haya que mantener
+sincronizada. **No hay tope de vueltas** (decisión del dueño).
+
+**La unicidad se corre de "un cheque vivo" a "un cheque EN CARTERA"** (migración
+`0028`, índice `uq_cheques_banco_nro_en_cartera`):
+
+- Sigue frenando el duplicado real: no se puede cargar dos veces el cheque que se
+  tiene en la mano, que es contra lo que la constraint siempre protegió.
+- Deja recomprar cuando la pasada anterior cerró (`VENDIDO`/`FIADO`/`COBRADO`/
+  `RECHAZADO`). Un `RECHAZADO` también puede recomprarse: el índice solo mira la
+  cartera, y no se bloquea a propósito.
+- Un cheque **anulado** sigue liberando su número, como desde `0017`.
+
+**Los cuatro portones de "cheque como pago".** Cuando un cheque entra pagando una
+deuda no pasa por `create_cheque` (recibirlo no es comprarlo), así que esos call
+sites chequean el duplicado a mano. Los cuatro (`deudas_simples` ×2, `deudores`,
+`fiados`) llaman a `svc_cheques.verificar_no_esta_en_cartera`, que es **una sola**
+implementación a propósito: eran cuatro copias del mismo bloque y ya se habían
+desincronizado entre sí.
+
+**`resolve_cheque` desambigua por estado, no por banco.** Con varias pasadas del
+mismo papel, pedir el banco es un callejón —es el mismo banco en todas—. La regla:
+si hay exactamente uno `EN_CARTERA`, ese es (el único operable); si no hay ninguno,
+devuelve **el más reciente**, para que el error sea el útil ("ese cheque ya está
+VENDIDO") y no una desambiguación sin respuesta posible; si hay varios en cartera,
+son cheques realmente distintos de bancos distintos y ahí sí pregunta el banco.
+
+**Revertir queda bloqueado si el cheque volvió.** Devolver la venta vieja a
+`EN_CARTERA` dejaría el mismo papel dos veces en cartera —lo que el índice prohíbe—
+y borraría la venta que hizo que el cheque saliera y pudiera volver. Corta con
+mensaje explícito en `svc_anulacion.revertir_cheque`.
+
+**El aviso al operador (nunca bloquea).** Al registrar un cheque que ya pasó,
+`_aviso_recompra` suma una línea al comprobante del bot, y el panel marca la fila
+con un badge `2ª vuelta` (campo `vuelta` de `ChequeRead`, que calcula
+`list_cheques` en **una** consulta para todo el listado, no una por fila). El tono
+depende de la certeza:
+
+| Situación | Qué dice |
+|---|---|
+| Con banco | *"Este cheque ya pasó por el negocio (2ª vuelta): vendido a Benja el 12/07."* |
+| Sin banco, mismo monto y fecha de pago | Lo mismo, aclarando en qué se apoya |
+| Sin banco, datos distintos | *"Ojo: ya hubo un cheque Nº … Si es el mismo, cargale el banco."* |
+
+**Sin banco el bot avisa y carga igual** _(decisión del dueño, 2026-08-31)_: el
+comprobante dice *"no voy a poder distinguirlo de otro cheque con el mismo número"*
+y el operador corrige si quiere. Misma línea que el resto del bot —avisa, no frena—.
+La unicidad sí protege igual gracias al `COALESCE`; lo único que se rechaza es el
+duplicado, nunca la falta de banco.
 
 ### 2. Fiados _(módulo agregado 2026-06-09)_
 
