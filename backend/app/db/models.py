@@ -430,8 +430,16 @@ class Cheque(AnulableMixin, Base):
                     "Se requiere porcentaje_venta para registrar el fiado del cheque."
                 )
             self.porcentaje_venta = porcentaje_venta
-            if cliente_destino_id is not None:
-                self.cliente_destino_id = cliente_destino_id
+
+        # A quién se le fue el cheque. Vale igual en las dos salidas: al vender, el
+        # destino viajaba en el pedido —el bot lo manda desde que existe el intent—
+        # pero no se guardaba nunca, así que el "vendido a Fulano" del aviso de
+        # recompra salía siempre sin nombre.
+        if (
+            target in (ChequeEstado.VENDIDO, ChequeEstado.FIADO)
+            and cliente_destino_id is not None
+        ):
+            self.cliente_destino_id = cliente_destino_id
 
         self.estado                  = target
         self.ultimo_operador_id      = operador_id

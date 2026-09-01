@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import date
 from decimal import Decimal
 
@@ -35,6 +36,28 @@ def test_cheque_entra_en_cartera_y_venta_calcula_spread() -> None:
     assert cheque.estado == ChequeEstado.VENDIDO
     assert cheque.ganancia == Decimal("2000.00")
     assert cheque.ultimo_operador_id == "operador-1"
+
+
+def test_la_venta_guarda_a_quien_se_le_vendio() -> None:
+    # El destino se anotaba solo al fiar: vendido quedaba en None aunque el pedido
+    # lo trajera, y el aviso de recompra decía "vendido el 12/07", sin nombre.
+    destino = uuid.uuid4()
+    cheque = Cheque(
+        nro_cheque="CHK-001-B",
+        monto=Decimal("100000.00"),
+        porcentaje_compra=Decimal("5.0000"),
+        estado=ChequeEstado.EN_CARTERA,
+    )
+
+    cheque.transition_to(
+        ChequeEstado.VENDIDO,
+        operador_id="operador-1",
+        motivo="Venta manual al 3%",
+        porcentaje_venta=Decimal("3.0000"),
+        cliente_destino_id=destino,
+    )
+
+    assert cheque.cliente_destino_id == destino
 
 
 def test_cheque_vendido_es_estado_terminal() -> None:
