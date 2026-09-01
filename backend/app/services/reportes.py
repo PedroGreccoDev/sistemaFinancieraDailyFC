@@ -31,6 +31,7 @@ from app.schemas.reportes import (
     ReporteCajaRead,
     SaldoPasivos,
 )
+from app.services.cheques import describir
 from app.services.exceptions import ValidationError
 
 
@@ -325,7 +326,6 @@ def get_movimientos_unificados(
         fecha = fecha_local(c.created_at)
         if fecha < desde or fecha > hasta:
             continue
-        banco = f" — {c.banco}" if c.banco else ""
         cliente = c.cliente_origen.nombre if c.cliente_origen else None
         origen_txt = f" de {cliente}" if cliente else ""
         estado_txt = _LABEL_ESTADO_CHEQUE.get(c.estado, c.estado.value.lower())
@@ -337,7 +337,9 @@ def get_movimientos_unificados(
                 grupo="CHEQUES",
                 categoria="INGRESO_CHEQUE",
                 flujo="NEUTRO",
-                descripcion=f"Ingreso cheque Nº {c.nro_cheque}{banco}{origen_txt} ({estado_txt})",
+                # Por `describir` y no a mano: el número puede faltar, y armarlo
+                # acá escribía "cheque Nº None" en la pantalla de movimientos.
+                descripcion=f"Ingreso {describir(c)}{origen_txt} ({estado_txt})",
                 monto=_money(c.monto),
                 ganancia=None,
                 medio_pago=None,

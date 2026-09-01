@@ -11,6 +11,7 @@ from app.db.models import (
     CajaTipo,
     Cheque,
     ChequeEstado,
+    ChequeTipo,
     Cliente,
     MedioPago,
     Moneda,
@@ -66,7 +67,7 @@ def _caja(
 
 
 def _cheque(*, created_at: datetime, estado: ChequeEstado = ChequeEstado.EN_CARTERA,
-            cliente: Cliente | None = None, nro: str = "123", banco: str | None = None,
+            cliente: Cliente | None = None, nro: str | None = "123", banco: str | None = None,
             monto: str = "100000") -> Cheque:
     c = Cheque(
         id=uuid.uuid4(),
@@ -155,3 +156,30 @@ def test_venta_usd_expone_ganancia_y_cotizacion():
     assert it.grupo == "DIVISAS"
     assert it.ganancia == Decimal("5000.00")
     assert it.referencia_tipo == "movimiento"
+
+
+def test_un_echeq_sin_numero_no_se_muestra_como_None():
+    """Se vio en pantalla: "Ingreso cheque Nº None de Paolini Hnos".
+
+    El número puede faltar (§E-cheq) y esta línea lo interpolaba a mano, así que
+    el `None` de Python llegaba tal cual a la pantalla de movimientos. El nombre
+    lo arma `describir`, que es el único lugar que sabe qué hacer sin número.
+    """
+    cliente = Cliente(id=uuid.uuid4(), nombre="Paolini Hnos")
+    sin_numero = _cheque(created_at=datetime(2026, 7, 15, 15, 0, tzinfo=timezone.utc),
+                         cliente=cliente, nro=None, banco=None, monto="1234567.00")
+    sin_numero.tipo = ChequeTipo.ELECTRONICO
+    items = service.get_movimientos_unificados(FakeDB([], [sin_numero]), DESDE, HASTA)
+    assert "None" not in items[0].descripcion
+    assert "e-cheq sin número ($1,234,567.00)" in items[0].descripcion
+    assert "Paolini Hnos" in items[0].descripcion
+
+
+def test_un_echeq_con_numero_se_nombra_como_echeq():
+    """La misma pantalla llamaba "cheque" a un e-cheq: el operador no podía
+    distinguir en la lista qué papel entró y cuál no existe."""
+    con_numero = _cheque(created_at=datetime(2026, 7, 15, 15, 0, tzinfo=timezone.utc),
+                         nro="00001020", banco="Galicia")
+    con_numero.tipo = ChequeTipo.ELECTRONICO
+    items = service.get_movimientos_unificados(FakeDB([], [con_numero]), DESDE, HASTA)
+    assert "e-cheq Nº 00001020 — Galicia" in items[0].descripcion
