@@ -273,6 +273,23 @@ def _items_o_uno(
     return [data]
 
 
+def _nombre_de_item(item: dict[str, Any]) -> str:
+    """Cómo nombrar un cheque del payload que NO se pudo cargar.
+
+    No hay fila en la base todavía, así que no se puede usar `describir`; lo que
+    importa es que el que falló **se nombre**, porque un cheque que no entró y no
+    se informa es indistinguible de uno que entró. Sin esto, el que fallaba sin
+    número salía como "Nº None".
+    """
+    nro = item.get("nro_cheque")
+    banco = f" — {item['banco']}" if item.get("banco") else ""
+    if nro:
+        return f"Nº {nro}{banco}"
+    monto = item.get("monto")
+    monto_txt = f" ({_ars(Decimal(str(monto)))})" if monto is not None else ""
+    return f"sin número{monto_txt}{banco}"
+
+
 def _neto_de(item: dict[str, Any]) -> Decimal | None:
     """El valor neto de un cheque del payload, o None si le faltan datos.
 
@@ -386,13 +403,10 @@ def _registrar_cheque(
 
     cargados: list[str] = []
     fallidos: list[str] = []
+    advertencias: list[str] = []
     for item in items:
         try:
-            _registrar_un_cheque(db, item, msg_at, foto)
-            nro = str(item.get("nro_cheque", "?"))
-            banco = f" — {item['banco']}" if item.get("banco") else ""
-            monto = item.get("monto")
-            monto_txt = f" · {_ars(Decimal(str(monto)))}" if monto is not None else ""
+            cheque, avisos = _alta_de_cheque(db, item, msg_at, foto)
             ab_txt = ""
             ab = item.get("monto_abonado")
             if reparto_visible and ab is not None:
@@ -401,15 +415,25 @@ def _registrar_cheque(
                     ab_txt = f" — abonado {_ars(ab_dec)}, a deber {_ars(neto_item - ab_dec)}"
                 else:
                     ab_txt = f" — abonado {_ars(ab_dec)}"
-            cargados.append(f"  • Nº {nro}{banco}{monto_txt}{ab_txt}")
+            # El nombre lo arma `describir` y no este call site: acá salía
+            # "Nº None" para un e-cheq de emisión, que es el caso normal cuando la
+            # foto trae varios.
+            nombre = svc_cheques.describir(cheque, con_monto=False)
+            cargados.append(f"  • {nombre} · {_ars(cheque.monto)}{ab_txt}")
+            # Se juntan sin repetir: dos e-cheq sin número dan el mismo aviso y
+            # leerlo dos veces no agrega nada.
+            advertencias.extend(a for a in avisos if a not in advertencias)
         except (ServiceError, ValueError) as exc:
             motivo = getattr(exc, "message", None) or str(exc)
-            fallidos.append(f"  • Nº {item.get('nro_cheque', '?')}: {motivo}")
+            fallidos.append(f"  • {_nombre_de_item(item)}: {motivo}")
 
     lines: list[str] = []
     if cargados:
         lines.append(f"✅ *{len(cargados)} cheque(s) en cartera*")
         lines.extend(cargados)
+        if advertencias:
+            lines.append("")
+            lines.extend(advertencias)
     if fallidos:
         if cargados:
             lines.append("")
@@ -420,12 +444,20 @@ def _registrar_cheque(
     return bool(cargados), "\n".join(lines)
 
 
-def _registrar_un_cheque(
+def _alta_de_cheque(
     db: Session,
     data: dict[str, Any],
     msg_at: datetime | None = None,
     foto: tuple[bytes, str] | None = None,
-) -> DispatchResult:
+) -> tuple[Cheque, list[str]]:
+    """Da de alta un cheque y devuelve, además, lo que hay que avisarle al operador.
+
+    Los tres avisos —sin número, sin banco, recompra— valen igual venga un cheque
+    o venga un fajo, así que salen de acá y no del armado del mensaje. El camino
+    de lote no los tenía: una foto con dos e-cheq de emisión cargaba los dos y no
+    decía que ninguno tenía número, que es justo lo que después impide operarlos
+    por chat.
+    """
     # El número NO es obligatorio para dar de alta: el comprobante de emisión de un
     # e-cheq no lo trae y el operador no elige qué le reenvía el cliente (§E-cheq).
     # Se carga con el resto de los datos —que es lo que mueve la plata— y se avisa.
@@ -462,6 +494,35 @@ def _registrar_un_cheque(
         db, payload, created_at=msg_at, foto=foto_bytes, foto_mime=foto_mime
     )
 
+    # Se registra igual (human in the loop); solo avisamos para que el operador revise.
+    advertencias = _aviso_recompra(db, cheque) + _advertencias_cheque(fecha_emision, fecha_pago)
+    if cheque.nro_cheque is None:
+        # Este aviso tiene una consecuencia concreta, no es cosmético: sin número
+        # el cheque no se puede nombrar por chat, así que el operador tiene que
+        # saber en el momento que ese cheque va a necesitar el panel.
+        advertencias.append(
+            "⚠️ *Sin número*: lo cargué igual, pero no vas a poder nombrarlo por "
+            "acá para venderlo. Pasame el número cuando lo tengas y te lo completo."
+        )
+    if cheque.banco is None:
+        # Sin banco el cheque queda a medio identificar: el número solo no distingue
+        # dos láminas de bancos distintos. Se carga igual —decisión del dueño: el bot
+        # avisa, no frena— pero el operador tiene que enterarse para poder corregirlo.
+        advertencias.append(
+            "⚠️ Sin banco: no voy a poder distinguirlo de otro cheque con el mismo "
+            "número. Decime de qué banco es y te lo corrijo."
+        )
+    return cheque, advertencias
+
+
+def _registrar_un_cheque(
+    db: Session,
+    data: dict[str, Any],
+    msg_at: datetime | None = None,
+    foto: tuple[bytes, str] | None = None,
+) -> DispatchResult:
+    cheque, advertencias = _alta_de_cheque(db, data, msg_at, foto)
+
     es_echeq = cheque.tipo == ChequeTipo.ELECTRONICO
     banco_txt = f" — {cheque.banco}" if cheque.banco else ""
     lines = [
@@ -481,24 +542,6 @@ def _registrar_un_cheque(
     if a_deber > 0:
         lines.append(f"⚠️ Queda a deber: {_ars(a_deber)}")
 
-    # Se registra igual (human in the loop); solo avisamos para que el operador revise.
-    advertencias = _aviso_recompra(db, cheque) + _advertencias_cheque(fecha_emision, fecha_pago)
-    if cheque.nro_cheque is None:
-        # Este aviso tiene una consecuencia concreta, no es cosmético: sin número
-        # el cheque no se puede nombrar por chat, así que el operador tiene que
-        # saber en el momento que ese cheque va a necesitar el panel.
-        advertencias.append(
-            "⚠️ *Sin número*: lo cargué igual, pero no vas a poder nombrarlo por "
-            "acá para venderlo. Pasame el número cuando lo tengas y te lo completo."
-        )
-    if cheque.banco is None:
-        # Sin banco el cheque queda a medio identificar: el número solo no distingue
-        # dos láminas de bancos distintos. Se carga igual —decisión del dueño: el bot
-        # avisa, no frena— pero el operador tiene que enterarse para poder corregirlo.
-        advertencias.append(
-            "⚠️ Sin banco: no voy a poder distinguirlo de otro cheque con el mismo "
-            "número. Decime de qué banco es y te lo corrijo."
-        )
     if advertencias:
         lines.append("")
         lines.extend(advertencias)

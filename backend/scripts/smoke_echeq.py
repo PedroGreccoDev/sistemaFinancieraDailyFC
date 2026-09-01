@@ -64,7 +64,10 @@ def _psql(*sql: str, base: str = "postgres", check: bool = True) -> bool:
     for s in sql:
         cmd += ["-c", s]
     env = {**os.environ, "PGPASSWORD": "postgres"}
-    r = subprocess.run(cmd, check=check, env=env, capture_output=True, text=True)
+    r = subprocess.run(
+        cmd, check=check, env=env, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
     return r.returncode == 0
 
 
@@ -76,6 +79,11 @@ def _crear_base() -> None:
         cwd=str(Path(__file__).resolve().parent.parent),
         env={**os.environ, "DATABASE_URL": _URL},
         capture_output=True, text=True,
+        # `encoding` explícito: sin esto Python decodifica con la cp1252 de la
+        # consola y los acentos de los mensajes de migración revientan el hilo
+        # lector con UnicodeDecodeError. No corta la corrida —el traceback sale
+        # de un thread— pero tapa de ruido justo la pantalla que hay que leer.
+        encoding="utf-8", errors="replace",
     )
     if r.returncode != 0:
         print(r.stdout, r.stderr, file=sys.stderr)

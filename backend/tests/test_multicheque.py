@@ -451,3 +451,47 @@ def test_un_cheque_incompleto_no_rompe_el_reparto() -> None:
     items = _items_o_uno(data, "cheques")
     _repartir_abonado(data, items)
     assert items[1]["monto_abonado"] == Decimal("180000.00")
+
+
+# ── Un fajo no puede perder los avisos que sí da un cheque solo ───────
+
+def test_el_comprobante_del_fajo_lleva_los_avisos_de_cada_cheque(monkeypatch) -> None:
+    """Cargar dos e-cheq de una foto avisaba **nada**.
+
+    El camino de un cheque solo advierte tres cosas —sin número, sin banco,
+    recompra— y el de lote armaba su línea a mano, así que las perdía las tres. El
+    aviso de "sin número" no es cosmético: ese cheque no se va a poder nombrar por
+    chat, y una foto de comprobantes de emisión trae **varios** sin número. Se veía
+    tal cual en el smoke: "✅ 2 cheque(s) en cartera · Nº None · Nº None".
+    """
+    from app.db.models import Cheque, ChequeEstado, ChequeTipo
+    from app.services.whatsapp import dispatcher
+
+    def _falso_alta(db, data, msg_at=None, foto=None):
+        cheque = Cheque(
+            nro_cheque=None, banco=None, monto=Decimal(str(data["monto"])),
+            porcentaje_compra=Decimal("15"), estado=ChequeEstado.EN_CARTERA,
+            tipo=ChequeTipo.ELECTRONICO,
+        )
+        return cheque, ["⚠️ *Sin número*: lo cargué igual"]
+
+    monkeypatch.setattr(dispatcher, "_alta_de_cheque", _falso_alta)
+    data = {"cheques": [{"monto": 3000000, "porcentaje_compra": 15},
+                        {"monto": 3000000, "porcentaje_compra": 15}]}
+    ok, texto = dispatcher._registrar_cheque(None, "549", data)
+
+    assert ok
+    assert "2 cheque(s) en cartera" in texto
+    assert "None" not in texto, "el nombre se arma con describir(), no a mano"
+    assert "e-cheq sin número" in texto
+    # Una sola vez: el mismo aviso repetido por cheque no agrega nada.
+    assert texto.count("*Sin número*") == 1
+
+
+def test_el_cheque_que_falla_se_nombra_aunque_no_tenga_numero() -> None:
+    """Un cheque que no entró y no se informa es indistinguible de uno que entró.
+    Sin número salía como "Nº None", que no le dice al operador cuál fue."""
+    from app.services.whatsapp.dispatcher import _nombre_de_item
+
+    assert _nombre_de_item({"nro_cheque": "123", "banco": "Galicia"}) == "Nº 123 — Galicia"
+    assert _nombre_de_item({"monto": 3000000}) == "sin número ($3.000.000,00)"

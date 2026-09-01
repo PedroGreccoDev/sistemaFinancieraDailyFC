@@ -2119,9 +2119,19 @@ capturas, resultado idéntico en las tres— y el camino completo carga los cuat
 caja cuadrada. Cubre Galicia (endoso, PDF), Provincia (emisión, ×2) y una pantalla de
 endoso fotografiada de otro celular.
 
-**Lo que esa corrida NO cubre, y hay que cerrar cuando aparezca el caso:** otros bancos
-(Santander, BBVA, Macro…) y varios e-cheq en un mismo mensaje. Cuando llegue una captura
-nueva, el camino es sumarla a la carpeta con su `.json` y volver a correr los dos scripts.
+**Varios e-cheq en una imagen: probado el 2026-08-31.** `provincia-dos-en-uno.jpeg` son
+los dos comprobantes de emisión de Provincia apilados —mismo día y mismo importe, lo
+único que los distingue es la fecha de pago—, así que si el modelo devolviera la misma
+fecha dos veces estaría copiando en vez de mirar. Lee los dos, 3/3 corridas, y el camino
+completo los carga con la caja cuadrada. **Encontró un bug**: el comprobante del **lote**
+armaba el nombre a mano y no llevaba ninguna de las tres advertencias del camino de un
+cheque solo, así que una foto con dos e-cheq de emisión contestaba "✅ 2 cheque(s) en
+cartera · Nº None · Nº None" y **no avisaba que ninguno tenía número** —que es lo que
+después impide operarlos por chat—. Las dos puntas salen ahora de `_alta_de_cheque`.
+
+**Lo que NO está cubierto, y hay que cerrar cuando aparezca el caso:** otros bancos
+(Santander, BBVA, Macro…). Cuando llegue una captura nueva, el camino es sumarla a la
+carpeta con su `.json` y volver a correr los dos scripts.
 
 **El riesgo abierto es el comprobante de transferencia común** (pendiente al
 2026-08-31, falta una captura real para cerrarlo). El cliente reenvía lo que le llega, y
