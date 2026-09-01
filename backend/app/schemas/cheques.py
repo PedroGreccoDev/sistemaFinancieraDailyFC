@@ -118,7 +118,12 @@ class ChequeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    nro_cheque: str
+    # Puede faltar: un e-cheq cargado desde un comprobante de emisión no trae
+    # número (§E-cheq). Si esto vuelve a ser `str`, FastAPI no falla solo en esa
+    # fila: **rechaza la respuesta entera** y el listado de cartera devuelve 500
+    # con un `ResponseValidationError`. Un solo cheque sin número deja la pantalla
+    # en blanco, y el panel no muestra ningún error —solo un contador en cero—.
+    nro_cheque: str | None
     banco: str | None
     monto: Decimal
     fecha_emision: date | None

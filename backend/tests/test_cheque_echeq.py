@@ -17,7 +17,7 @@ import pytest
 from pydantic import ValidationError as PydanticValidationError
 
 from app.db.models import Cheque, ChequeEstado, ChequeTipo
-from app.schemas.cheques import ChequeCreate
+from app.schemas.cheques import ChequeCreate, ChequeRead
 from app.services.cheques import describir
 from app.services.ia.claude import _SYSTEM_PROMPT
 from app.services.whatsapp.dispatcher import _tipo_cheque
@@ -133,3 +133,47 @@ def test_el_prompt_contempla_los_dos_formatos_de_comprobante() -> None:
     assert "ENDOSO" in _SYSTEM_PROMPT
     assert "EMISIÓN" in _SYSTEM_PROMPT
     assert "Nro ECHEQ" in _SYSTEM_PROMPT
+
+
+# ── Lo que la pantalla necesita para no quedar en blanco ──────────────
+
+def _como_lo_devuelve_la_consulta(cheque: Cheque) -> Cheque:
+    """Completa los campos que llena la consulta, no el alta.
+
+    `ganancia` y `tiene_foto` son `column_property` —los calcula el SELECT— y
+    `updated_at` lo pone la base. En un objeto armado a mano vienen en None, que
+    no es lo que ve FastAPI al serializar una fila real.
+    """
+    cheque.ganancia = Decimal("0")
+    cheque.tiene_foto = False
+    cheque.updated_at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
+    return cheque
+
+
+def test_la_respuesta_de_la_api_acepta_un_cheque_sin_numero() -> None:
+    """Levantando el panel apareció esto: `ChequeRead.nro_cheque` era `str`, y
+    FastAPI no descarta la fila mala —**rechaza la respuesta entera**—. Un solo
+    e-cheq sin número devolvía 500 en el listado de cartera: contador en cero,
+    tabla vacía y ningún error a la vista. Los tests no lo veían porque miraban
+    el alta, no la salida.
+    """
+    leido = ChequeRead.model_validate(
+        _como_lo_devuelve_la_consulta(
+            _cheque(nro=None, banco=None, tipo=ChequeTipo.ELECTRONICO)
+        )
+    )
+    assert leido.nro_cheque is None
+    assert leido.tipo == ChequeTipo.ELECTRONICO
+
+
+def test_una_cartera_con_uno_sin_numero_se_serializa_entera() -> None:
+    """El caso real: la cartera mezcla cheques con número y sin él. Si uno solo
+    rompe, se caen todos."""
+    cartera = [
+        _cheque(),
+        _cheque(nro=None, banco=None, tipo=ChequeTipo.ELECTRONICO),
+    ]
+    leidos = [
+        ChequeRead.model_validate(_como_lo_devuelve_la_consulta(c)) for c in cartera
+    ]
+    assert [c.nro_cheque for c in leidos] == ["13332", None]
