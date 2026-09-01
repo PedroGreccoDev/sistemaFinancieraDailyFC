@@ -9,6 +9,7 @@ Estilo del proyecto: unitarios puros, sin BD.
 
 from __future__ import annotations
 
+import inspect
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -177,3 +178,58 @@ def test_una_cartera_con_uno_sin_numero_se_serializa_entera() -> None:
         ChequeRead.model_validate(_como_lo_devuelve_la_consulta(c)) for c in cartera
     ]
     assert [c.nro_cheque for c in leidos] == ["13332", None]
+
+
+# ── Que "Nº None" no vuelva por un séptimo call site ──────────────────
+
+def test_ninguna_linea_de_caja_arma_el_nombre_del_cheque_a_mano() -> None:
+    """Toda línea de caja que nombre un cheque tiene que pasar por `describir`.
+
+    Esta regla ya se rompió cuatro veces —los tres resync y la transición
+    manual— y el daño no es cosmético: la línea de caja **queda escrita en la
+    base**, así que el texto bueno del alta se degradaba a "Compra cheque Nº
+    None" en cuanto alguien corregía el cheque. Un e-cheq además se convertía en
+    "cheque" y en el libro dejaba de distinguirse cuál era cuál.
+
+    Se mira el árbol de sintaxis y no cada módulo: un call site nuevo armado a
+    mano funciona perfecto y no falla nunca, solo escribe mal. Solo alcanza al
+    `detalle=` literal; uno armado en una variable aparte se escapa.
+    """
+    import ast
+    import pathlib
+
+    from app.services import caja as svc_caja
+
+    crudos = []
+    raiz = pathlib.Path(inspect.getfile(svc_caja)).parents[1]
+    for archivo in raiz.rglob("*.py"):
+        arbol = ast.parse(archivo.read_text(encoding="utf-8"))
+        for nodo in ast.walk(arbol):
+            if not isinstance(nodo, ast.Call):
+                continue
+            nombre = getattr(nodo.func, "attr", None) or getattr(nodo.func, "id", None)
+            if nombre != "registrar":
+                continue
+            for kw in nodo.keywords:
+                if kw.arg != "detalle":
+                    continue
+                if any(
+                    isinstance(h, ast.Attribute) and h.attr == "nro_cheque"
+                    for h in ast.walk(kw.value)
+                ):
+                    crudos.append(f"{archivo.name}:{nodo.lineno}")
+    assert not crudos, (
+        f"detalle= interpola nro_cheque en vez de usar describir(): {crudos}"
+    )
+
+
+def test_en_una_lista_con_columna_de_monto_el_nombre_no_lo_repite() -> None:
+    """La cartera por WhatsApp ya muestra el monto en su propia columna: sin
+    esto la línea sale "e-cheq sin número ($3,000,000.00) | $3.000.000,00"."""
+    corto = describir(_cheque(nro=None, banco=None, tipo=ChequeTipo.ELECTRONICO), con_monto=False)
+    assert corto == "e-cheq sin número"
+
+
+def test_sin_numero_y_sin_monto_igual_menciona_el_banco() -> None:
+    """Es lo único que le queda al operador para reconocerlo en la lista."""
+    assert describir(_cheque(nro=None), con_monto=False) == "cheque sin número — Galicia"

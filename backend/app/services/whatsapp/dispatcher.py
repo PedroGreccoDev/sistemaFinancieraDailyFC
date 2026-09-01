@@ -1832,7 +1832,7 @@ def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
             categoria=CajaCategoria.COMPRA_CHEQUE, monto=pagado,
             medio_pago=medio_compra,
             referencia_tipo="cheque", referencia_id=cheque.id,
-            detalle=f"Compra cheque Nº {cheque.nro_cheque}",
+            detalle=f"Compra {svc_cheques.describir(cheque)}",
         )
     if cheque.estado == ChequeEstado.VENDIDO and cheque.porcentaje_venta is not None:
         ingreso = (cheque.monto * (_CIEN_PCT - cheque.porcentaje_venta) / _CIEN_PCT).quantize(Decimal("0.01"))
@@ -1842,7 +1842,7 @@ def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
                 categoria=CajaCategoria.VENTA_CHEQUE, monto=ingreso,
                 medio_pago=medio_venta,
                 referencia_tipo="cheque", referencia_id=cheque.id,
-                detalle=f"Venta cheque Nº {cheque.nro_cheque}",
+                detalle=f"Venta {svc_cheques.describir(cheque)}",
             )
     elif cheque.estado == ChequeEstado.COBRADO:
         svc_caja.registrar(
@@ -1850,7 +1850,7 @@ def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
             categoria=CajaCategoria.COBRO_CHEQUE, monto=cheque.monto.quantize(Decimal("0.01")),
             medio_pago=medio_venta,
             referencia_tipo="cheque", referencia_id=cheque.id,
-            detalle=f"Cobro cheque Nº {cheque.nro_cheque}",
+            detalle=f"Cobro {svc_cheques.describir(cheque)}",
         )
 
 
@@ -2387,7 +2387,9 @@ def _consulta_cartera(
     ]
 
     detalle = [
-        f"📄 Nº {c.nro_cheque} | {_ars(c.monto)} | Pago: "
+        # Por `describir` y no `Nº {c.nro_cheque}`: la cartera lista todo lo que
+        # hay, y un e-cheq sin número contestaba "📄 Nº None" por WhatsApp.
+        f"📄 {svc_cheques.describir(c, con_monto=False)} | {_ars(c.monto)} | Pago: "
         f"{_fmt_date(c.fecha_pago) if c.fecha_pago else 'sin fecha'} | "
         f"Compra: {_pct(c.porcentaje_compra)}%"
         for c in sorted(cheques, key=lambda x: x.fecha_pago or date.max)

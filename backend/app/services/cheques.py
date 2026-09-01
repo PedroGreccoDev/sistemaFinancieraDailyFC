@@ -42,19 +42,25 @@ from app.services.exceptions import (
 _CIEN = Decimal("100")
 
 
-def describir(cheque: Cheque) -> str:
+def describir(cheque: Cheque, con_monto: bool = True) -> str:
     """Cómo se nombra un cheque en un texto para el operador (caja, avisos, errores).
 
     Sale de un solo lado porque el número puede faltar —un e-cheq cargado desde un
     comprobante de emisión no lo trae (§E-cheq)—, y sin esto cada call site
     escribiría "cheque Nº None" a su manera. Cuando no hay número se lo nombra por
     lo que sí tiene, que es lo que le permite al operador reconocerlo en el panel.
+
+    `con_monto=False` es para las listas que ya muestran el monto en su propia
+    columna, donde repetirlo queda como "e-cheq sin número ($3.000.000,00) |
+    $3.000.000,00". El nombre lo sigue decidiendo esta función y no el call site,
+    que es todo el punto de que exista.
     """
     banco_txt = f" — {cheque.banco}" if cheque.banco else ""
     clase = "e-cheq" if cheque.tipo == ChequeTipo.ELECTRONICO else "cheque"
     if cheque.nro_cheque:
         return f"{clase} Nº {cheque.nro_cheque}{banco_txt}"
-    return f"{clase} sin número (${cheque.monto:,.2f}){banco_txt}"
+    monto_txt = f" (${cheque.monto:,.2f})" if con_monto else ""
+    return f"{clase} sin número{monto_txt}{banco_txt}"
 
 
 def _nombre_vendedor(db: Session, cliente_id: uuid.UUID | None) -> str:
@@ -474,7 +480,7 @@ def transition_cheque(
                 categoria=categoria, monto=ingreso,
                 medio_pago=payload.medio_pago,
                 referencia_tipo="cheque", referencia_id=cheque.id,
-                detalle=f"{accion} cheque Nº {cheque.nro_cheque}",
+                detalle=f"{accion} {describir(cheque)}",
             )
         db.commit()
         db.refresh(cheque)
@@ -518,14 +524,18 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
     # no hay que inventarlo. Sin esto, editar un cheque de carga inicial le haría
     # aparecer un egreso que no existió.
     if abonado > 0 and not cheque.es_carga_inicial:
-        banco_txt = f" — {cheque.banco}" if cheque.banco else ""
+        # Mismo texto que el alta, que es lo único que un resync debería hacer.
+        # Armado a mano, el número que puede faltar salía como "Nº None" y el
+        # e-cheq se degradaba a "cheque": editar un cheque **reescribía** su
+        # línea ya buena, así que el texto correcto duraba hasta la primera
+        # corrección.
         parcial = " (pago parcial)" if abonado < pagado else ""
         svc_caja.registrar(
             db, fecha=fecha_local(cheque.created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
             categoria=CajaCategoria.COMPRA_CHEQUE, monto=abonado,
             medio_pago=medio_compra,
             referencia_tipo="cheque", referencia_id=cheque.id,
-            detalle=f"Compra cheque Nº {cheque.nro_cheque}{banco_txt}{parcial}",
+            detalle=f"Compra {describir(cheque)}{parcial}",
         )
     if cheque.estado == ChequeEstado.VENDIDO and cheque.porcentaje_venta is not None:
         ingreso = (cheque.monto * (_CIEN - cheque.porcentaje_venta) / _CIEN).quantize(Decimal("0.01"))
@@ -535,7 +545,7 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
                 tipo=CajaTipo.INGRESO, categoria=CajaCategoria.VENTA_CHEQUE, monto=ingreso,
                 medio_pago=medio_venta,
                 referencia_tipo="cheque", referencia_id=cheque.id,
-                detalle=f"Venta cheque Nº {cheque.nro_cheque}",
+                detalle=f"Venta {describir(cheque)}",
             )
     elif cheque.estado == ChequeEstado.COBRADO:
         svc_caja.registrar(
@@ -544,7 +554,7 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
             monto=cheque.monto.quantize(Decimal("0.01")),
             medio_pago=medio_venta,
             referencia_tipo="cheque", referencia_id=cheque.id,
-            detalle=f"Cobro cheque Nº {cheque.nro_cheque}",
+            detalle=f"Cobro {describir(cheque)}",
         )
 
 

@@ -564,8 +564,17 @@ def aplicar_vuelto_cheque(
     (§5) y cobrarle a un cliente con un cheque que supera todo lo que debe
     (§2.b). Es la misma situación —el cheque no se puede recortar a medida— y
     tiene que resolverse igual en ambos, por eso vive acá y es pública."""
+    # Import local: `cheques` importa este módulo (el pasivo de una compra a
+    # deber), así que al tope sería un ciclo.
+    from app.services.cheques import describir
+
     cliente = cheque.cliente_origen
     cliente_nombre = cliente.nombre if cliente else "cliente"
+    # El cheque que cubre de más es el que el cliente tenía, y bien puede ser un
+    # e-cheq sin número: armar el nombre acá escribía "cheque Nº None" en la
+    # línea de caja y, peor, en el concepto del pasivo a favor —que es como el
+    # operador va a ver esa deuda de acá en adelante—.
+    nombre_cheque = describir(cheque)
 
     if modo == "SALDAR_EFECTIVO":
         # Le pagás el vuelto en efectivo/transferencia: egreso de caja ARS.
@@ -579,14 +588,14 @@ def aplicar_vuelto_cheque(
             medio_pago=medio,
             referencia_tipo="cheque",
             referencia_id=cheque.id,
-            detalle=f"Vuelto en efectivo a {cliente_nombre} (cheque Nº {cheque.nro_cheque})",
+            detalle=f"Vuelto en efectivo a {cliente_nombre} ({nombre_cheque})",
         )
     else:  # QUEDA_DEBIENDO
         # Quedás debiendo: se crea un pasivo a favor del cliente (sin movimiento de caja).
         db.add(
             Pasivo(
                 acreedor=cliente_nombre,
-                concepto=f"Vuelto cheque Nº {cheque.nro_cheque}",
+                concepto=f"Vuelto {nombre_cheque}",
                 monto=diferencia,
                 saldo_pendiente=diferencia,
                 moneda=Moneda.ARS,
