@@ -419,7 +419,12 @@ def _registrar_cheque(
             # "Nº None" para un e-cheq de emisión, que es el caso normal cuando la
             # foto trae varios.
             nombre = svc_cheques.describir(cheque, con_monto=False)
-            cargados.append(f"  • {nombre} · {_ars(cheque.monto)}{ab_txt}")
+            # Nominal → valor, igual que en el alta de a uno: en un fajo la cuenta
+            # de cabeza hay que hacerla cuatro veces y nadie la hace.
+            cargados.append(
+                f"  • {nombre} · {_ars(cheque.monto)} → {_ars(_neto_compra(cheque))} "
+                f"al {_pct(cheque.porcentaje_compra)}%{ab_txt}"
+            )
             # Se juntan sin repetir: dos e-cheq sin número dan el mismo aviso y
             # leerlo dos veces no agrega nada.
             advertencias.extend(a for a in avisos if a not in advertencias)
@@ -525,18 +530,23 @@ def _registrar_un_cheque(
 
     es_echeq = cheque.tipo == ChequeTipo.ELECTRONICO
     banco_txt = f" — {cheque.banco}" if cheque.banco else ""
+    # Los dos números que el operador contrasta con el papel que tiene en la mano:
+    # el nominal que dice el cheque y lo que vale para el cliente que lo trajo
+    # (nominal − descuento). Con el nominal y el porcentaje solos, el operador
+    # tiene que hacer la cuenta de cabeza para saber si el bot entendió bien el
+    # descuento, que es justo el dato que más se tipea mal.
+    neto = _neto_compra(cheque)
     lines = [
         "✅ *E-cheq registrado en cartera*" if es_echeq else "✅ *Cheque registrado en cartera*",
         f"Nº {cheque.nro_cheque}{banco_txt}" if cheque.nro_cheque else f"Sin número{banco_txt}",
-        f"Monto: {_ars(cheque.monto)}",
-        f"Compra: {_pct(cheque.porcentaje_compra)}%",
+        f"Nominal: {_ars(cheque.monto)}",
+        f"Compra: {_pct(cheque.porcentaje_compra)}% — vale {_ars(neto)}",
     ]
     if cheque.fecha_pago:
         lines.append(f"Pago: {_fmt_date(cheque.fecha_pago)}")
 
     # Cuánto salió de la caja: el control inmediato del operador sobre si el bot
     # entendió que el cheque se pagó o quedó a deber.
-    neto = (cheque.monto * (Decimal("100") - cheque.porcentaje_compra) / Decimal("100")).quantize(Decimal("0.01"))
     abonado, a_deber = svc_pasivos.repartir_compra(neto, cheque.monto_abonado)
     lines.append(f"Salió de caja: {_ars(abonado)}")
     if a_deber > 0:
