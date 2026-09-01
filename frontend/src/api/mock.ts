@@ -69,10 +69,10 @@ const cheques: Cheque[] = [
 
 // ── Fiados ────────────────────────────────────────────────────────────
 const fiados: Fiado[] = [
-  { id: 'fi-1', cheque_nro: '00055111', cliente_id: 'cli-2', monto_original: '300000', porcentaje_venta: '8.00',  saldo_pendiente: '276000', estado: 'ABIERTO',   fecha_fiado: d(-7),  created_at: ts(-7),  updated_at: ts(-7) },
-  { id: 'fi-2', cheque_nro: '00055222', cliente_id: 'cli-4', monto_original: '180000', porcentaje_venta: '10.00', saldo_pendiente: '120000', estado: 'ABIERTO',   fecha_fiado: d(-15), created_at: ts(-15), updated_at: ts(-4) },
-  { id: 'fi-3', cheque_nro: '00055333', cliente_id: 'cli-1', monto_original: '500000', porcentaje_venta: '6.00',  saldo_pendiente: '470000', estado: 'ABIERTO',   fecha_fiado: d(-3),  created_at: ts(-3),  updated_at: ts(-3) },
-  { id: 'fi-4', cheque_nro: '00055444', cliente_id: 'cli-5', monto_original: '90000',  porcentaje_venta: '9.00',  saldo_pendiente: '0',      estado: 'CANCELADO', fecha_fiado: d(-40), created_at: ts(-40), updated_at: ts(-12) },
+  { id: 'fi-1', cheque_id: 'ch-fi-1', cheque_nro: '00055111', cliente_id: 'cli-2', monto_original: '300000', porcentaje_venta: '8.00',  saldo_pendiente: '276000', estado: 'ABIERTO',   fecha_fiado: d(-7),  created_at: ts(-7),  updated_at: ts(-7) },
+  { id: 'fi-2', cheque_id: 'ch-fi-2', cheque_nro: '00055222', cliente_id: 'cli-4', monto_original: '180000', porcentaje_venta: '10.00', saldo_pendiente: '120000', estado: 'ABIERTO',   fecha_fiado: d(-15), created_at: ts(-15), updated_at: ts(-4) },
+  { id: 'fi-3', cheque_id: 'ch-fi-3', cheque_nro: '00055333', cliente_id: 'cli-1', monto_original: '500000', porcentaje_venta: '6.00',  saldo_pendiente: '470000', estado: 'ABIERTO',   fecha_fiado: d(-3),  created_at: ts(-3),  updated_at: ts(-3) },
+  { id: 'fi-4', cheque_id: 'ch-fi-4', cheque_nro: '00055444', cliente_id: 'cli-5', monto_original: '90000',  porcentaje_venta: '9.00',  saldo_pendiente: '0',      estado: 'CANCELADO', fecha_fiado: d(-40), created_at: ts(-40), updated_at: ts(-12) },
 ]
 
 // ── Deudas libres (sin cuotas ni cheque) ──────────────────────────────

@@ -11,6 +11,12 @@ export const getChequeCartera = (): Promise<Cheque[]> =>
 export const getCheques = (estado?: string): Promise<Cheque[]> =>
   apiFetch<Cheque[]>(`/cheques${estado ? `?estado=${estado}` : ''}`)
 
+// Uno solo, por id. Lo necesita la pantalla de fiados: ahi se ve la deuda, no el
+// cheque, y para corregirlo hay que traerlo. Por id y no por numero, que con la
+// recompra puede repetirse.
+export const getCheque = (cheque_id: string): Promise<Cheque> =>
+  apiFetch<Cheque>(`/cheques/${encodeURIComponent(cheque_id)}`)
+
 // Alta manual de un cheque desde el panel (equivale al REGISTRAR_CHEQUE del bot).
 // El cheque entra siempre EN_CARTERA y su compra descuenta la caja ARS en el backend.
 export interface ChequeCreatePayload {
@@ -60,6 +66,9 @@ export const fiarCheque = (cheque_id: string, payload: FiarChequePayload): Promi
 export interface ChequeUpdatePayload {
   nro_cheque?: string | null
   banco?: string | null
+  // El tipo se corrige como cualquier otro dato mal cargado: es una etiqueta y
+  // no recalcula nada. El error tipico es un e-cheq que entro por foto como papel.
+  tipo?: ChequeTipo
   monto?: number
   fecha_emision?: string | null
   fecha_pago?: string | null

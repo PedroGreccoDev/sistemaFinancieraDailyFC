@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getFiados, cobrarEfectivo, cobrarConCheque } from '../api/fiados'
-import { getChequeCartera, fiarCheque } from '../api/cheques'
+import { getChequeCartera, fiarCheque, getCheque } from '../api/cheques'
 import { getClientes, createCliente } from '../api/clientes'
-import { fmtARS, fmtDate } from '../lib/fmt'
+import { fmtARS, fmtDate, fmtNroCheque } from '../lib/fmt'
 import { chip, btnSolid, btnBordered, btnFlat, btnGhost } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconPlus, IconRefresh } from '../components/icons'
@@ -11,6 +11,24 @@ import { SkeletonRows } from '../components/Skeleton'
 import type { Fiado, FiadoEstado, CobrarConChequeResult, Cliente } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
 import ModalEliminar from '../components/ModalEliminar'
+import ModalEditarCheque from '../components/ModalEditarCheque'
+
+/**
+ * El modal de edicion, pero partiendo del fiado.
+ *
+ * Esta pantalla muestra la **deuda**, no el cheque: para corregirlo hay que
+ * traerlo. Va por `cheque_id` y no por el numero, que con la recompra puede
+ * tener varias filas y daria con la pasada equivocada.
+ */
+function EditarChequeDelFiado({ fiado, onClose, onSuccess }: { fiado: Fiado; onClose: () => void; onSuccess: () => void }) {
+  const { data: cheque, isLoading, error } = useQuery({
+    queryKey: ['cheque', fiado.cheque_id],
+    queryFn: () => getCheque(fiado.cheque_id),
+  })
+  if (isLoading) return null
+  if (error || !cheque) return null
+  return <ModalEditarCheque cheque={cheque} onClose={onClose} onSuccess={onSuccess} />
+}
 
 type Filtro = 'ABIERTO' | 'todos' | 'CANCELADO'
 
@@ -57,7 +75,7 @@ function ModalEfectivo({ fiado, clienteNombre, onClose, onSuccess }: { fiado: Fi
       <div style={{ background: MODAL_BG, border: '1px solid var(--bd-008)', borderRadius: 'var(--r-lg)', width: '100%', maxWidth: '380px' }}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--bd-006)' }}>
           <h2 style={{ fontFamily: FN, fontSize: '1.5rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1 }}>Cobrar en efectivo</h2>
-          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{clienteNombre} · Cheque {fiado.cheque_nro}</p>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', marginTop: '0.2rem' }}>{clienteNombre} · Cheque {fmtNroCheque(fiado.cheque_nro)}</p>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
           <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', padding: '0.75rem 1rem', borderRadius: 'var(--r-md)' }}>
@@ -317,6 +335,7 @@ export default function Fiados() {
   const [filtro, setFiltro] = useState<Filtro>('ABIERTO')
   const [creandoFiado, setCreandoFiado] = useState(false)
   const [cobrandoEfectivo, setCobrandoEfectivo] = useState<Fiado | null>(null)
+  const [editandoCheque, setEditandoCheque] = useState<Fiado | null>(null)
   const [cobrandoCheque, setCobrandoCheque] = useState<Fiado | null>(null)
   const [resultado, setResultado] = useState<CobrarConChequeResult | null>(null)
   const [eliminando, setEliminando] = useState<Fiado | null>(null)
@@ -427,7 +446,7 @@ export default function Fiados() {
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.4rem' }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontFamily: FM, fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word' }}>{nombreCliente(fiado.cliente_id)}</p>
-                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '1px' }}>{fiado.cheque_nro} · {fmtDate(fiado.fecha_fiado)}</p>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '1px' }}>{fmtNroCheque(fiado.cheque_nro)} · {fmtDate(fiado.fecha_fiado)}</p>
                   </div>
                   <EstadoBadge estado={fiado.estado} />
                 </div>
@@ -444,6 +463,7 @@ export default function Fiados() {
                       <button onClick={() => setCobrandoCheque(fiado)} style={{ ...btnFlat('success'), flex: 1, fontSize: '0.72rem', padding: '0.4rem' }}>Con cheque</button>
                     </>
                   )}
+                  <button onClick={() => setEditandoCheque(fiado)} style={{ ...btnBordered('neutral'), flex: fiado.estado === 'ABIERTO' ? '0 0 auto' : 1, fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}>Editar</button>
                   <button onClick={() => setEliminando(fiado)} style={{ ...btnBordered('danger'), flex: fiado.estado === 'ABIERTO' ? '0 0 auto' : 1, fontSize: '0.72rem', padding: '0.4rem 0.7rem' }}>Eliminar</button>
                 </div>
               </div>
@@ -469,7 +489,7 @@ export default function Fiados() {
                     onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                     onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                     <td style={{ ...TD, fontWeight: 600 }}>{nombreCliente(fiado.cliente_id)}</td>
-                    <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem', color: 'rgba(100,116,139,0.6)' }}>{fiado.cheque_nro}</td>
+                    <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.75rem', color: 'rgba(100,116,139,0.6)' }}>{fmtNroCheque(fiado.cheque_nro)}</td>
                     <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)', whiteSpace: 'nowrap' }}>
                       <span style={{ fontSize: '0.72rem', color: 'rgba(100,116,139,0.5)', marginRight: '4px' }}>{fiado.porcentaje_venta}%</span>
                       {fmtARS(fiado.monto_original)}
@@ -487,6 +507,7 @@ export default function Fiados() {
                             <button onClick={() => setCobrandoCheque(fiado)} style={{ ...btnGhost('success'), fontSize: '0.68rem', padding: 0, whiteSpace: 'nowrap' }}>Con cheque</button>
                           </>
                         )}
+                        <button onClick={() => setEditandoCheque(fiado)} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px', whiteSpace: 'nowrap' }}>Editar</button>
                         <button onClick={() => setEliminando(fiado)} style={{ ...btnBordered('danger'), fontSize: '0.68rem', padding: '2px 8px', whiteSpace: 'nowrap' }}>Eliminar</button>
                       </div>
                     </td>
@@ -503,6 +524,13 @@ export default function Fiados() {
       {cobrandoEfectivo && <ModalEfectivo fiado={cobrandoEfectivo} clienteNombre={nombreCliente(cobrandoEfectivo.cliente_id)} onClose={() => setCobrandoEfectivo(null)} onSuccess={handleEfectivoSuccess} />}
       {cobrandoCheque && <ModalCheque fiado={cobrandoCheque} clienteNombre={nombreCliente(cobrandoCheque.cliente_id)} onClose={() => setCobrandoCheque(null)} onSuccess={handleChequeSuccess} />}
       {resultado && <ModalResultado result={resultado} onClose={() => setResultado(null)} />}
+      {editandoCheque && (
+        <EditarChequeDelFiado
+          fiado={editandoCheque}
+          onClose={() => setEditandoCheque(null)}
+          onSuccess={() => { setEditandoCheque(null); queryClient.invalidateQueries({ queryKey: ['fiados'] }); queryClient.invalidateQueries({ queryKey: ['cheque'] }) }}
+        />
+      )}
       {eliminando && <ModalEliminar entidad="fiado" id={eliminando.id} onClose={() => setEliminando(null)} onSuccess={handleEliminarSuccess} />}
     </div>
   )
