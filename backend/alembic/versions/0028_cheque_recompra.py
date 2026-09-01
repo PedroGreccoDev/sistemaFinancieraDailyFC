@@ -62,6 +62,43 @@ CREATE UNIQUE INDEX uq_cheques_banco_nro_en_cartera
 
 
 def upgrade() -> None:
+    # Si los datos ya violan la unicidad nueva, Postgres corta con "no se pudo
+    # crear el índice único" y una sola llave de ejemplo. Esto corre en el
+    # arranque del contenedor (`alembic upgrade head` con `set -e`), así que no es
+    # un deploy fallido: **el sistema no levanta**, y el log no dice qué cheques
+    # son ni qué hacer con ellos. El caso no es teórico — el agujero que esta
+    # misma migración tapa (el banco NULL que no bloqueaba nada) es justamente el
+    # que pudo dejar copias cargadas en silencio.
+    #
+    # Avisa y corta; no limpia solo. Cuál de las copias sobra lo decide el
+    # operador: una puede ser una lámina distinta que entró sin banco.
+    op.execute(
+        """
+        DO $$
+        DECLARE detalle text;
+        BEGIN
+            SELECT string_agg(
+                       format('%s (banco %s) ×%s',
+                              nro_cheque, COALESCE(banco, 'sin banco'), n),
+                       '; ')
+              INTO detalle
+              FROM (
+                SELECT nro_cheque, banco, count(*) AS n
+                  FROM cheques
+                 WHERE anulado_at IS NULL AND estado = 'EN_CARTERA'
+                 GROUP BY COALESCE(banco, ''), banco, nro_cheque
+                HAVING count(*) > 1
+              ) c;
+            IF detalle IS NOT NULL THEN
+                RAISE EXCEPTION
+                    'No se puede aplicar 0028: hay cheques repetidos EN CARTERA y la '
+                    'unicidad nueva los prohíbe → %. Anulá las copias que sobren, o '
+                    'cargales el banco si son láminas distintas, y volvé a desplegar.',
+                    detalle;
+            END IF;
+        END $$;
+        """
+    )
     # DROP ... IF EXISTS (mismo patrón que 0010 y 0017): el entrypoint corre
     # `alembic upgrade head` con `set -e`, así que un nombre que no matchee
     # tumbaría el arranque del contenedor.
