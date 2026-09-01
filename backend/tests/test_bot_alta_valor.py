@@ -81,3 +81,57 @@ def test_un_fajo_muestra_el_valor_de_cada_cheque(alta_falsa) -> None:
     assert ok
     assert "$1.000.000,00 → $900.000,00" in texto
     assert "$500.000,00 → $460.000,00" in texto
+
+
+# ── La salida: venta ──────────────────────────────────────────────────
+
+@pytest.fixture
+def venta_falsa(monkeypatch):
+    """Reemplaza la venta —lo único que toca la base— por cheques ya vendidos."""
+
+    def _preparar(*cheques: Cheque) -> None:
+        pendientes = list(cheques)
+        monkeypatch.setattr(
+            dispatcher, "_vender_un_cheque_obj",
+            lambda db, phone, data, msg_at=None: pendientes.pop(0),
+        )
+
+    return _preparar
+
+
+def _vendido(monto: str, pct_compra: str, pct_venta: str, nro: str = "1") -> Cheque:
+    ch = _cheque(monto, pct_compra, nro)
+    ch.porcentaje_venta = Decimal(pct_venta)
+    cien = Decimal("100")
+    ch.ganancia = (ch.monto * (ch.porcentaje_compra - ch.porcentaje_venta) / cien).quantize(
+        Decimal("0.01")
+    )
+    return ch
+
+
+def test_la_venta_de_a_uno_muestra_nominal_y_lo_que_entra(monkeypatch) -> None:
+    """La ganancia sola es un número que hay que creerle al bot. Con el nominal y
+    lo que pone el cliente a la vista, la resta se controla de un vistazo."""
+    ch = _vendido("1000000", "10", "5")
+    monkeypatch.setattr(dispatcher, "_resolver_cheque", lambda db, data: ch)
+    monkeypatch.setattr(
+        dispatcher.svc_cheques, "transition_cheque",
+        lambda db, cid, payload, event_at=None: ch,
+    )
+    _, texto = dispatcher._vender_un_cheque(None, "549", {"porcentaje_venta": 5})
+    assert "Nominal: $1.000.000,00" in texto
+    assert "entra $950.000,00" in texto   # 5% de descuento de venta
+    assert "costó $900.000,00" in texto   # 10% de descuento de compra
+    assert "Ganancia: $50.000,00" in texto
+
+
+def test_la_venta_en_lote_muestra_el_valor_de_cada_cheque(venta_falsa) -> None:
+    venta_falsa(_vendido("1000000", "10", "5", "1"), _vendido("500000", "8", "4", "2"))
+    ok, texto = dispatcher._vender_cheque(
+        None, "549", {"ventas": [{"nro_cheque": "1"}, {"nro_cheque": "2"}]}
+    )
+    assert ok
+    assert "$1.000.000,00 → $950.000,00" in texto
+    assert "$500.000,00 → $480.000,00" in texto
+    # El total de lo que entra a caja, no solo la ganancia.
+    assert "Entra: $1.430.000,00" in texto

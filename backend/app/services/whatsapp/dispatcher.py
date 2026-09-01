@@ -571,14 +571,19 @@ def _vender_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dateti
     vendidos: list[str] = []
     fallidos: list[str] = []
     ganancia_total = Decimal("0.00")
+    entra_total = Decimal("0.00")
     for item in items:
         try:
             cheque = _vender_un_cheque_obj(db, phone, item, msg_at)
             ganancia_total += cheque.ganancia or Decimal("0.00")
+            entra_total += _neto_venta(cheque) or Decimal("0.00")
             aviso = " ⚠️ a pérdida" if (cheque.ganancia or 0) < 0 else ""
+            # Nominal → lo que entra, igual que el fajo del alta: en un lote la
+            # ganancia sola no deja ver cuál de los cuatro se cargó con el % errado.
             vendidos.append(
-                f"  • Nº {cheque.nro_cheque} al {_pct(cheque.porcentaje_venta)}% "
-                f"· {_ars(cheque.ganancia)}{aviso}"
+                f"  • Nº {cheque.nro_cheque} · {_ars(cheque.monto)} → "
+                f"{_ars(_neto_venta(cheque))} al {_pct(cheque.porcentaje_venta)}% "
+                f"· ganancia {_ars(cheque.ganancia)}{aviso}"
             )
         except (ServiceError, ValueError) as exc:
             motivo = getattr(exc, "message", None) or str(exc)
@@ -589,7 +594,7 @@ def _vender_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dateti
         lines.append(f"✅ *{len(vendidos)} cheque(s) vendido(s)*")
         lines.extend(vendidos)
         lines.append("")
-        lines.append(f"Ganancia total: {_ars(ganancia_total)}")
+        lines.append(f"Entra: {_ars(entra_total)} · ganancia {_ars(ganancia_total)}")
     if fallidos:
         if vendidos:
             lines.append("")
@@ -640,10 +645,17 @@ def _vender_un_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dat
     )
     cheque = svc_cheques.transition_cheque(db, objetivo.id, payload, event_at=msg_at)
 
+    # Los mismos dos números que en el alta, del otro lado del mostrador: el
+    # nominal y lo que el cliente puso (nominal − descuento de venta). Con los dos
+    # porcentajes solos, la ganancia era un número que había que creerle al bot;
+    # con las dos plata a la vista, la resta se controla de un vistazo.
+    destino = f" → {cliente.nombre}" if cliente_destino_id else ""
     lines = [
         f"✅ *Cheque vendido*",
-        f"Nº {cheque.nro_cheque}",
-        f"Venta: {_pct(cheque.porcentaje_venta)}% | Compra: {_pct(cheque.porcentaje_compra)}%",
+        f"Nº {cheque.nro_cheque}{destino}",
+        f"Nominal: {_ars(cheque.monto)}",
+        f"Venta: {_pct(cheque.porcentaje_venta)}% — entra {_ars(_neto_venta(cheque))}",
+        f"Compra: {_pct(cheque.porcentaje_compra)}% — costó {_ars(_neto_compra(cheque))}",
         f"Ganancia: {_ars(cheque.ganancia)}",
     ]
     # Venta por debajo del % de compra ⇒ pérdida. Se registra igual, solo avisamos.
@@ -744,7 +756,12 @@ def _cobrar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: dateti
 
     if len(items) == 1:
         cheque = _cobrar_un_cheque(db, phone, items[0], msg_at)
-        return True, f"✅ Cheque Nº {cheque.nro_cheque} marcado como *COBRADO*."
+        # En ventanilla se cobra el nominal entero: no hay descuento que aplicar,
+        # pero el monto tiene que estar porque es lo que entró a la caja.
+        return True, (
+            f"✅ Cheque Nº {cheque.nro_cheque} marcado como *COBRADO*.\n"
+            f"Entró a caja: {_ars(cheque.monto)}"
+        )
 
     cobrados: list[str] = []
     fallidos: list[str] = []
@@ -795,8 +812,8 @@ def _rechazar_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: date
     if len(items) == 1:
         cheque = _rechazar_un_cheque(db, phone, items[0], msg_at)
         return True, (
-            f"⛔ Cheque Nº {cheque.nro_cheque} marcado como *RECHAZADO*. "
-            "Gestioná el recupero externamente."
+            f"⛔ Cheque Nº {cheque.nro_cheque} — {_ars(cheque.monto)} marcado como "
+            "*RECHAZADO*. Gestioná el recupero externamente."
         )
 
     rechazados: list[str] = []
@@ -2405,6 +2422,17 @@ def _neto_compra(cheque: Cheque) -> Decimal:
     tiene que cambiar en los dos lados o el bot y la pantalla van a mostrar dos
     valores distintos para la misma cartera."""
     return (cheque.monto * (_CIEN_PCT - cheque.porcentaje_compra) / _CIEN_PCT).quantize(Decimal("0.01"))
+
+
+def _neto_venta(cheque: Cheque) -> Decimal | None:
+    """Lo que se cobra por el cheque: nominal menos el descuento de venta.
+
+    Es lo que el cliente que se lo lleva pone sobre el mostrador, y la misma
+    cuenta que hace `transition_cheque` para el ingreso de caja. None si el
+    cheque todavía no se vendió."""
+    if cheque.porcentaje_venta is None:
+        return None
+    return (cheque.monto * (_CIEN_PCT - cheque.porcentaje_venta) / _CIEN_PCT).quantize(Decimal("0.01"))
 
 
 def _totales_cartera(db: Session) -> tuple[list[Cheque], Decimal, Decimal]:
