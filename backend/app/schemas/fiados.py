@@ -13,7 +13,17 @@ class FiadoRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    cheque_nro: str
+    # El id del cheque, además del número: con la recompra (§1.b) el mismo número
+    # puede tener varias filas, así que buscar el cheque por `cheque_nro` desde el
+    # panel puede dar con la pasada equivocada. El vínculo ya existía en la tabla;
+    # solo faltaba exponerlo para poder editar el cheque desde la pantalla del fiado.
+    cheque_id: UUID
+    # Igual que `ChequeRead.nro_cheque`, y por el mismo motivo: el modelo lo
+    # declara `str | None` —un e-cheq de emisión no trae número (§E-cheq)— y con
+    # `str` a secas FastAPI no descarta esa fila, **rechaza la respuesta entera**.
+    # Fiar un e-cheq sin número dejaba en 500 el listado completo de fiados: la
+    # pantalla en blanco, no una fila mal.
+    cheque_nro: str | None
     cliente_id: UUID
     monto_original: Decimal
     porcentaje_venta: Decimal

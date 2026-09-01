@@ -255,7 +255,11 @@ export interface GastoOperativo {
 
 export interface Fiado {
   id: string
-  cheque_nro: string
+  // Ademas del numero: con la recompra el mismo numero puede tener varias filas,
+  // asi que buscar el cheque por `cheque_nro` puede dar con la pasada equivocada.
+  cheque_id: string
+  // Puede faltar: un e-cheq de emision entra sin numero (§E-cheq).
+  cheque_nro: string | null
   cliente_id: string
   monto_original: string
   porcentaje_venta: string

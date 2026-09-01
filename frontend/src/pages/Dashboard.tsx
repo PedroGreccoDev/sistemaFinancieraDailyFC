@@ -337,7 +337,7 @@ export default function Dashboard() {
                 <RowItem
                   key={f.id}
                   primary={clienteMap.get(f.cliente_id) ?? '…'}
-                  secondary={f.cheque_nro}
+                  secondary={fmtNroCheque(f.cheque_nro)}
                   value={fmtARS(f.saldo_pendiente)}
                   valueColor="#fbbf24"
                   onClick={() => navigate('/deudores/cheques-fiados')}

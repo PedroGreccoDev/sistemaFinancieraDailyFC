@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import inspect
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -233,3 +233,35 @@ def test_en_una_lista_con_columna_de_monto_el_nombre_no_lo_repite() -> None:
 def test_sin_numero_y_sin_monto_igual_menciona_el_banco() -> None:
     """Es lo único que le queda al operador para reconocerlo en la lista."""
     assert describir(_cheque(nro=None), con_monto=False) == "cheque sin número — Galicia"
+
+
+def test_el_listado_de_fiados_aguanta_un_cheque_sin_numero() -> None:
+    """El mismo bug que la cartera, en otra pantalla: `FiadoRead.cheque_nro` era
+    `str` mientras el modelo lo declara `str | None`.
+
+    Fiar un e-cheq sin número dejaba **el listado entero de fiados en 500** —no
+    una fila mal: la pantalla en blanco— y hasta el POST de fiar devolvía error
+    después de haber hecho el trabajo. Visto en vivo el 2026-08-31.
+    """
+    from app.db.models import Fiado, FiadoEstado
+    from app.schemas.fiados import FiadoRead
+
+    fiado = Fiado(
+        id=uuid.uuid4(),
+        cheque_id=uuid.uuid4(),
+        cliente_id=uuid.uuid4(),
+        monto_original=Decimal("3000000.00"),
+        porcentaje_venta=Decimal("6"),
+        saldo_pendiente=Decimal("2820000.00"),
+        estado=FiadoEstado.ABIERTO,
+        fecha_fiado=date(2026, 8, 31),
+    )
+    fiado.cheque = _cheque(nro=None, banco=None, tipo=ChequeTipo.ELECTRONICO)
+    fiado.created_at = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
+    fiado.updated_at = fiado.created_at
+
+    leido = FiadoRead.model_validate(fiado)
+    assert leido.cheque_nro is None
+    # El id va además del número: con la recompra el mismo número puede tener
+    # varias filas, y el panel necesita saber cuál cheque está editando.
+    assert leido.cheque_id == fiado.cheque_id
