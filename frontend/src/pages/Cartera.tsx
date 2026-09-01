@@ -206,6 +206,16 @@ function totalCartera(cheques: Cheque[]): number {
   return cheques.reduce((acc, c) => acc + parseFloat(c.monto), 0)
 }
 
+// Lo que vale el cheque: el nominal menos su propio descuento de compra.
+function valorNeto(cheque: Cheque): number {
+  return parseFloat(cheque.monto) * (100 - parseFloat(cheque.porcentaje_compra)) / 100
+}
+
+// Cada cheque descuenta con su porcentaje, no con un promedio de la cartera.
+function totalNetoCartera(cheques: Cheque[]): number {
+  return cheques.reduce((acc, c) => acc + valorNeto(c), 0)
+}
+
 /**
  * Marca los e-cheq. Los de papel no llevan nada: son el caso normal y un badge en
  * todas las filas no distingue nada. Va antes del número porque lo que responde es
@@ -362,10 +372,11 @@ export default function Cartera() {
 
       {/* KPIs */}
       {cheques && (
-        <div className="grid grid-cols-2 gap-3 sm:max-w-xl" style={{ marginBottom: '1.25rem' }}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:max-w-3xl" style={{ marginBottom: '1.25rem' }}>
           {[
             { label: 'En cartera', value: String(cheques.length), color: 'var(--text-strong)', sub: 'cheque(s) en stock' },
             { label: 'Total', value: fmtARS(totalCartera(cheques)), color: 'var(--text-strong)', sub: 'valor nominal' },
+            { label: 'Con descuento', value: fmtARS(totalNetoCartera(cheques)), color: 'var(--text-strong)', sub: 'lo que valen hoy' },
           ].map(({ label, value, color, sub }) => (
             <div key={label} className="lift" style={{ ...CARD, padding: '0.8rem 1rem' }}>
               <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
@@ -398,6 +409,7 @@ export default function Cartera() {
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <p style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(cheque.monto)}</p>
+                    <p style={{ fontFamily: FM, fontSize: '0.7rem', fontWeight: 600, color: 'rgba(148,163,184,0.8)', marginTop: '1px' }}>{fmtARS(valorNeto(cheque))} c/desc.</p>
                     <div style={{ marginTop: '4px' }}>{diasBadge(dias)}</div>
                     <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end', marginTop: '6px', flexWrap: 'wrap' }}>
                       <button onClick={() => setChequeOperar({ cheque, modo: 'VENDER' })} style={{ ...btnFlat('success'), fontSize: '0.66rem', padding: '2px 8px' }}>Vender</button>
@@ -412,7 +424,7 @@ export default function Cartera() {
           </div>
           {/* Desktop: tabla */}
           <div className="hidden sm:block" style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '540px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '660px' }}>
               <thead>
                 <tr>
                   <th style={{ ...TH, width: '76px', textAlign: 'center' }} aria-label="Foto">
@@ -421,6 +433,7 @@ export default function Cartera() {
                   <th style={TH}>Nº Cheque</th>
                   <th style={{ ...TH, textAlign: 'right' }}>Monto</th>
                   <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">Compra %</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>Con descuento</th>
                   <th style={{ ...TH, textAlign: 'center' }}>Fecha pago</th>
                   <th style={{ ...TH, textAlign: 'center' }}>Vence</th>
                   <th style={TH} className="hidden sm:table-cell">Ingresado</th>
@@ -440,6 +453,7 @@ export default function Cartera() {
                       <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}><TipoBadge tipo={cheque.tipo} />{fmtNroCheque(cheque.nro_cheque)}<VueltaBadge vuelta={cheque.vuelta} /></td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(cheque.monto)}</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.7)' }} className="hidden sm:table-cell">{parseFloat(cheque.porcentaje_compra).toFixed(2)}%</td>
+                      <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(valorNeto(cheque))}</td>
                       <td style={{ ...TD, textAlign: 'center', color: 'rgba(148,163,184,0.7)' }}>{fmtDate(cheque.fecha_pago)}</td>
                       <td style={{ ...TD, textAlign: 'center' }}>{diasBadge(dias)}</td>
                       <td style={{ ...TD, color: 'rgba(100,116,139,0.6)', fontSize: '0.72rem' }} className="hidden sm:table-cell">{fmtDate(cheque.created_at.slice(0, 10))}</td>
