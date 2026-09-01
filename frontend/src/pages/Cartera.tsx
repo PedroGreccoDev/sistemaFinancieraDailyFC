@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getChequeCartera, getCheques, chequeFotoUrl, crearCheque } from '../api/cheques'
 import { getClientes } from '../api/clientes'
 import { fmtARS, fmtDate, fmtNroCheque, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
-import { btnBordered, btnSolid } from '../lib/ui'
+import { btnBordered, btnFlat, btnSolid } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconRefresh, IconCamera } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
@@ -15,6 +15,7 @@ import ModalEliminar from '../components/ModalEliminar'
 import ModalRevertirCheque from '../components/ModalRevertirCheque'
 import ClienteSelect from '../components/ClienteSelect'
 import ModalEditarCheque from '../components/ModalEditarCheque'
+import ModalOperarCheque, { type ModoOperar } from '../components/ModalOperarCheque'
 import SelectorMedioPago from '../components/SelectorMedioPago'
 
 const MODAL_BG = 'var(--modal)'
@@ -277,6 +278,9 @@ export default function Cartera() {
   const [chequeEditar, setChequeEditar] = useState<Cheque | null>(null)
   const [chequeRevertir, setChequeRevertir] = useState<Cheque | null>(null)
   const [chequeEliminar, setChequeEliminar] = useState<Cheque | null>(null)
+  // Sacar el cheque de la cartera: vendido o fiado. Un solo estado para las dos
+  // porque es el mismo modal y solo cambia a dónde va la plata.
+  const [chequeOperar, setChequeOperar] = useState<{ cheque: Cheque; modo: ModoOperar } | null>(null)
   const [nuevoCheque, setNuevoCheque] = useState(false)
   const queryClient = useQueryClient()
 
@@ -296,6 +300,12 @@ export default function Cartera() {
     queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
     queryClient.invalidateQueries({ queryKey: ['reporte'] })
     queryClient.invalidateQueries({ queryKey: ['movimientos-unificados'] })
+  }
+
+  /** Vender y fiar mueven caja, cartera, fiados y el feed: lo mismo que revertir. */
+  function handleOperarSuccess() {
+    setChequeOperar(null)
+    handleRevertirSuccess()
   }
 
   function handleNuevoSuccess() {
@@ -389,7 +399,9 @@ export default function Cartera() {
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <p style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(cheque.monto)}</p>
                     <div style={{ marginTop: '4px' }}>{diasBadge(dias)}</div>
-                    <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end', marginTop: '6px' }}>
+                    <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end', marginTop: '6px', flexWrap: 'wrap' }}>
+                      <button onClick={() => setChequeOperar({ cheque, modo: 'VENDER' })} style={{ ...btnFlat('success'), fontSize: '0.66rem', padding: '2px 8px' }}>Vender</button>
+                      <button onClick={() => setChequeOperar({ cheque, modo: 'FIAR' })} style={{ ...btnFlat('primary'), fontSize: '0.66rem', padding: '2px 8px' }}>Fiar</button>
                       <button onClick={() => setChequeEditar(cheque)} style={{ ...btnBordered('neutral'), fontSize: '0.66rem', padding: '2px 8px' }}>Editar</button>
                       <button onClick={() => setChequeEliminar(cheque)} style={{ ...btnBordered('danger'), fontSize: '0.66rem', padding: '2px 8px' }}>Eliminar</button>
                     </div>
@@ -433,6 +445,8 @@ export default function Cartera() {
                       <td style={{ ...TD, color: 'rgba(100,116,139,0.6)', fontSize: '0.72rem' }} className="hidden sm:table-cell">{fmtDate(cheque.created_at.slice(0, 10))}</td>
                       <td style={{ ...TD, textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                          <button onClick={() => setChequeOperar({ cheque, modo: 'VENDER' })} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Vender</button>
+                          <button onClick={() => setChequeOperar({ cheque, modo: 'FIAR' })} style={{ ...btnFlat('primary'), fontSize: '0.68rem', padding: '2px 8px' }}>Fiar</button>
                           <button onClick={() => setChequeEditar(cheque)} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>Editar</button>
                           <button onClick={() => setChequeEliminar(cheque)} style={{ ...btnBordered('danger'), fontSize: '0.68rem', padding: '2px 8px' }}>Eliminar</button>
                         </div>
@@ -583,6 +597,7 @@ export default function Cartera() {
       {nuevoCheque && <ModalNuevoCheque onClose={() => setNuevoCheque(false)} onSuccess={handleNuevoSuccess} />}
       {chequeRevertir && <ModalRevertirCheque cheque={chequeRevertir} onClose={() => setChequeRevertir(null)} onSuccess={handleRevertirSuccess} />}
       {chequeEliminar && <ModalEliminar entidad="cheque" id={chequeEliminar.id} onClose={() => setChequeEliminar(null)} onSuccess={handleRevertirSuccess} />}
+      {chequeOperar && <ModalOperarCheque cheque={chequeOperar.cheque} modo={chequeOperar.modo} onClose={() => setChequeOperar(null)} onSuccess={handleOperarSuccess} />}
     </div>
   )
 }

@@ -44,6 +44,26 @@ export const crearCheque = (payload: ChequeCreatePayload): Promise<Cheque> =>
     body: JSON.stringify(payload),
   })
 
+// Venta de un cheque de la cartera. Va por la transición manual genérica —el
+// backend no tiene un /vender— con `target_state: VENDIDO`: eso pasa el cheque a
+// estado terminal, calcula la ganancia (monto · (%compra − %venta)) y asienta el
+// ingreso a la caja de `medio_pago` por el neto: monto · (1 − %venta).
+interface VenderChequePayload {
+  porcentaje_venta: number
+  /** A quién se lo vendió. Opcional: la venta de mostrador no siempre tiene nombre. */
+  cliente_destino_id?: string | null
+  motivo: string
+  operador_id: string
+  /** Por cuál de las dos cajas entra la plata. Efectivo si no se manda. */
+  medio_pago?: MedioPago
+}
+
+export const venderCheque = (cheque_id: string, payload: VenderChequePayload): Promise<Cheque> =>
+  apiFetch<Cheque>(`/cheques/${encodeURIComponent(cheque_id)}/transiciones`, {
+    method: 'POST',
+    body: JSON.stringify({ target_state: 'VENDIDO', ...payload }),
+  })
+
 interface FiarChequePayload {
   cliente_destino_id: string
   porcentaje_venta: number

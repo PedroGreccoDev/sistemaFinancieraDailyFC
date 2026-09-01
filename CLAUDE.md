@@ -620,9 +620,24 @@ imposible esa reconstrucción.
 - `COBRADO` y `RECHAZADO` son eventos exclusivamente manuales del operador.
 - `FIADO` **solo** se procesa con la transacción atómica `fiar_cheque` (crea cheque FIADO + registro `Fiado` en el mismo commit). **No genera préstamo ni cuotas.**
 - Toda transición manual requiere `operador_id` y `motivo` no vacíos.
+- **El destino se guarda en las dos salidas** (`VENDIDO` y `FIADO`) _(arreglado
+  2026-09-01)_. Antes `transition_to` solo lo anotaba al fiar: el `cliente_destino_id`
+  que la venta mandaba —el bot lo manda desde que existe el intent— se perdía en
+  silencio, y por eso el aviso de recompra salía como *"vendido el 12/07"*, sin nombre.
 - **Foto del cheque:** los cheques cargados por WhatsApp guardan la imagen (migración `0009`); se visualiza en el panel con `ChequeFotoModal`.
   - El endpoint `GET /cheques/{id}/foto` se monta en un **router público** (`cheques.public_router`, sin `get_current_user`): se sirve por **UUID no-adivinable** para que funcione en `<img src>` directos del panel (p. ej. la miniatura de `Cartera`), que no pueden enviar el header `Authorization`. **La protección es la entropía del UUID, no la sesión** — si esos UUIDs se filtran (logs, links), la foto queda expuesta. El resto de `cheques.router` sigue protegido. Si se necesita cerrar el acceso sin romper los `<img>`, el camino es un token firmado en la query (`?token=`).
 - **Editar carga (panel + bot):** `PATCH /cheques/{id}` (`svc_cheques.editar_cheque`) corrige la carga y resincroniza la caja (`resync_caja_cheque`). Reglas: `COBRADO`/`RECHAZADO` son terminales y NO editables; `EN_CARTERA` edita campos base; `VENDIDO`/`FIADO` además `porcentaje_venta` (recalcula ganancia, y el saldo del fiado solo si aún no recibió cobros parciales). En el panel está el botón "Editar" por fila en Cartera (en cartera y en el historial de ventas); el modal permite además reasignar cliente origen/destino (con alta de cliente inline).
+- **Vender y Fiar (panel) _(agregado 2026-09-01)_:** botones por fila en Cartera, sobre
+  el cheque que se está mirando —antes las dos salidas normales del cheque solo existían
+  por WhatsApp, y el fiado además desde la pantalla de Fiados eligiendo el cheque de una
+  lista—. Los dos abren el mismo modal (`ModalOperarCheque`, prop `modo`) porque el
+  formulario es el mismo y lo que cambia es a dónde va la plata: **Vender** entra
+  `monto · (1 − %venta)` a la caja elegida y reconoce la ganancia en el acto (cliente
+  **opcional**, hay medio de pago); **Fiar** no mueve caja hoy, abre la deuda por ese
+  mismo neto (cliente **obligatorio**, no hay medio de pago que elegir). Vender va por
+  `POST /cheques/{id}/transiciones` con `target_state: VENDIDO`; fiar, por
+  `POST /cheques/{id}/fiar`. El `motivo` que el backend exige se completa solo si el
+  operador no escribe nada: es auditoría, no una decisión de negocio, igual que en el bot.
 - **Eliminar y Revertir (panel):** botones por fila en Cartera. Eliminar **anula** (no borra) y revierte la caja; Revertir devuelve un cheque terminal a `EN_CARTERA` dejándolo disponible para volver a operarse. Ver §Anulación y reversión.
 - **Cartera preexistente (`es_carga_inicial`):** un cheque cargado dentro del período de apertura **no asienta el egreso de compra** —ya estaba comprado antes de que el sistema existiera—. Ver §Apertura del sistema.
 
