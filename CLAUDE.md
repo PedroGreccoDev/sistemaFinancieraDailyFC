@@ -2087,6 +2087,18 @@ pero no es gratis y no puede correr en cada commit):
 |---|---|
 | `backend/scripts/probar_ocr.py` | Que el modelo **lea** bien la captura: campo por campo contra lo esperado |
 | `backend/scripts/smoke_echeq.py` | Lo que pasa **después**: que el cheque quede en la base, que la caja salga por el neto y que el comprobante avise lo que tiene que avisar |
+| `backend/scripts/chat_bot.py` | La **conversación**: se le escribe al bot como el operador y se ve qué contesta. Mismo modelo, mismo dispatcher, misma base; solo se reemplaza el envío por WhatsApp |
+
+```bash
+# Conversar, o correr un guion (un mensaje por línea)
+backend\.venv\Scripts\python.exe scripts/chat_bot.py --db dailyfc_panel
+backend\.venv\Scripts\python.exe scripts/chat_bot.py --db dailyfc_panel --guion g.txt
+```
+
+`chat_bot.py` verifica **dos veces** que la base sea local —la URL que arma y la que el
+backend termina usando— y fuerza WAHA y Telegram a inalcanzables: el `.env` del repo
+apunta a producción y bajo `railway run` el entorno trae los gateways reales. Con esto se
+encontró que la consulta de cartera contestaba "📄 Nº None" para un e-cheq sin número.
 
 ```bash
 # Qué lee, comparado contra el .json de al lado de cada imagen
@@ -2108,10 +2120,17 @@ caja cuadrada. Cubre Galicia (endoso, PDF), Provincia (emisión, ×2) y una pant
 endoso fotografiada de otro celular.
 
 **Lo que esa corrida NO cubre, y hay que cerrar cuando aparezca el caso:** otros bancos
-(Santander, BBVA, Macro…), varios e-cheq en un mismo mensaje, y —el riesgo más
-concreto— un **comprobante de transferencia común** que el modelo podría confundir con
-un cheque. Cuando llegue una captura nueva, el camino es sumarla a la carpeta con su
-`.json` y volver a correr los dos scripts.
+(Santander, BBVA, Macro…) y varios e-cheq en un mismo mensaje. Cuando llegue una captura
+nueva, el camino es sumarla a la carpeta con su `.json` y volver a correr los dos scripts.
+
+**El riesgo abierto es el comprobante de transferencia común** (pendiente al
+2026-08-31, falta una captura real para cerrarlo). El cliente reenvía lo que le llega, y
+una transferencia se ve **parecida a un e-cheq de emisión**: importe, fecha, CUIT,
+nombres. Si el modelo la lee como un cheque, el daño es de los que no dan señal —entra a
+cartera un cheque que no existe, sale de la caja la plata de una compra que nadie hizo, y
+el bot contesta el comprobante de siempre—. Se descubre al no cerrar la caja. La defensa
+que hoy existe es indirecta: el porcentaje de compra sale del mensaje del operador y sin
+él el alta pide aclaración. **No está probado que alcance.**
 
 ---
 
