@@ -2464,7 +2464,7 @@ def _consulta_cartera(
         f"Con descuento: {_ars(neto)}",
         f"Diferencia: {_ars(diferencia)}{pct}",
         "",
-        "*Próximos a cobrar:*",
+        "*Detalle (por fecha de pago):*",
     ]
 
     detalle = [
@@ -2475,7 +2475,10 @@ def _consulta_cartera(
         f"Compra: {_pct(c.porcentaje_compra)}%"
         for c in sorted(cheques, key=lambda x: x.fecha_pago or date.max)
     ]
-    lines.extend(_detalle(detalle))
+    # Sin recorte: la cartera se contesta entera. Es el inventario de papeles en
+    # stock y el operador la pide justamente para revisarlo todo; mandarlo al
+    # panel por los que sobran lo obliga a abrir la pantalla que quiso evitar.
+    lines.extend(detalle)
 
     return "\n".join(lines)
 
