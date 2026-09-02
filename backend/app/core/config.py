@@ -138,6 +138,23 @@ class Settings(BaseSettings):
     # por degradación (nunca el recordatorio periódico, que es solo para caídas).
     monitor_alertar_degradado: bool = Field(default=False)
 
+    # ── Auto-reinicio de la sesión de WhatsApp (ver services/autorestart.py) ──
+    # Cuando la sesión queda FAILED o STOPPED, el monitor puede apretar el
+    # restart de WAHA solo, sin esperar a que alguien lea el Telegram. Nunca
+    # actúa sobre SCAN_QR_CODE: ese estado necesita el celular de una persona.
+    #
+    # Apagado por default a propósito: encenderlo le da al backend permiso para
+    # reiniciar la sesión de WhatsApp de producción por su cuenta, y eso se
+    # decide a mano, no se hereda de un deploy.
+    autorestart_activo: bool = Field(default=False)
+    # Intentos seguidos antes de rendirse y dejarle el problema a la alerta.
+    # Reintentar sin techo contra los servidores de WhatsApp arriesga el baneo
+    # del número: el remedio sería peor que la caída.
+    autorestart_max_intentos: int = Field(default=3)
+    # Espera entre intentos. WAHA tarda en levantar; volver a sacudirlo antes
+    # de tiempo cuenta un intento y no arregla nada.
+    autorestart_espera_minutos: int = Field(default=5)
+
     # ── Registro de bugs (ver services/bugs.py) ──────────────────────────
     # Cada error único entra en la tabla `bugs` con un numeral, y ese número
     # —no el traceback— es lo que viaja a Telegram.

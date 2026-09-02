@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from app.core.config import get_settings
-from app.services import health, telegram
+from app.services import autorestart, health, telegram
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ async def _ciclo() -> None:
         )
 
     estado = health.EstadoAlerta()
+    estado_reinicio = autorestart.EstadoReinicio()
     while True:
         try:
             diagnostico = await health.diagnosticar()
@@ -60,6 +61,13 @@ async def _ciclo() -> None:
                 await telegram.enviar_alerta(decision.aviso)
             elif diagnostico.estado is not health.Estado.OK:
                 logger.warning("Monitor de salud degradado: %s", diagnostico.firma)
+
+            # Va DESPUÉS de decidir la alerta, y a propósito: avisar es lo que
+            # no se puede perder. Si el auto-reinicio falla o tarda, el Telegram
+            # ya salió. Con el umbral de fallos en 2, además, el reinicio suele
+            # arreglar la sesión antes de que la alerta llegue a dispararse.
+            if autorestart.corresponde_mirar(diagnostico):
+                estado_reinicio = await autorestart.intentar(estado_reinicio)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — el monitor no puede morirse
