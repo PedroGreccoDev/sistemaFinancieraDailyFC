@@ -541,7 +541,7 @@ queda en cero, lo que le debés a Pedro baja a $400.000, y la caja no se movió.
 - **Endpoints:** `POST /compensaciones`, `GET /compensaciones` (filtrable por
   cliente o acreedor), `POST /compensaciones/{id}/revertir`.
 - **Panel:** el mismo `ModalCompensar` con **dos entradas** —botón "Compensar" en
-  la pestaña General de Deudores (cliente fijo) y en la tarjeta del acreedor en
+  la pestaña General de Deudores (cliente fijo) y en la fila del acreedor en
   Deudas (acreedor fijo)—, porque según el día el operador piensa la operación de
   un lado o del otro. Entrar desde Deudas fija **el acreedor y la moneda, no una
   deuda**: la imputación es contra todo lo que se le debe, y por eso el botón vive
@@ -1109,17 +1109,23 @@ negocio le puede deber varias veces a la misma persona —le compró un lote de 
 pagarlo, después un cheque, y encima le pidió plata prestada— y **cuando le paga no está
 pagando una de esas: está pagando lo que le debe**.
 
-- **Una tarjeta por acreedor**, con el detalle de cada deuda y, al pie, **un total por
-  moneda con sus botones**: Pagar, Con cheque (solo ARS) y Compensar. ARS y USD no se
-  suman: son dos filas. El detalle **no lleva botón de pago** —acá se le paga al acreedor,
-  no a una deuda—; sí Editar y Eliminar, que corrigen la carga de esa deuda puntual.
+- **Una fila por acreedor** _(pasó de tarjeta a fila desplegable el 2026-09-07, para que
+  sea la misma pantalla que "Otras deudas" de Deudores)_: nombre, cuántas deudas, y
+  `Saldo ARS` y `Saldo USD` en columnas separadas —las monedas nunca se suman entre sí—.
+  En la fila van **"+ Sumar deuda"** y **"Pagar ARS" / "Pagar USD"**, que son las
+  acciones de todos los días; el resto vive al desplegar, para no llenar la fila de
+  botones.
+- **Al desplegar** está el detalle de cada deuda —con Editar y Eliminar, que corrigen la
+  carga de esa deuda puntual— y, al pie, **un total por moneda con sus botones**: Pagar,
+  Con cheque (solo ARS) y Compensar. El detalle **no lleva botón de pago**: acá se le paga
+  al acreedor, no a una deuda.
 - **La agrupación se arma en el front** (`agrupar()` en `Pasivos.tsx`), sin endpoint de
   agregación, igual que General y Otras deudas. **El criterio tiene que ser el mismo que el
-  del backend** (`cargar_pasivos_acreedor`: trim + case-insensitive) o la tarjeta mostraría
+  del backend** (`cargar_pasivos_acreedor`: trim + case-insensitive) o la fila mostraría
   un total y el botón pagaría otro. `acreedor` es **texto libre y no un cliente con id**
   (§Compensación), así que "Cuello" y "Cuello Hermanos" son dos acreedores y no hay forma
   de que el sistema sepa lo contrario.
-- **El acreedor conserva su tarjeta aunque ya no se le deba nada**, para poder sumarle la
+- **El acreedor conserva su fila aunque ya no se le deba nada**, para poder sumarle la
   próxima; el filtro de estado decide qué deudas se traen.
 - **"Sumar deuda" crea un registro nuevo, no edita el anterior** (`ModalNuevaDeuda` con
   `acreedorFijo`), por el mismo motivo que en §2.b: cada deuda tiene su fecha y su propia
@@ -1943,7 +1949,7 @@ que sería un loop infinito).
 - Cada tabla tiene trigger `updated_at` vía `fn_set_updated_at()` (creada en migración 0001).
 - Las transacciones críticas usan `SELECT ... FOR UPDATE` para evitar race conditions.
 - **Fechas/horas en hora local de Argentina (ART), no UTC.** Usar los helpers de `app/core/fechas.py` (`hoy_local`, etc.); los gastos guardan `hora_operacion` (migración `0008`).
-- **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad. La pantalla agrupa **por acreedor** —una tarjeta cada uno, con el total por moneda y sus botones— igual que Deudores/General agrupa por cliente; ver §5.
+- **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad. La pantalla agrupa **por acreedor** —una fila desplegable cada uno, con el total por moneda y sus botones— igual que Deudores/Otras deudas agrupa por cliente; ver §5.
 - **Sección "Deudores" (frontend):** agrupa lo que los **clientes** le deben al negocio (≠ "Deudas"/Pasivos, que es al revés). Cuatro pestañas: **General** (índice, `/deudores` → `DeudoresGeneral`), **Préstamos** (`/deudores/prestamos`), **Cheques fiados** (`/deudores/cheques-fiados`) y **Otras deudas** (`/deudores/otras` → `DeudoresOtras`, las deudas simples **agrupadas por cliente** — ver §2.b). La pestaña **General** es una **vista consolidada por cliente** (total ARS y USD sumando préstamos + fiados + deudas simples) armada **en el front** desde `/prestamos`, `/fiados` y `/deudas-simples` (no hay endpoint de agregación); tiene un botón **"Nuevo"** que abre `ModalNuevaDeudaSimple`. El **pago de importe libre** (parcial o total, cross-currency) vive en el componente compartido `components/ModalPagarDeuda.tsx` (llama a `pagar_prestamo`, `cobrar_con_efectivo`, `cobrar_deuda_simple` o `cobrar_deudas_cliente` según el `tipo` de deuda; con `deudas_cliente` el `id` que viaja es el del **cliente**, no el de una deuda) y se usa en General, Préstamos y Otras deudas (botón "Pago libre"/"Cobrar", además del cobro por cuota entera). No reemplaza el cobro directo desde las otras pestañas.
 
 ---
