@@ -56,9 +56,14 @@ def test_el_prompt_avisa_que_confundirse_mueve_la_caja() -> None:
 def test_sin_cuotas_no_es_un_prestamo() -> None:
     """"Le presté 100 lucas a Kiosco" cae justo entre préstamo y deuda libre.
     Sin esta regla el modelo elige por su cuenta y arma un cuadro de cuotas que
-    el operador nunca pactó."""
+    el operador nunca pactó.
+
+    Desde el préstamo a interés fijo son tres las salidas y no dos —cuotas,
+    interés por período, o deuda libre—, así que la regla nombra a las dos
+    formas de préstamo: un mensaje sin cuotas puede ser igual un préstamo."""
     seccion = _seccion_deuda_cliente()
-    assert "SIN CUOTAS NO ES PRÉSTAMO" in seccion
+    assert "SIN CUOTAS NI INTERÉS NO ES PRÉSTAMO" in seccion
+    assert "INTERES_FIJO" in seccion
 
 
 def test_fiar_plata_no_es_fiar_un_cheque() -> None:

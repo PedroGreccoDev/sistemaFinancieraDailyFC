@@ -50,6 +50,7 @@ from app.db.models import (
     Moneda,
     Prestamo,
     PrestamoEstado,
+    PrestamoTipo,
 )
 from app.schemas.cheques import ChequeRead
 from app.schemas.deudores import (
@@ -109,6 +110,12 @@ class Renglon:
 def saldo_prestamo(prestamo: Prestamo) -> Decimal:
     """Lo que falta cobrar de un préstamo: la suma del saldo de sus cuotas vivas.
 
+    En un préstamo a interés fijo eso es **el interés devengado impago —vigente y
+    mora—, nunca el capital**: el capital no vive en ninguna cuota y se devuelve
+    con un acto explícito del operador ("Abonar capital" / "Cancelar"), no con un
+    cobro genérico a cuenta. Un "Kiosco me entregó 200 lucas" baja interés, que es
+    lo que el cliente debe mes a mes (§Interés fijo).
+
     Pura (sin BD): testeable en el estilo de `tests/`."""
     return sum(
         (
@@ -124,6 +131,11 @@ def _detalle_prestamo(prestamo: Prestamo) -> str:
     pendientes = sum(
         1 for c in prestamo.cuotas_detalle if c.estado != CuotaEstado.COBRADA
     )
+    if prestamo.tipo_prestamo == PrestamoTipo.INTERES_FIJO:
+        # `prestamo.cuotas` es 0 acá (no hay cuadro): "1/0 cuota pend." no diría
+        # nada. Lo que se debe es interés de períodos de 30 días.
+        plural = "s" if pendientes != 1 else ""
+        return f"Interés fijo · {pendientes} período{plural} impago{plural}"
     plural = "s" if prestamo.cuotas > 1 else ""
     return f"Préstamo · {pendientes}/{prestamo.cuotas} cuota{plural} pend."
 
@@ -242,6 +254,13 @@ def _cargar_renglones(
     fiados = list(db.scalars(q_fiados)) if moneda == Moneda.ARS else []
     deudas = list(db.scalars(q_deudas))
     prestamos = list(db.scalars(q_prestamos.options(selectinload(Prestamo.cuotas_detalle))))
+    # Pone al día los períodos de interés fijo **sin commitear**: si esto es un
+    # cobro, el período nuevo entra en la misma transacción que la imputación; si
+    # es solo una consulta, se descarta al cerrar la sesión y se rehace igual en
+    # la próxima (es idempotente). Sin esto, cobrar el día que arranca un ciclo
+    # imputaría contra el ciclo anterior (§Interés fijo).
+    for p in prestamos:
+        svc_prestamos.devengar_periodos(db, p)
 
     return armar_renglones(fiados, deudas, prestamos, moneda)
 

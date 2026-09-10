@@ -6,7 +6,15 @@ export type ChequeTipo = 'PAPEL' | 'ELECTRONICO'
 export type CuotaEstado = 'PENDIENTE' | 'COBRADA' | 'EN_MORA'
 export type PrestamoEstado = 'ACTIVO' | 'CANCELADO' | 'EN_MORA'
 export type Moneda = 'ARS' | 'USD'
-export type Frecuencia = 'DIARIA' | 'SEMANAL' | 'QUINCENAL' | 'MENSUAL' | 'ANUAL'
+
+// Las dos formas de prestar. NORMAL es el préstamo de siempre (cuadro de cuotas
+// cerrado). INTERES_FIJO no amortiza capital: el capital queda prestado hasta que
+// el cliente lo devuelve y cada 30 días se cobra un interés fijo en plata.
+export type PrestamoTipo = 'NORMAL' | 'INTERES_FIJO'
+
+// CADA_30_DIAS es la del interés fijo. No es MENSUAL: un mes se corre con los de
+// 28 y 31, y acá cada fecha de cobro cae 30 días exactos después de la anterior.
+export type Frecuencia = 'DIARIA' | 'SEMANAL' | 'QUINCENAL' | 'MENSUAL' | 'ANUAL' | 'CADA_30_DIAS'
 export type PasivoEstado = 'PENDIENTE' | 'CANCELADA'
 export type FiadoEstado = 'ABIERTO' | 'CANCELADO'
 export type DeudaSimpleEstado = 'ABIERTA' | 'CANCELADA'
@@ -59,14 +67,29 @@ export interface Cuota {
 export interface Prestamo {
   id: string
   cliente_id: string
+  tipo_prestamo: PrestamoTipo
   credito: string
   moneda: Moneda
+  /** En INTERES_FIJO vale 0: no es "cero cuotas", es "no tiene cuadro". La
+   *  cantidad de períodos devengados se cuenta con `cuotas_detalle`. */
   cuotas: number
   frecuencia: Frecuencia
+  /** En INTERES_FIJO no se conoce al alta: arranca igual al capital y crece con
+   *  cada interés que se devenga. */
   total_a_cobrar: string
   ganancia: string
   estado: PrestamoEstado
   fecha_inicio: string
+  /** Solo INTERES_FIJO — el interés de UN período de 30 días, en plata. */
+  monto_interes_fijo: string | null
+  /** Solo INTERES_FIJO — la fecha de cobro fijada al alta, ancla de los ciclos:
+   *  el período k arranca 30 × (k−1) días después. */
+  dia_cobro: string | null
+  /** Solo INTERES_FIJO — capital que falta que devuelva. No vive en ninguna
+   *  cuota: baja solo con un abono explícito o con la cancelación. */
+  capital_pendiente: string | null
+  /** En INTERES_FIJO, un período de 30 días de interés (no una porción del
+   *  capital). El último es el vigente; los anteriores impagos son mora. */
   cuotas_detalle: Cuota[]
   created_at: string
   updated_at: string

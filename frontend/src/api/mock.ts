@@ -95,7 +95,7 @@ function cuotas(prestamoId: string, specs: { venc: number; monto: string; estado
 
 const prestamos: Prestamo[] = [
   {
-    id: 'pr-1', cliente_id: 'cli-1', credito: '500000', moneda: 'ARS', cuotas: 6, frecuencia: 'MENSUAL',
+    id: 'pr-1', cliente_id: 'cli-1', tipo_prestamo: 'NORMAL', credito: '500000', moneda: 'ARS', cuotas: 6, frecuencia: 'MENSUAL',
     total_a_cobrar: '600000', ganancia: '100000', estado: 'ACTIVO', fecha_inicio: d(-90),
     cuotas_detalle: cuotas('pr-1', [
       { venc: -60, monto: '100000', estado: 'COBRADA', cobro: -60 },
@@ -105,10 +105,11 @@ const prestamos: Prestamo[] = [
       { venc: 50,  monto: '100000', estado: 'PENDIENTE' },
       { venc: 80,  monto: '100000', estado: 'PENDIENTE' },
     ]),
+    monto_interes_fijo: null, dia_cobro: null, capital_pendiente: null,
     created_at: ts(-90), updated_at: ts(-5),
   },
   {
-    id: 'pr-2', cliente_id: 'cli-3', credito: '1000', moneda: 'USD', cuotas: 4, frecuencia: 'MENSUAL',
+    id: 'pr-2', cliente_id: 'cli-3', tipo_prestamo: 'NORMAL', credito: '1000', moneda: 'USD', cuotas: 4, frecuencia: 'MENSUAL',
     total_a_cobrar: '1200', ganancia: '200', estado: 'ACTIVO', fecha_inicio: d(-25),
     cuotas_detalle: cuotas('pr-2', [
       { venc: -25, monto: '300', estado: 'COBRADA', cobro: -25 },
@@ -116,10 +117,11 @@ const prestamos: Prestamo[] = [
       { venc: 35,  monto: '300', estado: 'PENDIENTE' },
       { venc: 65,  monto: '300', estado: 'PENDIENTE' },
     ]),
+    monto_interes_fijo: null, dia_cobro: null, capital_pendiente: null,
     created_at: ts(-25), updated_at: ts(-5),
   },
   {
-    id: 'pr-3', cliente_id: 'cli-4', credito: '200000', moneda: 'ARS', cuotas: 5, frecuencia: 'SEMANAL',
+    id: 'pr-3', cliente_id: 'cli-4', tipo_prestamo: 'NORMAL', credito: '200000', moneda: 'ARS', cuotas: 5, frecuencia: 'SEMANAL',
     total_a_cobrar: '250000', ganancia: '50000', estado: 'ACTIVO', fecha_inicio: d(-40),
     cuotas_detalle: cuotas('pr-3', [
       { venc: -33, monto: '50000', estado: 'COBRADA', cobro: -33 },
@@ -128,10 +130,11 @@ const prestamos: Prestamo[] = [
       { venc: -12, monto: '50000', estado: 'EN_MORA' },   // vencida
       { venc: -5,  monto: '50000', estado: 'PENDIENTE' }, // vencida
     ]),
+    monto_interes_fijo: null, dia_cobro: null, capital_pendiente: null,
     created_at: ts(-40), updated_at: ts(-2),
   },
   {
-    id: 'pr-4', cliente_id: 'cli-5', credito: '120000', moneda: 'ARS', cuotas: 3, frecuencia: 'MENSUAL',
+    id: 'pr-4', cliente_id: 'cli-5', tipo_prestamo: 'NORMAL', credito: '120000', moneda: 'ARS', cuotas: 3, frecuencia: 'MENSUAL',
     total_a_cobrar: '150000', ganancia: '30000', estado: 'CANCELADO', fecha_inicio: d(-120),
     cuotas_detalle: cuotas('pr-4', [
       { venc: -90, monto: '50000', estado: 'COBRADA', cobro: -90 },
@@ -139,6 +142,21 @@ const prestamos: Prestamo[] = [
       { venc: -30, monto: '50000', estado: 'COBRADA', cobro: -30 },
     ]),
     created_at: ts(-120), updated_at: ts(-30),
+    monto_interes_fijo: null, dia_cobro: null, capital_pendiente: null,
+  },
+  // Préstamo a interés fijo: capital afuera, un período impago (mora) y el
+  // vigente sin cobrar. Es el caso que hace visible el semáforo rojo de la
+  // modalidad, que no mira vencimientos de cuadro sino la mora acumulada.
+  {
+    id: 'pr-5', cliente_id: 'cli-2', tipo_prestamo: 'INTERES_FIJO', credito: '5000000', moneda: 'ARS',
+    cuotas: 0, frecuencia: 'CADA_30_DIAS', total_a_cobrar: '6000000', ganancia: '1000000',
+    estado: 'ACTIVO', fecha_inicio: d(-65),
+    monto_interes_fijo: '500000', dia_cobro: d(-35), capital_pendiente: '5000000',
+    cuotas_detalle: cuotas('pr-5', [
+      { venc: -35, monto: '500000', estado: 'EN_MORA' },
+      { venc: -5,  monto: '500000', estado: 'PENDIENTE' },
+    ]),
+    created_at: ts(-65), updated_at: ts(-5),
   },
 ]
 

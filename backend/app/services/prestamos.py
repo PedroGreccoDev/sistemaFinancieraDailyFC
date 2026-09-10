@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import logging
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -22,11 +23,16 @@ from app.db.models import (
     Moneda,
     Prestamo,
     PrestamoEstado,
+    PrestamoTipo,
 )
 from app.core.fechas import hoy_local
 from app.schemas.prestamos import (
+    AbonarCapitalRequest,
+    CancelarInteresFijoRequest,
+    CobrarInteresRequest,
     CuotaCobrarConChequeRequest,
     CuotasLoteCobrarConChequeRequest,
+    InteresFijoUpdate,
     PrestamoCreate,
     PrestamoPagoRequest,
     PrestamoUpdate,
@@ -41,6 +47,8 @@ from app.services.exceptions import (
     NotFoundError,
     ValidationError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _reimputar_stock(db: Session) -> None:
@@ -108,6 +116,17 @@ def _ingresar_stock_cobro(
     _reimputar_stock(db)
 
 
+def _etiqueta_cuota(prestamo: Prestamo, cuota: Cuota) -> str:
+    """Cómo se nombra la cuota en el libro de caja, según la modalidad.
+
+    En un préstamo a interés fijo la cuota no es una porción del cuadro: es el
+    interés de un período de 30 días. Llamarla "Cuota #3" en el reporte diario
+    haría pensar que quedan cuotas por delante, y no hay cuadro que terminar."""
+    if prestamo.tipo_prestamo == PrestamoTipo.INTERES_FIJO:
+        return f"Interés período #{cuota.numero_cuota}"
+    return f"Cuota #{cuota.numero_cuota}"
+
+
 def _registrar_cobro_cuota(
     db: Session,
     prestamo: Prestamo,
@@ -124,6 +143,7 @@ def _registrar_cobro_cuota(
     if monto <= Decimal("0.00"):
         return
     cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
+    etiqueta = _etiqueta_cuota(prestamo, cuota)
     svc_caja.registrar(
         db,
         fecha=cuota.fecha_cobro,
@@ -134,7 +154,7 @@ def _registrar_cobro_cuota(
         medio_pago=medio_pago,
         referencia_tipo="cuota",
         referencia_id=cuota.id,
-        detalle=f"Cuota #{cuota.numero_cuota} - {cliente_nombre}",
+        detalle=f"{etiqueta} - {cliente_nombre}",
     )
     _ingresar_stock_cobro(
         db,
@@ -143,7 +163,7 @@ def _registrar_cobro_cuota(
         moneda_pago=prestamo.moneda,
         cotizacion_stock=cotizacion_stock,
         fecha=cuota.fecha_cobro,
-        detalle=f"Stock por cuota #{cuota.numero_cuota} - {cliente_nombre}",
+        detalle=f"Stock por {etiqueta.lower()} - {cliente_nombre}",
     )
 
 
@@ -166,6 +186,8 @@ def calcular_vencimiento(fecha_inicio: date, frecuencia: FrecuenciaCuotas, numer
         return _add_months(fecha_inicio, numero)
     if frecuencia == FrecuenciaCuotas.ANUAL:
         return _add_months(fecha_inicio, 12 * numero)
+    if frecuencia == FrecuenciaCuotas.CADA_30_DIAS:
+        return fecha_inicio + timedelta(days=CICLO_DIAS * numero)
     raise ValueError(f"Frecuencia no soportada: {frecuencia}")
 
 
@@ -198,30 +220,546 @@ def construir_cuotas(
     return cuotas
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  Préstamo a interés fijo (§Interés fijo)
+# ══════════════════════════════════════════════════════════════════════
+#
+# El capital no se amortiza: queda prestado hasta que el cliente lo devuelve, y
+# cada 30 días se cobra un interés fijo en plata. De ahí salen las tres reglas
+# que gobiernan todo lo que sigue:
+#
+#   1. **El período se debe al empezar, no al terminar** (sin prorrateo). La
+#      cuota del período k se crea el día en que el período arranca; si el
+#      cliente cancela al día siguiente, ese interés se cobra igual.
+#   2. **Los períodos se devengan de a uno.** No hay cuadro que pre-generar
+#      porque no se sabe cuántos van a ser. `devengar_periodos` crea los que ya
+#      arrancaron y todavía no existían, y lo llama toda lectura y toda
+#      operación: así el sistema queda al día sin depender de ningún cron.
+#   3. **La mora se acumula, no reemplaza.** El interés impago de un período
+#      pasa a EN_MORA y el del siguiente se suma. El "período vigente" es
+#      siempre el último devengado; todos los anteriores impagos son mora.
+
+
+CICLO_DIAS = 30
+
+_CERO = Decimal("0.00")
+
+
+def fecha_de_periodo(dia_cobro: date, numero: int) -> date:
+    """Día en que arranca —y se cobra— el período `numero` (1 es el primero).
+
+    Pura (sin BD): testeable en el estilo de `tests/`."""
+    if numero < 1:
+        raise ValueError("El número de período arranca en 1.")
+    return dia_cobro + timedelta(days=CICLO_DIAS * (numero - 1))
+
+
+def periodos_cumplidos(dia_cobro: date, hasta: date) -> int:
+    """Cuántos períodos ya arrancaron al día `hasta`.
+
+    0 mientras no llegue la primera fecha de cobro: el préstamo existe y el
+    capital está afuera, pero todavía no se devengó interés. Pura (sin BD)."""
+    if hasta < dia_cobro:
+        return 0
+    return (hasta - dia_cobro).days // CICLO_DIAS + 1
+
+
+def es_interes_fijo(prestamo: Prestamo) -> bool:
+    return prestamo.tipo_prestamo == PrestamoTipo.INTERES_FIJO
+
+
+def _exigir_interes_fijo(prestamo: Prestamo) -> None:
+    if not es_interes_fijo(prestamo):
+        raise ConflictError(
+            "Esta operación es solo para préstamos a interés fijo. "
+            "Este préstamo tiene cuadro de cuotas: cobralo por cuota o con un pago libre."
+        )
+
+
+def periodos(prestamo: Prestamo) -> list[Cuota]:
+    """Los períodos devengados, del más viejo al más nuevo."""
+    return sorted(prestamo.cuotas_detalle, key=lambda c: c.numero_cuota)
+
+
+def periodo_vigente(prestamo: Prestamo) -> Cuota | None:
+    """El último período devengado, esté cobrado o no.
+
+    Es el que entra en una cancelación: el interés del ciclo en curso se debe
+    completo aunque el cliente cancele antes de que se cumpla (sin prorrateo)."""
+    devengados = periodos(prestamo)
+    return devengados[-1] if devengados else None
+
+
+def periodos_en_mora(prestamo: Prestamo) -> list[Cuota]:
+    """Los períodos anteriores al vigente que quedaron sin saldar.
+
+    Se acumulan: el interés nuevo no reemplaza al viejo, se suma."""
+    devengados = periodos(prestamo)
+    return [c for c in devengados[:-1] if c.estado != CuotaEstado.COBRADA]
+
+
+def saldo_cuota(cuota: Cuota) -> Decimal:
+    return (cuota.monto - (cuota.monto_pagado or _CERO)).quantize(Decimal("0.01"))
+
+
+def mora_acumulada(prestamo: Prestamo) -> Decimal:
+    return sum((saldo_cuota(c) for c in periodos_en_mora(prestamo)), _CERO).quantize(
+        Decimal("0.01")
+    )
+
+
+def total_cancelacion(prestamo: Prestamo, *, incluir_mora: bool) -> Decimal:
+    """Lo que hay que cobrar para cancelar: capital + interés del período vigente.
+
+    La mora acumulada entra o no según decida el operador: puede saldarse junto
+    con la cancelación o quedar para cobrar aparte (decisión del dueño)."""
+    vigente = periodo_vigente(prestamo)
+    total = prestamo.capital_pendiente or _CERO
+    if vigente is not None:
+        total += saldo_cuota(vigente)
+    if incluir_mora:
+        total += mora_acumulada(prestamo)
+    return Decimal(total).quantize(Decimal("0.01"))
+
+
+def proxima_fecha_cobro(prestamo: Prestamo) -> date | None:
+    """Cuándo arranca el próximo período que todavía no se devengó."""
+    if prestamo.dia_cobro is None:
+        return None
+    return fecha_de_periodo(prestamo.dia_cobro, len(prestamo.cuotas_detalle) + 1)
+
+
+def _marcar_mora(prestamo: Prestamo) -> bool:
+    """Pone EN_MORA los períodos impagos que ya no son el vigente. Devuelve si cambió algo.
+
+    No se mira la fecha sino la posición: el vigente es el último devengado, y
+    que exista uno posterior significa que el ciclo de este ya terminó."""
+    cambio = False
+    devengados = periodos(prestamo)
+    # Se compara por POSICIÓN, no por id: una cuota recién devengada todavía no
+    # tiene id —lo asigna el INSERT— y `None == None` daría "vigente" a todas,
+    # dejando la mora sin marcar justo en la pasada que la crea.
+    for indice, cuota in enumerate(devengados):
+        if cuota.estado == CuotaEstado.COBRADA:
+            continue
+        objetivo = (
+            CuotaEstado.PENDIENTE
+            if indice == len(devengados) - 1
+            else CuotaEstado.EN_MORA
+        )
+        if cuota.estado != objetivo:
+            cuota.estado = objetivo
+            cambio = True
+    return cambio
+
+
+def devengar_periodos(db: Session, prestamo: Prestamo, hasta: date | None = None) -> bool:
+    """Crea las cuotas de los períodos que ya arrancaron y faltaban (sin commit).
+
+    Devuelve si hubo algún cambio. Es idempotente: llamarla dos veces el mismo
+    día no genera nada la segunda vez, y por eso puede colgarse de las lecturas.
+
+    **No devenga si el capital ya se saldó.** El interés se cobra por tener el
+    capital afuera; una vez devuelto no nace un período nuevo. El que estuviera
+    en curso al momento de devolverlo ya está devengado y se debe igual.
+    """
+    if not es_interes_fijo(prestamo) or prestamo.anulado_at is not None:
+        return False
+    if prestamo.dia_cobro is None or prestamo.monto_interes_fijo is None:
+        return False
+    if (prestamo.capital_pendiente or _CERO) <= _CERO:
+        return _marcar_mora(prestamo)
+
+    objetivo = periodos_cumplidos(prestamo.dia_cobro, hasta or hoy_local())
+    ya = len(prestamo.cuotas_detalle)
+    nuevas: list[Cuota] = []
+    for numero in range(ya + 1, objetivo + 1):
+        cuota = Cuota(
+            prestamo=prestamo,
+            numero_cuota=numero,
+            fecha_vencimiento=fecha_de_periodo(prestamo.dia_cobro, numero),
+            # El interés se congela al devengarse: editarlo después vale para los
+            # períodos que vengan, no reescribe lo que ya se debía.
+            monto=prestamo.monto_interes_fijo,
+        )
+        db.add(cuota)
+        nuevas.append(cuota)
+
+    if nuevas:
+        devengado = sum((c.monto for c in nuevas), _CERO)
+        # El total a cobrar de un préstamo a interés fijo no se conoce al alta:
+        # se va conociendo. Arranca en el capital y crece con cada interés que
+        # nace, y la ganancia es exactamente ese interés devengado.
+        prestamo.total_a_cobrar = (prestamo.total_a_cobrar + devengado).quantize(Decimal("0.01"))
+        prestamo.ganancia = (prestamo.ganancia + devengado).quantize(Decimal("0.01"))
+
+    cambio_mora = _marcar_mora(prestamo)
+    return bool(nuevas) or cambio_mora
+
+
+def devengar(db: Session, prestamos: list[Prestamo], hasta: date | None = None) -> int:
+    """Devenga y **commitea** los préstamos que lo necesiten. Devuelve cuántos tocó.
+
+    La cuelgan las lecturas (`get_prestamo`, `list_prestamos`), que es lo que
+    mantiene el sistema al día sin un cron: el panel, el bot y los reportes ven
+    siempre los períodos que ya arrancaron. Si la escritura falla, la lectura
+    sigue: un período que no se pudo crear se vuelve a intentar en la próxima,
+    y romper una consulta por eso sería peor que mostrarla un rato desactualizada.
+    """
+    tocados = [p for p in prestamos if devengar_periodos(db, p, hasta)]
+    if not tocados:
+        return 0
+    try:
+        for tocado in tocados:
+            recalcular_estado(tocado)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("No se pudieron devengar los períodos de interés fijo")
+        return 0
+    return len(tocados)
+
+
+def recalcular_estado(prestamo: Prestamo) -> None:
+    """Deja el préstamo en ACTIVO o CANCELADO según lo que le quede por cobrar.
+
+    Va después de **todo** cobro. La trampa que tapa es del interés fijo: ahí las
+    cuotas son interés, no capital, y darlo por cancelado porque no quedan cuotas
+    impagas sacaría del panel un capital que sigue prestado. Al revés también:
+    cancelar dejando mora sin saldar mantiene el préstamo vivo, porque esa deuda
+    se sigue debiendo y tiene que verse en la cuenta del cliente.
+
+    Cuenta sobre `cuotas_detalle` en memoria y no sobre la BD a propósito: así ve
+    los períodos que se acaban de devengar y todavía no se flushearon, y sirve
+    igual a los servicios que imputan sin commitear (`imputar_pago`).
+    """
+    pendientes = sum(
+        1 for c in prestamo.cuotas_detalle if c.estado != CuotaEstado.COBRADA
+    )
+    if es_interes_fijo(prestamo):
+        cancelado = pendientes == 0 and (prestamo.capital_pendiente or _CERO) <= _CERO
+    else:
+        cancelado = pendientes == 0
+    if cancelado:
+        prestamo.estado = PrestamoEstado.CANCELADO
+    elif prestamo.estado == PrestamoEstado.CANCELADO:
+        prestamo.estado = PrestamoEstado.ACTIVO
+
+
+def _prestamo_interes_fijo_bloqueado(db: Session, prestamo_id: uuid.UUID) -> Prestamo:
+    """Trae el préstamo con lock, valida que sea a interés fijo y lo pone al día."""
+    prestamo = db.scalar(
+        select(Prestamo)
+        .options(selectinload(Prestamo.cuotas_detalle))
+        .where(Prestamo.id == prestamo_id)
+        .with_for_update()
+    )
+    if prestamo is None:
+        raise NotFoundError("Prestamo no encontrado.")
+    if prestamo.anulado_at is not None:
+        raise ConflictError("El préstamo está anulado.")
+    _exigir_interes_fijo(prestamo)
+    # Sin esto, cobrar el día que arranca un período nuevo cobraría el anterior:
+    # la operación tiene que ver los mismos períodos que ve el panel.
+    if devengar_periodos(db, prestamo):
+        # El flush le da `id` a las cuotas recién nacidas. Hace falta antes de
+        # cobrarlas: la línea de caja las referencia por id, y sin flush entraría
+        # con `referencia_id` en NULL — invisible para la anulación, que barre
+        # por referencia.
+        db.flush()
+    return prestamo
+
+
+def cobrar_interes(
+    db: Session, prestamo_id: uuid.UUID, payload: CobrarInteresRequest
+) -> Prestamo:
+    """Cobra el interés de uno o varios períodos de un préstamo a interés fijo.
+
+    Sin `cuota_ids`, cobra el **período vigente**; con `incluir_mora`, suma
+    además todos los períodos viejos impagos. El capital no se toca: para eso
+    está `abonar_capital`.
+    """
+    prestamo = _prestamo_interes_fijo_bloqueado(db, prestamo_id)
+
+    if payload.cuota_ids:
+        por_id = {c.id: c for c in prestamo.cuotas_detalle}
+        faltantes = [i for i in payload.cuota_ids if i not in por_id]
+        if faltantes:
+            raise NotFoundError("Uno o más períodos no pertenecen a este préstamo.")
+        elegidas = [por_id[i] for i in payload.cuota_ids]
+    else:
+        vigente = periodo_vigente(prestamo)
+        elegidas = [vigente] if vigente is not None else []
+        if payload.incluir_mora:
+            elegidas = periodos_en_mora(prestamo) + elegidas
+
+    a_cobrar = [c for c in elegidas if saldo_cuota(c) > _CERO]
+    if not a_cobrar:
+        if not prestamo.cuotas_detalle:
+            raise ConflictError(
+                "Todavía no se devengó ningún interés: el primer período arranca "
+                f"el {prestamo.dia_cobro:%d/%m/%Y}."
+            )
+        raise ConflictError("No hay interés pendiente para cobrar en este préstamo.")
+
+    fecha = payload.fecha_cobro or hoy_local()
+    for cuota in sorted(a_cobrar, key=lambda c: c.numero_cuota):
+        restante = saldo_cuota(cuota)
+        cuota.monto_pagado = cuota.monto
+        cuota.estado = CuotaEstado.COBRADA
+        cuota.fecha_cobro = fecha
+        _registrar_cobro_cuota(
+            db, prestamo, cuota, restante, payload.medio_pago, payload.cotizacion_stock
+        )
+
+    try:
+        recalcular_estado(prestamo)
+        db.commit()
+        return get_prestamo(db, prestamo.id)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo registrar el cobro del interés.") from exc
+
+
+def abonar_capital(
+    db: Session, prestamo_id: uuid.UUID, payload: AbonarCapitalRequest
+) -> Prestamo:
+    """Recibe capital de vuelta: baja `capital_pendiente` y lo asienta en la caja.
+
+    Va en la moneda del préstamo —el capital se devuelve en lo que se prestó— y
+    entra como `DEVOLUCION_CAPITAL`, no como cobro: es plata que vuelve, no
+    ganancia. Devolver todo el capital **frena el devengo**: no nacen períodos
+    nuevos, aunque el interés del período en curso siga debiéndose.
+    """
+    prestamo = _prestamo_interes_fijo_bloqueado(db, prestamo_id)
+
+    pendiente = prestamo.capital_pendiente or _CERO
+    if pendiente <= _CERO:
+        raise ConflictError("Este préstamo ya no tiene capital pendiente.")
+    monto = Decimal(payload.monto).quantize(Decimal("0.01"))
+    if monto > pendiente:
+        raise ValidationError(
+            f"El abono ({monto}) supera el capital pendiente ({pendiente}). "
+            "Si además está cobrando interés, usá 'Cancelar' o cobralo aparte."
+        )
+
+    fecha = payload.fecha_cobro or hoy_local()
+    prestamo.capital_pendiente = (pendiente - monto).quantize(Decimal("0.01"))
+    _registrar_devolucion_capital(
+        db, prestamo, monto=monto, fecha=fecha,
+        medio_pago=payload.medio_pago, cotizacion_stock=payload.cotizacion_stock,
+    )
+
+    try:
+        recalcular_estado(prestamo)
+        db.commit()
+        return get_prestamo(db, prestamo.id)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo registrar el abono de capital.") from exc
+
+
+def _registrar_devolucion_capital(
+    db: Session,
+    prestamo: Prestamo,
+    *,
+    monto: Decimal,
+    fecha: date,
+    medio_pago: MedioPago,
+    cotizacion_stock: Decimal | None,
+) -> None:
+    """Asienta (sin commit) el capital que volvió al cajón."""
+    if monto <= _CERO:
+        return
+    cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
+    svc_caja.registrar(
+        db,
+        fecha=fecha,
+        moneda=prestamo.moneda,
+        tipo=CajaTipo.INGRESO,
+        categoria=CajaCategoria.DEVOLUCION_CAPITAL,
+        monto=monto,
+        medio_pago=medio_pago,
+        referencia_tipo="prestamo",
+        referencia_id=prestamo.id,
+        detalle=f"Devolución de capital - {cliente_nombre}",
+    )
+    _ingresar_stock_cobro(
+        db,
+        prestamo,
+        monto=monto,
+        moneda_pago=prestamo.moneda,
+        cotizacion_stock=cotizacion_stock,
+        fecha=fecha,
+        detalle=f"Stock por devolución de capital - {cliente_nombre}",
+    )
+
+
+def editar_interes_fijo(
+    db: Session, prestamo_id: uuid.UUID, payload: InteresFijoUpdate
+) -> Prestamo:
+    """Cambia el interés pactado (y, si todavía no arrancó, la fecha de cobro).
+
+    El interés es **editable sin obligación de modificarlo**: se renegocia cuando
+    el dueño quiere y mientras no lo toque sigue valiendo el de siempre. El nuevo
+    valor rige **de los próximos períodos en adelante**; lo ya devengado quedó
+    congelado con el interés que estaba pactado ese día.
+
+    `aplicar_a_periodo_vigente` es la excepción para el caso real de renegociar
+    el ciclo en curso. Solo se permite si ese período no recibió ni un peso: con
+    un pago encima, cambiarle el monto reescribiría una cuenta ya empezada.
+    """
+    prestamo = _prestamo_interes_fijo_bloqueado(db, prestamo_id)
+    if prestamo.estado == PrestamoEstado.CANCELADO:
+        raise ConflictError("El préstamo ya está cancelado.")
+
+    data = payload.model_dump(exclude_unset=True)
+
+    if "dia_cobro" in data and data["dia_cobro"] != prestamo.dia_cobro:
+        if prestamo.cuotas_detalle:
+            raise ConflictError(
+                "La fecha de cobro es el ancla de los ciclos de 30 días y ya hay "
+                f"{len(prestamo.cuotas_detalle)} período(s) devengado(s): moverla "
+                "correría todas las fechas. Solo se puede cambiar antes del primer período."
+            )
+        prestamo.dia_cobro = data["dia_cobro"]
+
+    nuevo = data.get("monto_interes_fijo")
+    if nuevo is not None:
+        nuevo = Decimal(nuevo).quantize(Decimal("0.01"))
+        if payload.aplicar_a_periodo_vigente:
+            vigente = periodo_vigente(prestamo)
+            if vigente is None:
+                raise ConflictError("Todavía no hay un período vigente al que aplicarlo.")
+            if (vigente.monto_pagado or _CERO) > _CERO:
+                raise ConflictError(
+                    f"El período #{vigente.numero_cuota} ya tiene un pago imputado; "
+                    "no se le puede cambiar el interés. El nuevo valor rige desde el próximo."
+                )
+            delta = nuevo - vigente.monto
+            vigente.monto = nuevo
+            prestamo.total_a_cobrar = (prestamo.total_a_cobrar + delta).quantize(Decimal("0.01"))
+            prestamo.ganancia = (prestamo.ganancia + delta).quantize(Decimal("0.01"))
+        prestamo.monto_interes_fijo = nuevo
+
+    try:
+        db.commit()
+        return get_prestamo(db, prestamo.id)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo editar el interés fijo.") from exc
+
+
+def cancelar_interes_fijo(
+    db: Session, prestamo_id: uuid.UUID, payload: CancelarInteresFijoRequest
+) -> Prestamo:
+    """Liquida el préstamo: capital pendiente + interés del período vigente.
+
+    El interés del ciclo en curso va **completo**, aunque falten días para que se
+    cumpla: sin prorrateo (decisión del dueño). La mora acumulada entra según
+    `incluir_mora`; si queda afuera, el préstamo **no** pasa a CANCELADO —esa
+    deuda se sigue debiendo y tiene que seguir viéndose en la cuenta del cliente—.
+    """
+    prestamo = _prestamo_interes_fijo_bloqueado(db, prestamo_id)
+    if prestamo.estado == PrestamoEstado.CANCELADO:
+        raise ConflictError("El préstamo ya está cancelado.")
+
+    capital = prestamo.capital_pendiente or _CERO
+    vigente = periodo_vigente(prestamo)
+    a_cobrar = [c for c in ([vigente] if vigente is not None else []) if saldo_cuota(c) > _CERO]
+    if payload.incluir_mora:
+        a_cobrar = [c for c in periodos_en_mora(prestamo) if saldo_cuota(c) > _CERO] + a_cobrar
+    if capital <= _CERO and not a_cobrar:
+        raise ConflictError("El préstamo no tiene nada pendiente para cancelar.")
+
+    fecha = payload.fecha_cobro or hoy_local()
+    for cuota in sorted(a_cobrar, key=lambda c: c.numero_cuota):
+        restante = saldo_cuota(cuota)
+        cuota.monto_pagado = cuota.monto
+        cuota.estado = CuotaEstado.COBRADA
+        cuota.fecha_cobro = fecha
+        _registrar_cobro_cuota(
+            db, prestamo, cuota, restante, payload.medio_pago, payload.cotizacion_stock
+        )
+
+    if capital > _CERO:
+        prestamo.capital_pendiente = _CERO
+        _registrar_devolucion_capital(
+            db, prestamo, monto=capital, fecha=fecha,
+            medio_pago=payload.medio_pago, cotizacion_stock=payload.cotizacion_stock,
+        )
+
+    try:
+        recalcular_estado(prestamo)
+        db.commit()
+        return get_prestamo(db, prestamo.id)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo cancelar el préstamo.") from exc
+
+
+def _armar_interes_fijo(payload: PrestamoCreate, fecha_inicio: date) -> Prestamo:
+    """Arma el préstamo a interés fijo del alta. Sin cuotas: se devengan solas.
+
+    `total_a_cobrar` arranca igual al capital y `ganancia` en cero porque acá el
+    total **no se conoce al alta**: depende de cuántos períodos dure el préstamo,
+    y eso lo decide el cliente cuando devuelve el capital. Los dos crecen con
+    cada interés que se devenga (`devengar_periodos`).
+
+    Si el operador no fija la fecha de cobro, se toma un ciclo después de la
+    entrega: es lo que significa "le presté hoy y me paga el mes que viene".
+    """
+    dia_cobro = payload.dia_cobro or (fecha_inicio + timedelta(days=CICLO_DIAS))
+    return Prestamo(
+        cliente_id=payload.cliente_id,
+        tipo_prestamo=PrestamoTipo.INTERES_FIJO,
+        credito=payload.credito,
+        moneda=payload.moneda,
+        # 0 no es "cero cuotas": es "no tiene cuadro" (§migración 0031).
+        cuotas=0,
+        frecuencia=FrecuenciaCuotas.CADA_30_DIAS,
+        total_a_cobrar=payload.credito,
+        ganancia=_CERO,
+        estado=PrestamoEstado.ACTIVO,
+        fecha_inicio=fecha_inicio,
+        monto_interes_fijo=payload.monto_interes_fijo,
+        dia_cobro=dia_cobro,
+        capital_pendiente=payload.credito,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Alta, lectura y edición (las dos modalidades)
+# ══════════════════════════════════════════════════════════════════════
+
 def create_prestamo(db: Session, payload: PrestamoCreate) -> Prestamo:
     cliente = db.get(Cliente, payload.cliente_id)
     if cliente is None:
         raise NotFoundError("Cliente no encontrado.")
 
     fecha_inicio = payload.fecha_inicio or hoy_local()
-    prestamo = Prestamo(
-        cliente_id=payload.cliente_id,
-        credito=payload.credito,
-        moneda=payload.moneda,
-        cuotas=payload.cuotas,
-        frecuencia=payload.frecuencia,
-        total_a_cobrar=payload.total_a_cobrar,
-        ganancia=payload.total_a_cobrar - payload.credito,
-        estado=PrestamoEstado.ACTIVO,
-        fecha_inicio=fecha_inicio,
-    )
-    prestamo.cuotas_detalle = construir_cuotas(
-        prestamo=prestamo,
-        fecha_inicio=fecha_inicio,
-        cantidad=payload.cuotas,
-        frecuencia=payload.frecuencia,
-        total_a_cobrar=payload.total_a_cobrar,
-    )
+    if payload.tipo_prestamo == PrestamoTipo.INTERES_FIJO:
+        prestamo = _armar_interes_fijo(payload, fecha_inicio)
+    else:
+        prestamo = Prestamo(
+            cliente_id=payload.cliente_id,
+            tipo_prestamo=PrestamoTipo.NORMAL,
+            credito=payload.credito,
+            moneda=payload.moneda,
+            cuotas=payload.cuotas,
+            frecuencia=payload.frecuencia,
+            total_a_cobrar=payload.total_a_cobrar,
+            ganancia=payload.total_a_cobrar - payload.credito,
+            estado=PrestamoEstado.ACTIVO,
+            fecha_inicio=fecha_inicio,
+        )
+        prestamo.cuotas_detalle = construir_cuotas(
+            prestamo=prestamo,
+            fecha_inicio=fecha_inicio,
+            cantidad=payload.cuotas,
+            frecuencia=payload.frecuencia,
+            total_a_cobrar=payload.total_a_cobrar,
+        )
 
     try:
         db.add(prestamo)
@@ -256,6 +794,9 @@ def get_prestamo(db: Session, prestamo_id: uuid.UUID) -> Prestamo:
     )
     if prestamo is None:
         raise NotFoundError("Prestamo no encontrado.")
+    # Toda lectura pone al día los períodos de interés fijo: es lo que reemplaza
+    # al cron que no existe (§Interés fijo).
+    devengar(db, [prestamo])
     return prestamo
 
 
@@ -267,7 +808,14 @@ def list_prestamos(db: Session, estado: PrestamoEstado | None = None) -> list[Pr
     )
     if estado is not None:
         query = query.where(Prestamo.estado == estado)
-    return list(db.scalars(query.order_by(Prestamo.created_at.desc())))
+    prestamos = list(db.scalars(query.order_by(Prestamo.created_at.desc())))
+    # Toda lectura pone al día los períodos de interés fijo (§Interés fijo). El
+    # re-filtro es una red: hoy el devengo no puede cambiar el estado de un
+    # préstamo —solo agrega cuotas, y eso nunca lo cancela—, pero si algún día
+    # pudiera, el listado no debería devolver una fila que ya no corresponde.
+    if devengar(db, prestamos) and estado is not None:
+        prestamos = [p for p in prestamos if p.estado == estado]
+    return prestamos
 
 
 def editar_prestamo(
@@ -289,6 +837,13 @@ def editar_prestamo(
     if prestamo.estado != PrestamoEstado.ACTIVO:
         raise ConflictError(
             f"El préstamo está {prestamo.estado.value} y no se puede editar."
+        )
+    if es_interes_fijo(prestamo):
+        # Esta edición regenera el cuadro de cuotas, y un préstamo a interés fijo
+        # no tiene cuadro: le borraría los períodos ya devengados —con su mora—.
+        raise ConflictError(
+            "Este préstamo es a interés fijo y no tiene cuadro de cuotas que "
+            "regenerar. Para cambiar el interés usá 'Editar interés'."
         )
     if any(c.estado == CuotaEstado.COBRADA for c in prestamo.cuotas_detalle):
         raise ConflictError(
@@ -332,7 +887,13 @@ def editar_prestamo(
         medio = data.get("medio_pago") or svc_caja.medio_de_referencia(
             db, "prestamo", prestamo.id, CajaCategoria.OTORGAMIENTO_PRESTAMO
         )
-        svc_caja.borrar_por_referencia(db, "prestamo", prestamo.id)
+        # Acotado a la categoría del otorgamiento: bajo la referencia `prestamo`
+        # también cuelgan los pagos de importe libre (COBRO_CUOTA) y, desde el
+        # interés fijo, las devoluciones de capital. Barrer todo borraría plata
+        # que entró de verdad.
+        svc_caja.borrar_por_referencia(
+            db, "prestamo", prestamo.id, CajaCategoria.OTORGAMIENTO_PRESTAMO
+        )
         cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
         # Un préstamo anterior al corte ya salió de la caja vieja: reasentarlo
         # restaría esa plata dos veces (§Reset de caja). Se borra la línea igual
@@ -392,15 +953,10 @@ def cobrar_cuota(
             _registrar_cobro_cuota(
                 db, prestamo, cuota, restante, medio_pago, cotizacion_stock
             )
-        # Cualquier cuota no cobrada (PENDIENTE o EN_MORA) mantiene vivo el préstamo.
-        pendientes_restantes = db.scalar(
-            select(func.count()).select_from(Cuota).where(
-                Cuota.prestamo_id == prestamo_id,
-                Cuota.estado != CuotaEstado.COBRADA,
-            )
-        )
-        if pendientes_restantes == 0 and prestamo is not None:
-            prestamo.estado = PrestamoEstado.CANCELADO
+        # Cualquier cuota no cobrada (PENDIENTE o EN_MORA) mantiene vivo el
+        # préstamo — y en el interés fijo, también el capital que falte devolver.
+        if prestamo is not None:
+            recalcular_estado(prestamo)
         db.commit()
         db.refresh(cuota)
         return cuota
@@ -445,16 +1001,9 @@ def cobrar_cuota_con_cheque(
         db.add(cheque)
         db.flush()
 
-        pendientes_restantes = db.scalar(
-            select(func.count()).select_from(Cuota).where(
-                Cuota.prestamo_id == prestamo_id,
-                Cuota.estado != CuotaEstado.COBRADA,
-            )
-        )
-        if pendientes_restantes == 0:
-            prestamo = db.get(Prestamo, prestamo_id)
-            if prestamo is not None:
-                prestamo.estado = PrestamoEstado.CANCELADO
+        prestamo = db.get(Prestamo, prestamo_id)
+        if prestamo is not None:
+            recalcular_estado(prestamo)
 
         db.commit()
         db.refresh(cuota)
@@ -506,14 +1055,8 @@ def cobrar_cuotas_lote(
                     db, prestamo, cuota, restantes[cuota.id],
                     medio_pago, cotizacion_stock,
                 )
-        pendientes_restantes = db.scalar(
-            select(func.count()).select_from(Cuota).where(
-                Cuota.prestamo_id == prestamo_id,
-                Cuota.estado != CuotaEstado.COBRADA,
-            )
-        )
-        if pendientes_restantes == 0 and prestamo is not None:
-            prestamo.estado = PrestamoEstado.CANCELADO
+        if prestamo is not None:
+            recalcular_estado(prestamo)
         db.commit()
         for cuota in cuotas:
             db.refresh(cuota)
@@ -561,16 +1104,9 @@ def cobrar_cuotas_con_cheque_lote(
     try:
         db.add(cheque)
         db.flush()
-        pendientes_restantes = db.scalar(
-            select(func.count()).select_from(Cuota).where(
-                Cuota.prestamo_id == prestamo_id,
-                Cuota.estado != CuotaEstado.COBRADA,
-            )
-        )
-        if pendientes_restantes == 0:
-            prestamo = db.get(Prestamo, prestamo_id)
-            if prestamo is not None:
-                prestamo.estado = PrestamoEstado.CANCELADO
+        prestamo = db.get(Prestamo, prestamo_id)
+        if prestamo is not None:
+            recalcular_estado(prestamo)
         db.commit()
         for cuota in cuotas:
             db.refresh(cuota)
@@ -645,9 +1181,10 @@ def imputar_pago(
             cuota.estado = CuotaEstado.COBRADA
             cuota.fecha_cobro = fecha
 
-    cancelado = all(c.estado == CuotaEstado.COBRADA for c in prestamo.cuotas_detalle)
-    if cancelado:
-        prestamo.estado = PrestamoEstado.CANCELADO
+    # En el interés fijo saldar todas las cuotas NO cancela el préstamo: esas
+    # cuotas son interés y el capital sigue afuera (§Interés fijo).
+    recalcular_estado(prestamo)
+    cancelado = prestamo.estado == PrestamoEstado.CANCELADO
 
     if monto_caja is None or monto_caja <= Decimal("0.00"):
         return cancelado
@@ -705,6 +1242,9 @@ def pagar_prestamo(
         raise NotFoundError("Prestamo no encontrado.")
     if prestamo.estado == PrestamoEstado.CANCELADO:
         raise ConflictError("El préstamo ya está cancelado.")
+    # En el interés fijo el pago libre salda **interés**, nunca capital: se
+    # imputa a los períodos impagos del más viejo al más nuevo (primero la mora).
+    devengar_periodos(db, prestamo)
 
     pendientes = [
         c for c in prestamo.cuotas_detalle if c.estado != CuotaEstado.COBRADA
@@ -714,6 +1254,13 @@ def pagar_prestamo(
         ((c.monto - c.monto_pagado) for c in pendientes), Decimal("0.00")
     ).quantize(Decimal("0.01"))
     if saldo_total <= Decimal("0.00"):
+        if es_interes_fijo(prestamo):
+            # Lo que queda es capital, y el capital no se paga por acá: no vive
+            # en ninguna cuota contra la que imputar (§Interés fijo).
+            raise ConflictError(
+                "No hay interés pendiente. Lo que queda es capital: usá "
+                "'Abonar capital' o 'Cancelar'."
+            )
         raise ConflictError("El préstamo no tiene saldo pendiente.")
 
     es_cross = payload.moneda_pago != prestamo.moneda

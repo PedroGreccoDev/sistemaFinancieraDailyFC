@@ -219,6 +219,9 @@ _GRUPO_POR_CATEGORIA: dict[CajaCategoria, str] = {
     CajaCategoria.GASTO:                 "GASTOS",
     CajaCategoria.OTORGAMIENTO_PRESTAMO: "OTORGAMIENTOS",
     CajaCategoria.OTORGAMIENTO_DEUDA:    "OTORGAMIENTOS",
+    # Capital que devuelve el cliente de un préstamo a interés fijo: es un cobro,
+    # pero **no ganancia** — la plata vuelve, no se gana (§Interés fijo).
+    CajaCategoria.DEVOLUCION_CAPITAL:    "COBROS",
     CajaCategoria.INGRESO_PASIVO:        "PASIVOS",
     CajaCategoria.PAGO_PASIVO:           "PASIVOS",
     CajaCategoria.VUELTO_PASIVO:         "PASIVOS",
@@ -243,6 +246,7 @@ _LABEL_CATEGORIA: dict[CajaCategoria, str] = {
     CajaCategoria.GASTO:                 "Gasto",
     CajaCategoria.OTORGAMIENTO_PRESTAMO: "Otorgamiento de préstamo",
     CajaCategoria.OTORGAMIENTO_DEUDA:    "Otorgamiento de deuda",
+    CajaCategoria.DEVOLUCION_CAPITAL:    "Devolución de capital",
     CajaCategoria.INGRESO_PASIVO:        "Préstamo recibido",
     CajaCategoria.PAGO_PASIVO:           "Pago de deuda (pasivo)",
     CajaCategoria.VUELTO_PASIVO:         "Vuelto de pasivo",

@@ -35,6 +35,7 @@ from app.db.models import (
     PasivoEstado,
     Prestamo,
     PrestamoEstado,
+    PrestamoTipo,
 )
 from app.schemas.gastos_operativos import GastoOperativoCreate
 from app.services import gastos_operativos as svc_gastos
@@ -50,7 +51,13 @@ from app.services import compensaciones as svc_compensaciones
 from app.services import deudores as svc_deudores
 from app.schemas.fiados import FiadoCobrarConChequeRequest, FiadoCobrarEfectivoRequest
 from app.schemas.movimientos import MovimientoEfectivoCreate
-from app.schemas.prestamos import PrestamoCreate
+from app.schemas.prestamos import (
+    AbonarCapitalRequest,
+    CancelarInteresFijoRequest,
+    CobrarInteresRequest,
+    InteresFijoUpdate,
+    PrestamoCreate,
+)
 from app.services import anulacion as svc_anulacion
 from app.services import caja as svc_caja
 from app.services import cheques as svc_cheques
@@ -112,7 +119,9 @@ _CLAVES_DE_LOTE: dict[str, tuple[str, ...]] = {
 # ACLARACION_REQUERIDA/DESCONOCIDO: no cargan nada, así que no hay qué perder.
 _INTENTS_DE_ESCRITURA = frozenset({
     "REGISTRAR_CHEQUE", "VENDER_CHEQUE", "FIAR_CHEQUE", "COBRAR_CHEQUE",
-    "RECHAZAR_CHEQUE", "NUEVO_PRESTAMO", "COBRAR_CUOTA", "COBRAR_FIADO_EFECTIVO",
+    "RECHAZAR_CHEQUE", "NUEVO_PRESTAMO", "COBRAR_CUOTA", "COBRAR_INTERES",
+    "ABONAR_CAPITAL", "CANCELAR_PRESTAMO", "EDITAR_INTERES_FIJO",
+    "COBRAR_FIADO_EFECTIVO",
     "COBRAR_FIADO_CON_CHEQUE", "COBRAR_DEUDA_CLIENTE", "COMPENSAR_DEUDA",
     "REGISTRAR_DEUDA", "REGISTRAR_DEUDA_CLIENTE", "PAGAR_PASIVO", "TRASPASO_CAJA",
     "MOVIMIENTO_EFECTIVO", "REGISTRAR_GASTO", "EDITAR_OPERACION",
@@ -198,6 +207,14 @@ def dispatch(
             return _nuevo_prestamo(db, data, msg_at)
         if intent == "COBRAR_CUOTA":
             return _cobrar_cuota(db, data, msg_at)
+        if intent == "COBRAR_INTERES":
+            return _cobrar_interes(db, data, msg_at)
+        if intent == "ABONAR_CAPITAL":
+            return _abonar_capital(db, data, msg_at)
+        if intent == "CANCELAR_PRESTAMO":
+            return _cancelar_prestamo(db, data, msg_at)
+        if intent == "EDITAR_INTERES_FIJO":
+            return _editar_interes_fijo(db, data)
         if intent == "COBRAR_FIADO_EFECTIVO":
             return _cobrar_fiado_efectivo(db, phone, data, msg_at)
         if intent == "COBRAR_FIADO_CON_CHEQUE":
@@ -860,6 +877,19 @@ def _nuevo_prestamo(db: Session, data: dict[str, Any], msg_at: datetime | None =
     cliente_nombre = _req_str(data, "cliente_nombre")
     credito = _req_decimal(data, "credito")
     moneda = _req_enum(data, "moneda", Moneda)
+
+    tipo = PrestamoTipo.NORMAL
+    if data.get("tipo_prestamo"):
+        tipo = _req_enum(data, "tipo_prestamo", PrestamoTipo)
+    # Un mensaje que trae interés y NO trae cuadro es a interés fijo aunque el
+    # modelo no haya puesto la etiqueta: es la señal más fuerte que hay, y
+    # cargarlo como NORMAL obligaría a borrarlo y rehacerlo.
+    elif data.get("monto_interes_fijo") and not data.get("cuotas"):
+        tipo = PrestamoTipo.INTERES_FIJO
+
+    if tipo == PrestamoTipo.INTERES_FIJO:
+        return _nuevo_prestamo_interes_fijo(db, data, cliente_nombre, credito, moneda, msg_at)
+
     cuotas = _req_int(data, "cuotas")
     frecuencia = _req_enum(data, "frecuencia", FrecuenciaCuotas)
     total = _req_decimal(data, "total_a_cobrar")
@@ -899,12 +929,16 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
 
     cliente = _buscar_cliente_o_error(db, cliente_nombre, estricto=True)
 
-    # Buscar cuotas por cobrar del cliente (PENDIENTE o EN_MORA).
+    # Buscar cuotas por cobrar del cliente (PENDIENTE o EN_MORA). Solo de los
+    # préstamos con cuadro: en el interés fijo la "cuota" es el interés de un
+    # período de 30 días y se cobra por otro camino, que arranca por el vigente y
+    # no por el más viejo (§Interés fijo).
     stmt = (
         select(Cuota)
         .join(Prestamo, Cuota.prestamo_id == Prestamo.id)
         .where(
             Prestamo.cliente_id == cliente.id,
+            Prestamo.tipo_prestamo == PrestamoTipo.NORMAL,
             Prestamo.estado != PrestamoEstado.CANCELADO,
             Cuota.estado != CuotaEstado.COBRADA,
         )
@@ -913,6 +947,19 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
     pendientes: list[Cuota] = list(db.scalars(stmt).all())
 
     if not pendientes:
+        # El operador dice "Juan pagó" sin saber de modalidades: si lo que Juan
+        # tiene es un préstamo a interés fijo, esto es un cobro de interés. La
+        # base lo sabe y el modelo no, así que se resuelve acá.
+        tiene_interes_fijo = db.scalar(
+            select(func.count()).select_from(Prestamo).where(
+                Prestamo.cliente_id == cliente.id,
+                Prestamo.tipo_prestamo == PrestamoTipo.INTERES_FIJO,
+                Prestamo.estado != PrestamoEstado.CANCELADO,
+                Prestamo.anulado_at.is_(None),
+            )
+        )
+        if tiene_interes_fijo:
+            return _cobrar_interes(db, data, msg_at)
         return False, f"ℹ️ {cliente.nombre} no tiene cuotas pendientes."
 
     if numero_cuota is not None:
@@ -977,6 +1024,248 @@ def _cobrar_cuota(db: Session, data: dict[str, Any], msg_at: datetime | None = N
         f"✅ Cobré {len(cobradas)} cuotas de {cliente.nombre} ({nros}).\n"
         f"Total: {simbolo}{_fmt_num(total_cobrado)}{extra}"
     )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Préstamo a interés fijo (§Interés fijo)
+# ────────────────────────────────────────────────────────────────────────────
+#
+# El operador no dice de qué modalidad habla: dice "Juan me pagó". **Quién es el
+# cliente lo dice el mensaje; qué modalidad tiene su préstamo lo dice la base.**
+# Por eso la desambiguación vive acá y no en el prompt: el modelo no puede saber
+# si el préstamo de Juan es a cuotas o a interés fijo, y adivinarlo cobraría la
+# cosa equivocada.
+
+def _bandera(data: dict[str, Any], clave: str, *, default: bool) -> bool:
+    """Un sí/no opcional del modelo, con default cuando no lo manda.
+
+    Se separa de `_parse_bool_val` porque ahí el campo ausente es un error —lo que
+    corresponde cuando la respuesta del operador ES la pregunta—, y acá es lo
+    normal: el modelo solo pone la bandera si el mensaje la nombra."""
+    if data.get(clave) is None:
+        return default
+    return _parse_bool_val(data[clave])
+
+
+def _nuevo_prestamo_interes_fijo(
+    db: Session,
+    data: dict[str, Any],
+    cliente_nombre: str,
+    credito: Decimal,
+    moneda: Moneda,
+    msg_at: datetime | None = None,
+) -> DispatchResult:
+    interes = _req_decimal(data, "monto_interes_fijo")
+    dia_cobro = _opt_date(data, "dia_cobro")
+
+    cliente = _find_or_create_cliente(db, cliente_nombre)
+    payload = PrestamoCreate(
+        cliente_id=cliente.id,
+        tipo_prestamo=PrestamoTipo.INTERES_FIJO,
+        credito=credito,
+        moneda=moneda,
+        monto_interes_fijo=interes,
+        dia_cobro=dia_cobro,
+        fecha_inicio=fecha_local(msg_at),
+        medio_pago=_medio(data),
+    )
+    prestamo = svc_prestamos.create_prestamo(db, payload)
+
+    simbolo = "U$D" if moneda == Moneda.USD else "$"
+    lines = [
+        "✅ *Préstamo a interés fijo registrado*",
+        f"Cliente: {cliente.nombre}",
+        f"Capital: {simbolo}{_fmt_num(credito)} — queda prestado, no se amortiza",
+        f"Interés: {simbolo}{_fmt_num(interes)} cada 30 días",
+        f"Primer cobro: {_fmt_date(prestamo.dia_cobro)}",
+    ]
+    return True, "\n".join(lines)
+
+
+def _prestamo_interes_fijo_de(db: Session, cliente: Cliente) -> Prestamo:
+    """El préstamo a interés fijo vivo del cliente. Explota con un aviso si no hay uno solo.
+
+    Con varios no se elige por cuenta propia: cobrar el interés del préstamo
+    equivocado deja uno pago de más y otro en mora, y el error no se ve hasta que
+    no cierra la cuenta del cliente."""
+    prestamos = list(
+        db.scalars(
+            select(Prestamo).where(
+                Prestamo.cliente_id == cliente.id,
+                Prestamo.tipo_prestamo == PrestamoTipo.INTERES_FIJO,
+                Prestamo.estado != PrestamoEstado.CANCELADO,
+                Prestamo.anulado_at.is_(None),
+            )
+        ).all()
+    )
+    svc_prestamos.devengar(db, prestamos)
+    if not prestamos:
+        raise ValidationError(
+            f"{cliente.nombre} no tiene ningún préstamo a interés fijo activo."
+        )
+    if len(prestamos) > 1:
+        raise ValidationError(
+            f"{cliente.nombre} tiene {len(prestamos)} préstamos a interés fijo "
+            "activos y no puedo saber cuál es. Resolvelo desde el panel web."
+        )
+    return prestamos[0]
+
+
+def _resumen_interes_fijo(prestamo: Prestamo, cliente_nombre: str) -> list[str]:
+    """Las tres líneas de estado que cierran toda respuesta de esta modalidad."""
+    simbolo = "U$D" if prestamo.moneda == Moneda.USD else "$"
+    vigente = svc_prestamos.periodo_vigente(prestamo)
+    mora = svc_prestamos.mora_acumulada(prestamo)
+    lines = [
+        f"Capital pendiente: {simbolo}{_fmt_num(prestamo.capital_pendiente or Decimal('0.00'))}",
+    ]
+    if vigente is not None and svc_prestamos.saldo_cuota(vigente) > Decimal("0.00"):
+        lines.append(
+            f"Interés del período #{vigente.numero_cuota}: "
+            f"{simbolo}{_fmt_num(svc_prestamos.saldo_cuota(vigente))} — impago"
+        )
+    if mora > Decimal("0.00"):
+        cuantos = len(svc_prestamos.periodos_en_mora(prestamo))
+        lines.append(f"⚠️ Mora acumulada ({cuantos} período/s): {simbolo}{_fmt_num(mora)}")
+    proxima = svc_prestamos.proxima_fecha_cobro(prestamo)
+    if prestamo.estado != PrestamoEstado.CANCELADO and proxima is not None:
+        lines.append(f"Próximo cobro: {_fmt_date(proxima)}")
+    return lines
+
+
+def _cobrar_interes(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
+    cliente = _buscar_cliente_o_error(db, _req_str(data, "cliente_nombre"), estricto=True)
+    prestamo = _prestamo_interes_fijo_de(db, cliente)
+
+    incluir_mora = _bandera(data, "incluir_mora", default=False)
+    antes = svc_prestamos.mora_acumulada(prestamo)
+    vigente = svc_prestamos.periodo_vigente(prestamo)
+    a_cobrar = svc_prestamos.saldo_cuota(vigente) if vigente is not None else Decimal("0.00")
+    total = a_cobrar + (antes if incluir_mora else Decimal("0.00"))
+
+    prestamo = svc_prestamos.cobrar_interes(
+        db,
+        prestamo.id,
+        CobrarInteresRequest(
+            incluir_mora=incluir_mora,
+            medio_pago=_medio(data),
+            fecha_cobro=fecha_local(msg_at),
+        ),
+    )
+
+    simbolo = "U$D" if prestamo.moneda == Moneda.USD else "$"
+    # Qué se cobró exactamente: el interés del ciclo, la mora, o las dos cosas.
+    # Decir "incluye X de mora" cuando TODO lo cobrado era mora se lee como si
+    # además se hubiera cobrado el período vigente, y no fue así.
+    cobro_mora = antes if incluir_mora else Decimal("0.00")
+    if cobro_mora > Decimal("0.00") and a_cobrar > Decimal("0.00"):
+        detalle_cobro = f"Cobrado: {simbolo}{_fmt_num(total)} (incluye {simbolo}{_fmt_num(cobro_mora)} de mora)"
+    elif cobro_mora > Decimal("0.00"):
+        detalle_cobro = f"Cobrado: {simbolo}{_fmt_num(total)} de mora atrasada"
+    else:
+        detalle_cobro = f"Cobrado: {simbolo}{_fmt_num(total)}"
+    lines = [
+        f"✅ *Interés cobrado — {cliente.nombre}*",
+        detalle_cobro,
+        "",
+        *_resumen_interes_fijo(prestamo, cliente.nombre),
+    ]
+    if not incluir_mora and antes > Decimal("0.00"):
+        lines.append("(La mora quedó sin tocar: pedime «y lo atrasado» para cobrarla.)")
+    return True, "\n".join(lines)
+
+
+def _abonar_capital(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
+    cliente = _buscar_cliente_o_error(db, _req_str(data, "cliente_nombre"), estricto=True)
+    monto = _req_decimal(data, "monto")
+    prestamo = _prestamo_interes_fijo_de(db, cliente)
+
+    prestamo = svc_prestamos.abonar_capital(
+        db,
+        prestamo.id,
+        AbonarCapitalRequest(
+            monto=monto,
+            medio_pago=_medio(data),
+            fecha_cobro=fecha_local(msg_at),
+        ),
+    )
+
+    simbolo = "U$D" if prestamo.moneda == Moneda.USD else "$"
+    lines = [
+        f"✅ *Capital devuelto — {cliente.nombre}*",
+        f"Recibí: {simbolo}{_fmt_num(monto)} de capital",
+        "",
+        *_resumen_interes_fijo(prestamo, cliente.nombre),
+    ]
+    if (prestamo.capital_pendiente or Decimal("0.00")) <= Decimal("0.00"):
+        lines.append("El capital quedó saldado: no se devengan más períodos.")
+    return True, "\n".join(lines)
+
+
+def _cancelar_prestamo(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
+    cliente = _buscar_cliente_o_error(db, _req_str(data, "cliente_nombre"), estricto=True)
+    prestamo = _prestamo_interes_fijo_de(db, cliente)
+
+    # El default es cobrar todo: "canceló" significa que quedó a cero. Dejar la
+    # mora afuera es la excepción y el operador la tiene que decir.
+    incluir_mora = _bandera(data, "incluir_mora", default=True)
+    total = svc_prestamos.total_cancelacion(prestamo, incluir_mora=incluir_mora)
+    capital = prestamo.capital_pendiente or Decimal("0.00")
+    mora = svc_prestamos.mora_acumulada(prestamo)
+
+    prestamo = svc_prestamos.cancelar_interes_fijo(
+        db,
+        prestamo.id,
+        CancelarInteresFijoRequest(
+            incluir_mora=incluir_mora,
+            medio_pago=_medio(data),
+            fecha_cobro=fecha_local(msg_at),
+        ),
+    )
+
+    simbolo = "U$D" if prestamo.moneda == Moneda.USD else "$"
+    lines = [
+        f"✅ *Préstamo cancelado — {cliente.nombre}*",
+        f"Cobrado: {simbolo}{_fmt_num(total)}",
+        f"  · Capital: {simbolo}{_fmt_num(capital)}",
+        f"  · Interés del período: {simbolo}{_fmt_num(total - capital - (mora if incluir_mora else Decimal('0.00')))}",
+    ]
+    if incluir_mora and mora > Decimal("0.00"):
+        lines.append(f"  · Mora acumulada: {simbolo}{_fmt_num(mora)}")
+    if not incluir_mora and mora > Decimal("0.00"):
+        lines.append("")
+        lines.append(
+            f"⚠️ Quedan {simbolo}{_fmt_num(mora)} de mora sin cobrar: el préstamo "
+            "sigue abierto por esa deuda."
+        )
+    return True, "\n".join(lines)
+
+
+def _editar_interes_fijo(db: Session, data: dict[str, Any]) -> DispatchResult:
+    cliente = _buscar_cliente_o_error(db, _req_str(data, "cliente_nombre"), estricto=True)
+    nuevo = _req_decimal(data, "monto_interes_fijo")
+    prestamo = _prestamo_interes_fijo_de(db, cliente)
+    anterior = prestamo.monto_interes_fijo or Decimal("0.00")
+    vigente_tambien = _bandera(data, "aplicar_a_periodo_vigente", default=False)
+
+    prestamo = svc_prestamos.editar_interes_fijo(
+        db,
+        prestamo.id,
+        InteresFijoUpdate(
+            monto_interes_fijo=nuevo,
+            aplicar_a_periodo_vigente=vigente_tambien,
+        ),
+    )
+
+    simbolo = "U$D" if prestamo.moneda == Moneda.USD else "$"
+    desde = "este período incluido" if vigente_tambien else "el próximo período"
+    return True, "\n".join([
+        f"✅ *Interés actualizado — {cliente.nombre}*",
+        f"{simbolo}{_fmt_num(anterior)} → {simbolo}{_fmt_num(nuevo)} cada 30 días",
+        f"Rige desde {desde}.",
+        "",
+        *_resumen_interes_fijo(prestamo, cliente.nombre),
+    ])
 
 
 def _registrar_deuda(db: Session, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
@@ -2587,6 +2876,7 @@ def _consulta_cliente(
             )
         ).all()
     )
+    svc_prestamos.devengar(db, prestamos)
     if prestamos:
         hay_algo = True
         lines.append("")
@@ -2602,6 +2892,16 @@ def _consulta_cliente(
             )
             simbolo = "U$D" if p.moneda == Moneda.USD else "$"
             saldo = sum((c.monto for c in cuotas_pendientes), Decimal("0.00"))
+            if p.tipo_prestamo == PrestamoTipo.INTERES_FIJO:
+                # Acá lo que importa es otra cosa: el capital que sigue afuera y
+                # el interés que se debe, no cuántas cuotas faltan de un cuadro.
+                lines.append(
+                    f"  • Interés fijo — capital {simbolo}"
+                    f"{_fmt_num(p.capital_pendiente or Decimal('0.00'))} + "
+                    f"interés impago {simbolo}{_fmt_num(saldo)} "
+                    f"({simbolo}{_fmt_num(p.monto_interes_fijo or Decimal('0.00'))} cada 30 días)"
+                )
+                continue
             proxima = cuotas_pendientes[0] if cuotas_pendientes else None
             prox_txt = (
                 f"próx. cuota #{proxima.numero_cuota}: {simbolo}{_fmt_num(proxima.monto)}"
@@ -2680,6 +2980,9 @@ def _consulta_prestamos(
             .order_by(Prestamo.created_at.asc())
         ).all()
     )
+    # Los períodos de interés fijo que ya arrancaron tienen que estar antes de
+    # sumar, o la consulta mostraría un interés de menos (§Interés fijo).
+    svc_prestamos.devengar(db, prestamos)
 
     if not prestamos:
         return "📭 No tenés préstamos activos por cobrar."
@@ -2699,6 +3002,20 @@ def _consulta_prestamos(
             ).all()
         )
         saldo = sum((c.monto for c in cuotas_pendientes), Decimal("0.00"))
+        if p.tipo_prestamo == PrestamoTipo.INTERES_FIJO:
+            # El capital también está por cobrar, aunque no viva en ninguna cuota:
+            # dejarlo afuera del total mostraría millones de menos.
+            capital = p.capital_pendiente or Decimal("0.00")
+            pendiente_por_moneda[p.moneda] = (
+                pendiente_por_moneda.get(p.moneda, Decimal("0.00")) + saldo + capital
+            )
+            proxima = svc_prestamos.proxima_fecha_cobro(p)
+            detalle.append(
+                f"👤 {p.cliente.nombre} — interés fijo: capital {_monto(capital, p.moneda)} "
+                f"+ interés impago {_monto(saldo, p.moneda)}"
+                + (f" (próx. cobro {_fmt_date(proxima)})" if proxima else "")
+            )
+            continue
         pendiente_por_moneda[p.moneda] = pendiente_por_moneda.get(p.moneda, Decimal("0.00")) + saldo
 
         proxima = cuotas_pendientes[0] if cuotas_pendientes else None

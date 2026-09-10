@@ -55,12 +55,32 @@ class PrestamoEstado(str, enum.Enum):
     EN_MORA   = "EN_MORA"
 
 
+class PrestamoTipo(str, enum.Enum):
+    """Las dos formas de prestar. Cambian qué se cobra y cuándo (§Interés fijo).
+
+    `NORMAL` es el préstamo de siempre: capital + ganancia repartidos en un cuadro
+    de cuotas cerrado que se genera entero al alta.
+
+    `INTERES_FIJO` no amortiza capital: el capital queda prestado hasta que el
+    cliente lo devuelve, y cada 30 días se cobra un interés fijo en plata. No hay
+    cuadro —no se sabe cuántos períodos va a durar—, así que las cuotas se
+    devengan de a una cuando cada período arranca.
+    """
+
+    NORMAL       = "NORMAL"
+    INTERES_FIJO = "INTERES_FIJO"
+
+
 class FrecuenciaCuotas(str, enum.Enum):
     DIARIA    = "DIARIA"
     SEMANAL   = "SEMANAL"
     QUINCENAL = "QUINCENAL"
     MENSUAL   = "MENSUAL"
     ANUAL     = "ANUAL"
+    # Ciclo de 30 días exactos, el del préstamo a interés fijo. No es MENSUAL: un
+    # mes se corre con los de 28 y 31, y acá la fecha de cobro tiene que caer
+    # siempre 30 días después de la anterior.
+    CADA_30_DIAS = "CADA_30_DIAS"
 
 
 class CuotaEstado(str, enum.Enum):
@@ -126,6 +146,10 @@ class CajaCategoria(str, enum.Enum):
     INGRESO_PASIVO       = "INGRESO_PASIVO"
     OTORGAMIENTO_DEUDA   = "OTORGAMIENTO_DEUDA"
     COBRO_DEUDA          = "COBRO_DEUDA"
+    # Capital que devuelve el cliente de un préstamo a interés fijo. Va aparte de
+    # COBRO_CUOTA a propósito: es plata que vuelve, **no ganancia**. El interés de
+    # esos préstamos sí entra como COBRO_CUOTA (§Interés fijo).
+    DEVOLUCION_CAPITAL   = "DEVOLUCION_CAPITAL"
     # Efectivo que ya estaba en el cajón al poner el sistema en marcha. No es un
     # ingreso del día: el reporte lo trata como saldo de apertura (§Apertura).
     SALDO_INICIAL        = "SALDO_INICIAL"
@@ -455,8 +479,29 @@ class Prestamo(AnulableMixin, Base):
     __tablename__ = "prestamos"
     __table_args__ = (
         sa.CheckConstraint("credito > 0",               name="ck_prestamos_credito_positive"),
-        sa.CheckConstraint("cuotas > 0",                name="ck_prestamos_cuotas_positive"),
         sa.CheckConstraint("total_a_cobrar >= credito", name="ck_prestamos_total_a_cobrar_gte_credito"),
+        # `cuotas` significa cosas distintas según la modalidad: la cantidad de
+        # cuotas del cuadro pactado en NORMAL, y "no hay cuadro" (0) en
+        # INTERES_FIJO, donde los períodos se devengan de a uno (§Interés fijo).
+        sa.CheckConstraint(
+            "(tipo_prestamo = 'NORMAL' AND cuotas > 0)"
+            " OR (tipo_prestamo = 'INTERES_FIJO' AND cuotas = 0)",
+            name="ck_prestamos_cuotas_por_tipo",
+        ),
+        # Las tres columnas del interés fijo no significan nada en un préstamo
+        # normal, y son obligatorias en uno a interés fijo. La base lo impone para
+        # que no dependa de que todos los caminos de escritura se acuerden.
+        sa.CheckConstraint(
+            "(tipo_prestamo = 'NORMAL'"
+            " AND monto_interes_fijo IS NULL AND dia_cobro IS NULL"
+            " AND capital_pendiente IS NULL)"
+            " OR (tipo_prestamo = 'INTERES_FIJO'"
+            " AND monto_interes_fijo IS NOT NULL AND monto_interes_fijo > 0"
+            " AND dia_cobro IS NOT NULL"
+            " AND capital_pendiente IS NOT NULL"
+            " AND capital_pendiente >= 0 AND capital_pendiente <= credito)",
+            name="ck_prestamos_interes_fijo_coherente",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -465,6 +510,12 @@ class Prestamo(AnulableMixin, Base):
         PG_UUID(as_uuid=True),
         sa.ForeignKey("clientes.id", ondelete="RESTRICT"),
         index=True,
+    )
+    # Cuál de las dos modalidades es (§Interés fijo). NORMAL es el default y lo
+    # que era todo antes de la migración `0031`.
+    tipo_prestamo:  Mapped[PrestamoTipo]     = mapped_column(
+        sa.Enum(PrestamoTipo, name="prestamo_tipo", create_type=False),
+        default=PrestamoTipo.NORMAL, server_default="NORMAL", index=True,
     )
     credito:        Mapped[Decimal]          = mapped_column(sa.Numeric(18, 2))
     moneda:         Mapped[Moneda]           = mapped_column(sa.Enum(Moneda,           name="moneda",           create_type=False))
@@ -477,6 +528,18 @@ class Prestamo(AnulableMixin, Base):
         default=PrestamoEstado.ACTIVO, index=True,
     )
     fecha_inicio: Mapped[date] = mapped_column(sa.Date())
+
+    # ── Solo INTERES_FIJO (NULL en los préstamos normales) ────────────────
+    # El interés de UN período, en plata y en la moneda del préstamo. Editable:
+    # el dueño lo renegocia cuando quiere y no está obligado a tocarlo nunca.
+    monto_interes_fijo: Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+    # **La fecha de cobro fijada al alta**, no un día del mes: es el ancla de los
+    # ciclos de 30 días. El período k arranca en `dia_cobro + 30*(k-1)`.
+    dia_cobro:          Mapped[date | None]    = mapped_column(sa.Date(), nullable=True)
+    # Cuánto capital falta que devuelva el cliente. Arranca en `credito` y solo
+    # baja con un abono explícito: en esta modalidad las cuotas son interés puro,
+    # el capital no vive en ninguna de ellas.
+    capital_pendiente:  Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(

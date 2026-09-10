@@ -60,6 +60,11 @@ _CH = [
 _PR = [
     "id", "cliente_id", "credito", "moneda", "cuotas", "frecuencia",
     "total_a_cobrar", "ganancia", "estado", "fecha_inicio", "created_at", "updated_at",
+    # Modalidad y sus tres columnas propias (§Interés fijo). Sin ellas, un
+    # préstamo a interés fijo vuelve del backup como uno normal con `cuotas = 0`:
+    # sin cuadro, sin capital pendiente y sin interés que cobrar — el capital
+    # prestado desaparecería de la cuenta del cliente.
+    "tipo_prestamo", "monto_interes_fijo", "dia_cobro", "capital_pendiente",
     *_ANUL,
 ]
 _CU = [
@@ -184,6 +189,8 @@ _DEC_COLS = frozenset({
     "cotizacion_usd", "cotizacion", "cotizacion_ingreso_usd",
     # Compras a deber y compensaciones (§Comprar sin abonar, §Compensación).
     "monto_abonado", "imputado_cliente", "imputado_pasivo", "excedente",
+    # Préstamo a interés fijo (§Interés fijo).
+    "monto_interes_fijo", "capital_pendiente",
 })
 _DT_COLS = frozenset({"created_at", "updated_at", "ultimo_evento_manual_at", "anulado_at"})
 _BYTES_COLS = frozenset({"foto"})
@@ -269,7 +276,7 @@ def _cv(
 
 
 _DATE_CH = frozenset({"fecha_emision", "fecha_pago"})
-_DATE_PR = frozenset({"fecha_inicio"})
+_DATE_PR = frozenset({"fecha_inicio", "dia_cobro"})
 _DATE_CU = frozenset({"fecha_vencimiento", "fecha_cobro"})
 _DATE_FI = frozenset({"fecha_fiado"})
 _DATE_PA = frozenset({"fecha_vencimiento", "fecha_cancelacion", "fecha_ingreso"})
@@ -499,14 +506,17 @@ def exportar_excel(
         prestamos = _vivos(_date_filter(db.query(Prestamo), Prestamo), Prestamo).all()
         add_sheet(
             "Préstamos",
-            ["ID", "Cliente ID", "Crédito", "Moneda", "Cuotas", "Frecuencia",
-             "Total a Cobrar", "Ganancia", "Estado", "Fecha Inicio", "Creado"],
+            ["ID", "Cliente ID", "Modalidad", "Crédito", "Moneda", "Cuotas", "Frecuencia",
+             "Total a Cobrar", "Ganancia", "Estado", "Fecha Inicio",
+             "Interés fijo", "Fecha de cobro", "Capital pendiente", "Creado"],
             [[
-                _fmt_excel(r.id), _fmt_excel(r.cliente_id),
+                _fmt_excel(r.id), _fmt_excel(r.cliente_id), _fmt_excel(r.tipo_prestamo),
                 _fmt_excel(r.credito), _fmt_excel(r.moneda),
                 r.cuotas, _fmt_excel(r.frecuencia),
                 _fmt_excel(r.total_a_cobrar), _fmt_excel(r.ganancia),
-                _fmt_excel(r.estado), _fmt_excel(r.fecha_inicio), _fmt_excel(r.created_at),
+                _fmt_excel(r.estado), _fmt_excel(r.fecha_inicio),
+                _fmt_excel(r.monto_interes_fijo), _fmt_excel(r.dia_cobro),
+                _fmt_excel(r.capital_pendiente), _fmt_excel(r.created_at),
             ] for r in prestamos],
         )
 

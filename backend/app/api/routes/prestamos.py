@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 from app.db.models import PrestamoEstado
 from app.db.session import get_db
 from app.schemas.prestamos import (
+    AbonarCapitalRequest,
+    CancelarInteresFijoRequest,
+    CobrarInteresRequest,
     CuotaCobrarConChequeRequest,
     CuotaCobrarConChequeResponse,
     CuotaCobroRequest,
@@ -16,6 +19,7 @@ from app.schemas.prestamos import (
     CuotasLoteCobrarConChequeRequest,
     CuotasLoteCobrarConChequeResponse,
     CuotasLoteCobrarRequest,
+    InteresFijoUpdate,
     PrestamoCreate,
     PrestamoPagoRequest,
     PrestamoRead,
@@ -54,6 +58,52 @@ def editar_prestamo(
     db: DbSession,
 ) -> PrestamoRead:
     return service.editar_prestamo(db, prestamo_id, payload)
+
+
+# ── Préstamo a interés fijo (§Interés fijo) ──────────────────────────────────
+# Cuatro operaciones propias, porque en esta modalidad el interés y el capital se
+# cobran por separado: el interés cada 30 días y el capital cuando el cliente lo
+# devuelve. Las rutas van ANTES de `/{prestamo_id}/pagar` solo por orden de
+# lectura; no se pisan entre sí.
+
+@router.post("/{prestamo_id}/interes-fijo/cobrar-interes", response_model=PrestamoRead)
+def cobrar_interes(
+    prestamo_id: UUID,
+    payload: CobrarInteresRequest,
+    db: DbSession,
+) -> PrestamoRead:
+    """Cobra el interés del período vigente (y la mora, si se pide)."""
+    return service.cobrar_interes(db, prestamo_id, payload)
+
+
+@router.post("/{prestamo_id}/interes-fijo/abonar-capital", response_model=PrestamoRead)
+def abonar_capital(
+    prestamo_id: UUID,
+    payload: AbonarCapitalRequest,
+    db: DbSession,
+) -> PrestamoRead:
+    """Recibe capital de vuelta, total o parcial. No toca el interés."""
+    return service.abonar_capital(db, prestamo_id, payload)
+
+
+@router.patch("/{prestamo_id}/interes-fijo", response_model=PrestamoRead)
+def editar_interes_fijo(
+    prestamo_id: UUID,
+    payload: InteresFijoUpdate,
+    db: DbSession,
+) -> PrestamoRead:
+    """Renegocia el interés pactado. Rige de los próximos períodos en adelante."""
+    return service.editar_interes_fijo(db, prestamo_id, payload)
+
+
+@router.post("/{prestamo_id}/interes-fijo/cancelar", response_model=PrestamoRead)
+def cancelar_interes_fijo(
+    prestamo_id: UUID,
+    payload: CancelarInteresFijoRequest,
+    db: DbSession,
+) -> PrestamoRead:
+    """Liquida el préstamo: capital pendiente + interés del período vigente."""
+    return service.cancelar_interes_fijo(db, prestamo_id, payload)
 
 
 @router.post("/{prestamo_id}/pagar", response_model=PrestamoRead)

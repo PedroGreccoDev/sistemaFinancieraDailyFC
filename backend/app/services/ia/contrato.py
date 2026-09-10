@@ -32,6 +32,12 @@ INTENTS = {
     "RECHAZAR_CHEQUE",
     "NUEVO_PRESTAMO",
     "COBRAR_CUOTA",
+    # Préstamo a interés fijo (§Interés fijo): el capital no se amortiza, se cobra
+    # un interés cada 30 días y el capital vuelve cuando el cliente lo devuelve.
+    "COBRAR_INTERES",
+    "ABONAR_CAPITAL",
+    "CANCELAR_PRESTAMO",
+    "EDITAR_INTERES_FIJO",
     "COBRAR_FIADO_EFECTIVO",
     "COBRAR_FIADO_CON_CHEQUE",
     "COBRAR_DEUDA_CLIENTE",
@@ -266,14 +272,43 @@ OPERACIONES DISPONIBLES
 
 6. NUEVO_PRESTAMO
    Cuándo: El operador prestó dinero directamente (sin cheque).
-   Ej: "Presté $50000 a María García en 6 cuotas mensuales de $10000"
-   data:
-     - cliente_nombre: string
-     - credito: number
-     - moneda: "ARS" o "USD"
-     - cuotas: integer
-     - frecuencia: "diaria" | "semanal" | "quincenal" | "mensual" | "anual"
-     - total_a_cobrar: number
+   ⚠️ HAY DOS MODALIDADES Y SE CARGAN DISTINTO. Mirá qué dice el mensaje:
+
+   6.a NORMAL — cuadro de cuotas (la de siempre)
+     El operador dice EN CUÁNTAS CUOTAS y CUÁNTO se cobra en total.
+     Ej: "Presté $50000 a María García en 6 cuotas mensuales de $10000"
+     data:
+       - tipo_prestamo: "NORMAL"
+       - cliente_nombre: string
+       - credito: number
+       - moneda: "ARS" o "USD"
+       - cuotas: integer
+       - frecuencia: "diaria" | "semanal" | "quincenal" | "mensual" | "anual"
+       - total_a_cobrar: number
+
+   6.b INTERES_FIJO — interés cada 30 días, el capital queda prestado
+     El operador dice CUÁNTO INTERÉS le paga por período y NO habla de cuotas.
+     Ej: "Le presté 5 millones a Juan a interés, me paga 500 mil por mes"
+         "Presté 2 palos a Kiosco, 200 mil de interés cada 30 días, cobro el 15"
+         "Le di 3 millones a Pedro a interés fijo de 300 lucas"
+     data:
+       - tipo_prestamo: "INTERES_FIJO"
+       - cliente_nombre: string
+       - credito: number (el capital prestado)
+       - moneda: "ARS" o "USD"
+       - monto_interes_fijo: number (el interés de UN período, EN PLATA)
+       - dia_cobro: "YYYY-MM-DD" o null (la fecha del primer cobro; null = a los
+         30 días de hoy, que es lo normal)
+     ⚠️ NO mandes cuotas, frecuencia ni total_a_cobrar: en esta modalidad no
+        existen. El total no se sabe al alta — depende de cuántos meses dure.
+     ⚠️ El interés va EN PLATA, no en %. Si el operador lo dice en porcentaje
+        ("al 10%"), calculalo sobre el capital y mandá el número en pesos.
+
+   CUÁL DE LAS DOS: si el mensaje nombra CUOTAS o un TOTAL A COBRAR → NORMAL.
+   Si nombra un INTERÉS por mes / por período / "a interés" → INTERES_FIJO.
+   Si no se entiende cuál es → ACLARACION_REQUERIDA (preguntá si es a cuotas o
+   a interés fijo). Cargarlo con la modalidad equivocada obliga a borrarlo y
+   rehacerlo entero.
 
 7. COBRAR_CUOTA
    Cuándo: Un deudor pagó una o varias cuotas de un préstamo.
@@ -283,6 +318,53 @@ OPERACIONES DISPONIBLES
      - cliente_nombre: string
      - numero_cuota: integer o null (null = primera pendiente; si paga varias, la primera del lote)
      - cantidad_cuotas: integer (cuántas cuotas pagó; default 1; "dos cuotas" → 2)
+   Nota: no te preocupes por la modalidad del préstamo. Si el cliente tiene un
+     préstamo a interés fijo, el sistema lo reconoce solo y cobra el interés.
+
+7.b COBRAR_INTERES  ←— préstamo a interés fijo
+   Cuándo: Un cliente con préstamo a interés fijo paga el interés del período.
+   Ej: "Juan me pagó el interés", "cobré los 500 mil de interés de Kiosco",
+       "Pedro pagó el mes", "me pagó el interés y lo atrasado"
+   data:
+     - cliente_nombre: string
+     - incluir_mora: boolean (true si dice que paga TAMBIÉN lo atrasado / lo que
+       debía de antes; default false = solo el período vigente)
+     - medio_pago: "EFECTIVO" o "TRANSFERENCIA" (default EFECTIVO)
+
+7.c ABONAR_CAPITAL  ←— préstamo a interés fijo
+   Cuándo: El cliente DEVUELVE capital (parte del dinero prestado), sin cancelar.
+   Ej: "Juan me devolvió 2 millones del capital", "Kiosco me bajó un palo",
+       "me entregó 500 mil a cuenta del capital"
+   data:
+     - cliente_nombre: string
+     - monto: number (el capital que devolvió)
+     - medio_pago: "EFECTIVO" o "TRANSFERENCIA" (default EFECTIVO)
+   ⚠️ Solo si dice CAPITAL o que devuelve lo prestado. "Me pagó 500 mil" a secas
+      NO es esto: es COBRAR_DEUDA_CLIENTE (§9b) y baja interés, no capital.
+
+7.d CANCELAR_PRESTAMO  ←— préstamo a interés fijo
+   Cuándo: El cliente liquida el préstamo: devuelve todo el capital que falta
+     más el interés del período en curso.
+   Ej: "Juan canceló el préstamo", "Kiosco me devolvió todo", "me liquidó",
+       "cerró la deuda del préstamo"
+   data:
+     - cliente_nombre: string
+     - incluir_mora: boolean (default true; poné false SOLO si dice que lo
+       atrasado se lo cobra aparte / que queda debiendo la mora)
+     - medio_pago: "EFECTIVO" o "TRANSFERENCIA" (default EFECTIVO)
+   Nota: el interés del período en curso se cobra COMPLETO aunque cancele a los
+     dos días de empezado. No es un error: es la regla del negocio.
+
+7.e EDITAR_INTERES_FIJO  ←— préstamo a interés fijo
+   Cuándo: Se renegocia cuánto interés paga por período.
+   Ej: "Juan pasa a pagar 600 mil", "subile el interés a Kiosco a 300 lucas",
+       "el interés de Pedro ahora es 250 mil desde este mes"
+   data:
+     - cliente_nombre: string
+     - monto_interes_fijo: number (el interés NUEVO, en plata)
+     - aplicar_a_periodo_vigente: boolean (true si dice que rige YA / desde este
+       mes / desde este período; default false = desde el próximo período)
+   ⚠️ Esto NO cobra nada: solo cambia el interés pactado de ahí en más.
 
 8. COBRAR_FIADO_EFECTIVO
    Cuándo: Un cliente con fiado abierto paga parte o todo en efectivo.
@@ -336,10 +418,18 @@ OPERACIONES DISPONIBLES
        es el caso donde no hay `cotizacion`. Si no la dice → ACLARACION_REQUERIDA
        ("¿a cuánto tomás el dólar?"). Ver la regla 14: la cotización nunca se asume.
 
-⚠️ CUÁL DE LOS TRES COBROS — decide QUÉ NOMBRA el mensaje:
+⚠️ CUÁL DE LOS COBROS — decide QUÉ NOMBRA el mensaje:
      "X me pagó 50 lucas" / "cobré 200 mil a X"  → COBRAR_DEUDA_CLIENTE (no dice contra qué)
      "X pagó la 3" / "pagó 2 cuotas"             → COBRAR_CUOTA (nombra la cuota)
      "X saldó el fiado" / "pagó el cheque"       → COBRAR_FIADO_EFECTIVO (nombra el fiado)
+     "X me pagó el interés" / "pagó el mes"      → COBRAR_INTERES (nombra el interés)
+     "X me devolvió 2 palos del capital"         → ABONAR_CAPITAL (nombra el capital)
+     "X canceló" / "me devolvió todo"            → CANCELAR_PRESTAMO (liquida el préstamo)
+   Los tres últimos son del préstamo a interés fijo. **Interés y capital son dos
+   cosas distintas**: el interés es lo que paga cada 30 días por tener la plata,
+   el capital es la plata prestada. Confundirlos deja al cliente debiendo de
+   menos —o de más— por millones. Si el mensaje no distingue, NO elijas: es
+   COBRAR_DEUDA_CLIENTE, que imputa a lo más viejo y nunca toca capital.
    Los dos puntuales son para cuando el operador dice CONTRA QUÉ va la plata. Si
    no lo dice, no lo adivines: el cobro general imputa a lo más viejo, que es lo
    que el operador espera, y el resultado le muestra qué quedó saldado.
@@ -419,8 +509,11 @@ OPERACIONES DISPONIBLES
    ⚠️ "ME PRESTÓ" vs "LE PRESTÉ" — se dicen igual y son opuestos:
      "Fernando me prestó 500 lucas"  → REGISTRAR_DEUDA con ingreso_caja: true (ENTRA plata,
                                         el negocio DEBE)
-     "Le presté 500 lucas a Fernando" → el negocio DA la plata (SALE): NUEVO_PRESTAMO si
-                                        hay cuotas, REGISTRAR_DEUDA_CLIENTE si no
+     "Le presté 500 lucas a Fernando" → el negocio DA la plata (SALE):
+                                        NUEVO_PRESTAMO si hay cuotas (§6.a) o si hay
+                                        un interés por período (§6.b, "a interés"),
+                                        REGISTRAR_DEUDA_CLIENTE si no hay ni una cosa
+                                        ni la otra
    Confundirlas se equivoca en las dos cosas a la vez: el sentido de la caja y quién le
    debe a quién. Si no distinguís quién le dio la plata a quién → ACLARACION_REQUERIDA.
 
@@ -441,13 +534,15 @@ OPERACIONES DISPONIBLES
 ⚠️ DIRECCIÓN DE LA DEUDA — estos tres se dicen parecido y significan cosas opuestas:
      "le debo a X" / "quedé debiendo a X"          → REGISTRAR_DEUDA (el negocio debe)
      "X me debe" / "le di plata a X y me la debe"  → REGISTRAR_DEUDA_CLIENTE (el cliente debe)
-     "le presté a X en 6 cuotas de $Y"             → NUEVO_PRESTAMO (deuda CON cuadro de cuotas)
+     "le presté a X en 6 cuotas de $Y"             → NUEVO_PRESTAMO NORMAL (§6.a — cuadro de cuotas)
+     "le presté $X a Y, me paga $Z de interés"     → NUEVO_PRESTAMO INTERES_FIJO (§6.b — sin cuotas)
    Equivocarse anota la plata al revés, y el error NO es simétrico ni visible: una deuda
    de cliente DESCUENTA la caja del día (salió la plata), mientras que registrar un pasivo
    no la mueve —salvo que le hayan prestado plata al negocio, donde SUMA (ver 10)—. Si la
    dirección no está clara en el mensaje → ACLARACION_REQUERIDA.
-   SIN CUOTAS NO ES PRÉSTAMO: si dice "le presté" pero no menciona cuotas ni total a
-   cobrar, preguntá si va con cuotas en vez de elegir por tu cuenta.
+   SIN CUOTAS NI INTERÉS NO ES PRÉSTAMO: si dice "le presté" pero no menciona cuotas,
+   total a cobrar ni un interés por período, preguntá cuál de las dos modalidades es
+   en vez de elegir por tu cuenta.
    OJO CON "FIAR": en este negocio fiar es entregar un CHEQUE a crédito (FIAR_CHEQUE).
    Si le fió PLATA, sin cheque de por medio → REGISTRAR_DEUDA_CLIENTE.
    ⚠️ "ME DEBE" NO ES "ME ENTREGÓ" — mueven la caja en sentidos opuestos:
@@ -567,7 +662,8 @@ OPERACIONES DISPONIBLES
           * PASIVOS     → lo que el NEGOCIO debe, agrupado por acreedor
           * DEUDORES    → lo que los CLIENTES deben, todos juntos
           * CLIENTE     → la situación de UN cliente (requiere cliente_nombre)
-          * PRESTAMOS   → préstamos activos por cobrar
+          * PRESTAMOS   → préstamos activos por cobrar (los de cuotas y los de
+                          interés fijo, cada uno con lo suyo)
           * MOVIMIENTOS → historial de operaciones del período
           * CAJA        → ingresos, egresos, neto y saldo del período
           * GASTOS      → gastos operativos del período

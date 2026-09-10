@@ -987,6 +987,86 @@ el efectivo real, en la moneda pagada** (ref. `prestamo`). Los cobros por cuota 
 asientan solo el **restante** de la cuota (por si traía un pago parcial previo), y todos los flujos
 que marcan `COBRADA` fijan `monto_pagado = monto`.
 
+### 3.b Préstamo a interés fijo _(modalidad agregada 2026-09-10, migración `0031`)_
+
+Segunda modalidad de préstamo, que convive con la de siempre. `prestamos.tipo_prestamo`
+distingue `NORMAL` (todo lo anterior) de `INTERES_FIJO`. **El default y el `server_default`
+es `NORMAL`**, así que ninguna carga vieja cambia de significado.
+
+**En qué se diferencia** (reglas del dueño):
+
+- **El capital no se amortiza.** Queda prestado hasta que el cliente lo devuelve: total (lo
+  ideal) o de a partes. No vive en ninguna cuota — por eso hay una columna
+  `capital_pendiente`, que arranca en `credito` y solo baja con un abono explícito.
+- **Cada 30 días se cobra un interés fijo en plata** (`monto_interes_fijo`), no un porcentaje.
+  Es **editable y sin obligación de tocarlo**: mientras el dueño no lo cambie, sigue valiendo.
+- **Los ciclos son de 30 días exactos** desde `dia_cobro`, que es **la fecha de cobro fijada al
+  alta** (no un día del mes). El período _k_ arranca en `dia_cobro + 30·(k−1)`. La frecuencia
+  guarda `CADA_30_DIAS`, un valor propio del enum: `MENSUAL` se correría con los meses de 28 y 31.
+- **Sin prorrateo.** El interés se debe **al entrar** al período, completo, aunque el cliente
+  cancele al día siguiente. Por eso la cuota del período se crea el día que el período _arranca_.
+- **La mora se acumula, no reemplaza.** El interés impago de un período queda `EN_MORA` y el del
+  siguiente se suma: se deben los dos. El **período vigente** es siempre el último devengado;
+  todos los anteriores impagos son mora.
+- **Cancelación** = capital pendiente + interés del período vigente. La mora acumulada entra o
+  no **a criterio del operador**: puede saldarla junto o cobrarla aparte.
+
+**El devengo reemplaza al cron que no existe.** No hay cuadro que pre-generar (no se sabe cuántos
+períodos va a durar), así que las cuotas nacen de a una: `svc_prestamos.devengar_periodos` crea
+las de los períodos que ya arrancaron y faltaban. Lo llaman **todas las lecturas**
+(`get_prestamo`, `list_prestamos`, las consultas del bot, `deudores._cargar_renglones`) y toda
+operación de la modalidad. Es **idempotente**: mirar el panel dos veces no cobra dos veces. Con
+el capital ya saldado **no nacen períodos nuevos** — el interés se cobra por tener el capital
+afuera; el que estuviera en curso al devolverlo se debe igual.
+
+**`cuotas` vale 0** en esta modalidad. No es "cero cuotas": es "no tiene cuadro". La cantidad de
+períodos se cuenta con las filas de `cuotas`. Un CHECK
+(`ck_prestamos_cuotas_por_tipo`) lo impone, y otro (`ck_prestamos_interes_fijo_coherente`) exige
+que las tres columnas propias estén completas en `INTERES_FIJO` y en NULL en `NORMAL`.
+
+**`total_a_cobrar` y `ganancia` no se conocen al alta:** arrancan en el capital y en cero, y
+crecen con cada interés que se devenga. La ganancia es exactamente el interés devengado.
+
+**La trampa central — `svc_prestamos.recalcular_estado`:** acá las cuotas son **interés**, no
+capital. Darlo por `CANCELADO` porque no quedan cuotas impagas borraría del panel un capital que
+sigue prestado. Al revés también: cancelar dejando mora sin saldar **mantiene el préstamo
+`ACTIVO`**, porque esa deuda se sigue debiendo y tiene que verse en la cuenta del cliente. Todo
+cobro pasa por ese helper (los cinco caminos de cobro de cuota, y los tres de esta modalidad).
+
+**Caja:** el interés entra como `COBRO_CUOTA` (ref. `cuota`, detalle "Interés período #k"); el
+capital devuelto como **`DEVOLUCION_CAPITAL`** (ref. `prestamo`), categoría nueva y aparte a
+propósito: es plata que vuelve, **no ganancia**, y mezclarla con los cobros de interés
+desvirtuaría el reporte diario. El otorgamiento sigue siendo `OTORGAMIENTO_PRESTAMO`.
+
+**En la cuenta consolidada del cliente** (§2.c) el préstamo aporta **solo el interés devengado
+impago**, nunca el capital: un "Kiosco me entregó 200 lucas" baja lo que el cliente debe mes a
+mes, y el capital vuelve con un acto explícito del operador. Lo mismo vale para el pago de
+importe libre (`POST /prestamos/{id}/pagar`), que en esta modalidad salda interés de lo más viejo
+a lo más nuevo.
+
+**Endpoints** (`/prestamos/{id}/interes-fijo/…`, todos en la moneda del préstamo):
+
+| Endpoint | Qué hace |
+|---|---|
+| `POST …/cobrar-interes` | Cobra el período vigente; con `incluir_mora`, también los viejos impagos. Acepta `cuota_ids` para períodos puntuales. |
+| `POST …/abonar-capital` | Recibe capital de vuelta (parcial o total). No toca el interés. |
+| `POST …/cancelar` | Capital pendiente + interés del período vigente; `incluir_mora` decide qué pasa con lo atrasado. |
+| `PATCH /prestamos/{id}/interes-fijo` | Renegocia `monto_interes_fijo`. Rige desde el próximo período salvo `aplicar_a_periodo_vigente` (solo si ese período no recibió ningún pago). `dia_cobro` solo se puede mover **antes del primer período**: es el ancla de los ciclos. |
+
+`PATCH /prestamos/{id}` (el que regenera el cuadro) **rechaza** un préstamo a interés fijo: le
+borraría los períodos devengados con su mora.
+
+**Panel:** la tarjeta muestra capital pendiente, interés por período, el estado del período
+vigente, la mora y el próximo cobro, con cuatro botones (Cobrar interés / Abonar capital /
+Cancelar / Editar interés). El semáforo no mira vencimientos de cuadro sino la **mora acumulada**.
+
+**Bot:** el alta va por `NUEVO_PRESTAMO` con `tipo_prestamo`, y hay cuatro intents propios —
+`COBRAR_INTERES`, `ABONAR_CAPITAL`, `CANCELAR_PRESTAMO`, `EDITAR_INTERES_FIJO`—. **La modalidad
+la resuelve el dispatcher, no el prompt**: el operador dice "Juan pagó" y el modelo no puede
+saber qué tiene Juan, así que `COBRAR_CUOTA` sobre un cliente cuyo único préstamo vivo es a
+interés fijo se reencamina solo al cobro de interés (`_prestamo_interes_fijo_de`). Con **varios**
+préstamos a interés fijo activos no elige: manda al panel.
+
 ### 4. Movimientos de Efectivo (compra/venta de divisas)
 
 - Operaciones de compra/venta de divisas (ARS ↔ USD).
@@ -2183,7 +2263,15 @@ que hoy existe es indirecta: el porcentaje de compra sale del mensaje del operad
   `movimientos_efectivo`, para que **toda** entrada o salida de dólares mueva el stock —
   ver §Stock de dólares), `0026` (dos cajas en paralelo: `medio_pago` NOT NULL y la
   apertura por medio — ver §Las dos cajas) y `0027` (tabla `bugs`: cada error con su
-  numeral — ver §Registro de bugs).
+  numeral — ver §Registro de bugs), `0028` (recompra: un cheque puede volver a entrar),
+  `0029`/`0030` (e-cheq: tipo de cheque, y el número opcional) y `0031` (préstamo a
+  interés fijo: `tipo_prestamo`, `monto_interes_fijo`, `dia_cobro` y `capital_pendiente` —
+  ver §3.b). **Head actual: `0031`.**
+- **Agregar un valor a un enum que ya existe** va con
+  `ALTER TYPE … ADD VALUE IF NOT EXISTS` (así lo hacen `0016`, `0020`, `0023`, `0026` y
+  `0031`), y **no se puede usar en la misma transacción** que lo agrega. En el `downgrade`
+  no se quita: Postgres no soporta `DROP VALUE` y recrear el tipo obligaría a reescribir
+  todas las columnas que lo usan; queda sin usar, que es inocuo.
 
 ---
 
