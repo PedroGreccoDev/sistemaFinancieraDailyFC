@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getPasivos, createPasivo, editarPasivo,
@@ -561,6 +561,10 @@ const TH: React.CSSProperties = { fontFamily: FM, fontSize: '0.63rem', fontWeigh
 const TD: React.CSSProperties = { fontFamily: FM, fontSize: '0.82rem', padding: '0.65rem 1rem', borderBottom: '1px solid var(--ov-004)', color: 'var(--text-1)' }
 const TD_SUB: React.CSSProperties = { ...TD, fontSize: '0.76rem', padding: '0.45rem 1rem', borderBottom: '1px solid var(--ov-002)' }
 
+function saldoDe(grupo: GrupoAcreedor, moneda: Moneda): number {
+  return moneda === 'ARS' ? grupo.saldoARS : grupo.saldoUSD
+}
+
 /** Lo que se le debe a alguien en una moneda: el objetivo de los botones de pago. */
 function objetivoDe(grupo: GrupoAcreedor, moneda: Moneda): DeudaAcreedor {
   const deLaMoneda = grupo.deudas.filter((p) => p.estado === 'PENDIENTE' && p.moneda === moneda)
@@ -641,6 +645,13 @@ export default function Pasivos() {
   const [creando, setCreando] = useState<string | null>(null)
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
   const queryClient = useQueryClient()
+
+  // Compensar apunta al acreedor y la moneda, no a una deuda: el modal imputa
+  // contra todo lo que se le debe y arranca por la más vieja, que es esta.
+  function compensar(grupo: GrupoAcreedor, moneda: Moneda) {
+    const primera = primeraPendiente(grupo, moneda)
+    if (primera) setPasivoCompensar(primera)
+  }
 
   function toggle(clave: string) {
     setExpandidos((prev) => {
@@ -759,10 +770,15 @@ export default function Pasivos() {
                       </span>
                     </button>
 
+                    {/* Las acciones de todos los días van acá, sin desplegar nada. */}
                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem', flexWrap: 'wrap' }}>
                       <button onClick={() => setCreando(g.nombre)} style={{ ...btnBordered('neutral'), flex: '1 1 auto', fontSize: '0.72rem', padding: '0.4rem' }}>+ Sumar deuda</button>
-                      {g.saldoARS > 0.009 && <button onClick={() => setPagando(objetivoDe(g, 'ARS'))} style={{ ...btnFlat('success'), flex: '1 1 auto', fontSize: '0.72rem', padding: '0.4rem' }}>Pagar ARS</button>}
-                      {g.saldoUSD > 0.009 && <button onClick={() => setPagando(objetivoDe(g, 'USD'))} style={{ ...btnFlat('success'), flex: '1 1 auto', fontSize: '0.72rem', padding: '0.4rem' }}>Pagar USD</button>}
+                      {(['ARS', 'USD'] as Moneda[]).filter((m) => saldoDe(g, m) > 0.009).map((m) => (
+                        <Fragment key={m}>
+                          <button onClick={() => setPagando(objetivoDe(g, m))} style={{ ...btnFlat('success'), flex: '1 1 auto', fontSize: '0.72rem', padding: '0.4rem' }}>Pagar {m}</button>
+                          <button onClick={() => compensar(g, m)} title="Se la cubrió un cliente que te debe" style={{ ...btnBordered('neutral'), flex: '1 1 auto', fontSize: '0.72rem', padding: '0.4rem' }}>Compensar {m}</button>
+                        </Fragment>
+                      ))}
                     </div>
                   </div>
 
@@ -835,10 +851,14 @@ export default function Pasivos() {
                         <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: g.saldoARS > 0.009 ? '#fbbf24' : 'rgba(100,116,139,0.45)' }}>{g.saldoARS > 0.009 ? fmtARS(g.saldoARS) : '—'}</td>
                         <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: g.saldoUSD > 0.009 ? '#38bdf8' : 'rgba(100,116,139,0.45)' }}>{g.saldoUSD > 0.009 ? fmtUSD(g.saldoUSD) : '—'}</td>
                         <td style={{ ...TD, textAlign: 'right' }}>
-                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                             <button onClick={() => setCreando(g.nombre)} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>+ Sumar deuda</button>
-                            {g.saldoARS > 0.009 && <button onClick={() => setPagando(objetivoDe(g, 'ARS'))} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Pagar ARS</button>}
-                            {g.saldoUSD > 0.009 && <button onClick={() => setPagando(objetivoDe(g, 'USD'))} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Pagar USD</button>}
+                            {(['ARS', 'USD'] as Moneda[]).filter((m) => saldoDe(g, m) > 0.009).map((m) => (
+                              <Fragment key={m}>
+                                <button onClick={() => setPagando(objetivoDe(g, m))} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Pagar {m}</button>
+                                <button onClick={() => compensar(g, m)} title="Se la cubrió un cliente que te debe" style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>Compensar {m}</button>
+                              </Fragment>
+                            ))}
                           </div>
                         </td>
                       </tr>,
