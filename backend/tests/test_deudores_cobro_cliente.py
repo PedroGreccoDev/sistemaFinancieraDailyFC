@@ -34,6 +34,8 @@ from app.db.models import (
 )
 from app.services.deudas_simples import repartir_cobro_fifo
 from app.services.deudores import (
+    CREDITOS,
+    CUENTA,
     _cargar_renglones,
     _imputar,
     armar_renglones,
@@ -210,6 +212,41 @@ def test_los_prestamos_no_entran_en_la_cuota_comun() -> None:
 
     assert [r.tipo for r in renglones] == ["deuda_simple", "fiado"]
     assert sum((r.saldo for r in renglones), Decimal("0.00")) == Decimal("80000")
+
+
+def test_la_bolsa_de_creditos_trae_solo_los_prestamos() -> None:
+    # La otra mitad de la regla: cobrando "del préstamo" no se toca ni el fiado
+    # ni la deuda libre. Las dos bolsas son estancas en los dos sentidos.
+    fiado = _fiado("50000", date(2026, 3, 10))
+    deuda = _deuda("30000", date(2026, 1, 5))
+    prestamo = _prestamo(["20000", "20000"], date(2026, 2, 1))
+
+    renglones = _cargar_renglones(
+        DBPorEntidad([fiado], [deuda], [prestamo]),
+        prestamo.cliente_id,
+        Moneda.ARS,
+        bloquear=False,
+        fuentes=CREDITOS,
+    )
+
+    assert [r.tipo for r in renglones] == ["prestamo"]
+    assert renglones[0].saldo == Decimal("40000.00")
+
+
+def test_las_dos_bolsas_juntas_son_toda_la_deuda() -> None:
+    # Lo que el bot le muestra al operador cuando pregunta contra cuál imputa:
+    # ninguna deuda queda fuera de las dos bolsas, y ninguna está en las dos.
+    fiado = _fiado("50000", date(2026, 3, 10))
+    deuda = _deuda("30000", date(2026, 1, 5))
+    prestamo = _prestamo(["20000", "20000"], date(2026, 2, 1))
+    db = DBPorEntidad([fiado], [deuda], [prestamo])
+
+    cuenta = _cargar_renglones(db, fiado.cliente_id, Moneda.ARS, bloquear=False, fuentes=CUENTA)
+    credito = _cargar_renglones(db, fiado.cliente_id, Moneda.ARS, bloquear=False, fuentes=CREDITOS)
+
+    total = sum((r.saldo for r in cuenta + credito), Decimal("0.00"))
+    assert total == Decimal("120000.00")
+    assert not {r.tipo for r in cuenta} & {r.tipo for r in credito}
 
 
 class DBConPrestamos:

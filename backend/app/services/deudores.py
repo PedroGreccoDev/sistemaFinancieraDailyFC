@@ -40,7 +40,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.fechas import hoy_local
 from app.db.models import (
@@ -93,6 +93,13 @@ _CERO = Decimal("0.00")
 # hace el reparto determinista, para que el mismo cobro imputado dos veces dé
 # siempre el mismo resultado.
 _ORDEN_TIPO = {"fiado": 0, "deuda_simple": 1, "prestamo": 2}
+
+# Qué deudas entran en un cobro. Son dos bolsas separadas y **nunca se mezclan en
+# un mismo cobro**: la cuenta corriente se cobra desde Deudores y los préstamos
+# desde Créditos, que es la decisión que toma el operador antes de cobrar (§2.c).
+# El reparto de adentro es el mismo para las dos: lo más viejo primero.
+CUENTA: tuple[str, ...] = ("fiado", "deuda_simple")
+CREDITOS: tuple[str, ...] = ("prestamo",)
 
 
 @dataclass
@@ -232,37 +239,65 @@ def armar_renglones(
 
 
 def _cargar_renglones(
-    db: Session, cliente_id: uuid.UUID, moneda: Moneda, *, bloquear: bool
+    db: Session,
+    cliente_id: uuid.UUID,
+    moneda: Moneda,
+    *,
+    bloquear: bool,
+    fuentes: tuple[str, ...] = CUENTA,
 ) -> list[Renglon]:
-    """Lee las dos fuentes de deuda del cliente y arma la cuota común.
+    """Lee las deudas del cliente de las `fuentes` pedidas y arma la cuota común.
 
-    **Los préstamos no entran acá.** Viven en su propia sección (Créditos) y se
-    cobran únicamente desde ahí: el total que el operador ve en Deudores y el
-    importe que este cobro imputa tienen que ser el mismo número, y un préstamo
-    invisible en pantalla se llevaría parte de la plata sin que lo vea.
+    **Por defecto, la cuenta corriente: fiados y deudas libres.** Los préstamos
+    solo entran pidiéndolos con `fuentes=CREDITOS`, y nunca en el mismo cobro
+    que los otros: el total que el operador ve en la pantalla desde la que cobra
+    y el importe que se imputa tienen que ser el mismo número, y una cuota
+    invisible en esa pantalla se llevaría parte de la plata sin que la vea.
 
     Con `bloquear` toma `FOR UPDATE` sobre las filas: dos cobros simultáneos al
     mismo cliente no pueden imputar sobre el mismo saldo. Un módulo nuevo de
     deuda de cliente se da de alta acá y en `armar_renglones`."""
-    q_fiados = select(Fiado).where(
-        Fiado.cliente_id == cliente_id,
-        Fiado.estado == FiadoEstado.ABIERTO,
-        Fiado.anulado_at.is_(None),
-    )
-    q_deudas = select(DeudaSimple).where(
-        DeudaSimple.cliente_id == cliente_id,
-        DeudaSimple.moneda == moneda,
-        DeudaSimple.estado == DeudaSimpleEstado.ABIERTA,
-        DeudaSimple.anulado_at.is_(None),
-    )
-    if bloquear:
-        q_fiados = q_fiados.with_for_update()
-        q_deudas = q_deudas.with_for_update()
+    fiados: list[Fiado] = []
+    deudas: list[DeudaSimple] = []
+    prestamos: list[Prestamo] = []
 
-    fiados = list(db.scalars(q_fiados)) if moneda == Moneda.ARS else []
-    deudas = list(db.scalars(q_deudas))
+    if "fiado" in fuentes and moneda == Moneda.ARS:
+        q = select(Fiado).where(
+            Fiado.cliente_id == cliente_id,
+            Fiado.estado == FiadoEstado.ABIERTO,
+            Fiado.anulado_at.is_(None),
+        )
+        fiados = list(db.scalars(q.with_for_update() if bloquear else q))
 
-    return armar_renglones(fiados, deudas, [], moneda)
+    if "deuda_simple" in fuentes:
+        q = select(DeudaSimple).where(
+            DeudaSimple.cliente_id == cliente_id,
+            DeudaSimple.moneda == moneda,
+            DeudaSimple.estado == DeudaSimpleEstado.ABIERTA,
+            DeudaSimple.anulado_at.is_(None),
+        )
+        deudas = list(db.scalars(q.with_for_update() if bloquear else q))
+
+    if "prestamo" in fuentes:
+        # ACTIVO o EN_MORA con saldo siguen contando; solo CANCELADO queda afuera.
+        q = select(Prestamo).where(
+            Prestamo.cliente_id == cliente_id,
+            Prestamo.moneda == moneda,
+            Prestamo.estado != PrestamoEstado.CANCELADO,
+            Prestamo.anulado_at.is_(None),
+        )
+        if bloquear:
+            q = q.with_for_update()
+        prestamos = list(db.scalars(q.options(selectinload(Prestamo.cuotas_detalle))))
+        # Pone al día los períodos de interés fijo **sin commitear**: si esto es
+        # un cobro, el período nuevo entra en la misma transacción que la
+        # imputación; si es solo una consulta, se descarta al cerrar la sesión y
+        # se rehace igual en la próxima (es idempotente). Sin esto, cobrar el día
+        # que arranca un ciclo imputaría contra el anterior (§Interés fijo).
+        for p in prestamos:
+            svc_prestamos.devengar_periodos(db, p)
+
+    return armar_renglones(fiados, deudas, prestamos, moneda)
 
 
 def _mensaje_sin_deuda(
@@ -312,16 +347,21 @@ def _cliente_o_error(db: Session, cliente_id: uuid.UUID) -> Cliente:
 
 
 def resumen_cliente(
-    db: Session, cliente_id: uuid.UUID, moneda: Moneda
+    db: Session,
+    cliente_id: uuid.UUID,
+    moneda: Moneda,
+    fuentes: tuple[str, ...] = CUENTA,
 ) -> DeudaClienteResumen:
     """Cuánto debe un cliente en una moneda, con el detalle que lo compone.
 
-    Fiados y deudas libres: lo cobrable desde Deudores. Los préstamos del cliente
-    **no suman acá** (ver cabecera); se consultan en Créditos.
+    Por defecto la cuenta corriente —fiados y deudas libres, lo cobrable desde
+    Deudores—. Con `fuentes=CREDITOS` contesta lo mismo para sus préstamos, que
+    es lo que necesita el bot para saber si hay que preguntar contra cuál de las
+    dos bolsas imputa (§Bot).
 
     Lectura sin bloqueo, para contestar por chat o mostrar antes de cobrar."""
     cliente = _cliente_o_error(db, cliente_id)
-    renglones = _cargar_renglones(db, cliente_id, moneda, bloquear=False)
+    renglones = _cargar_renglones(db, cliente_id, moneda, bloquear=False, fuentes=fuentes)
     return DeudaClienteResumen(
         cliente_id=cliente.id,
         cliente_nombre=cliente.nombre,
@@ -422,21 +462,41 @@ error_sin_deuda = _error_sin_deuda
 mensaje_sin_deuda = _mensaje_sin_deuda
 
 
-def cobrar_cliente(
-    db: Session, payload: CobroClienteCreate
-) -> CobroClienteResponse:
-    """Cobra un importe libre contra toda la deuda de un cliente, en efectivo.
+def _sin_renglones(
+    db: Session,
+    cliente_id: uuid.UUID,
+    cliente_nombre: str,
+    moneda: Moneda,
+    fuentes: tuple[str, ...],
+) -> ConflictError:
+    """El error de "acá no hay nada que cobrar", según la bolsa que se pidió."""
+    if fuentes == CREDITOS:
+        return ConflictError(
+            f"{cliente_nombre} no tiene préstamos abiertos en {moneda.value}."
+        )
+    return _error_sin_deuda(db, cliente_id, cliente_nombre, moneda)
 
-    El importe se imputa de la operación más vieja a la más nueva cruzando
-    fiados y deudas libres (los préstamos no entran: ver cabecera). Cada
-    operación alcanzada asienta su propia línea de caja en la moneda efectivamente cobrada; el residuo del
+
+def cobrar_cliente(
+    db: Session,
+    payload: CobroClienteCreate,
+    fuentes: tuple[str, ...] = CUENTA,
+) -> CobroClienteResponse:
+    """Cobra un importe libre contra la deuda de un cliente, en efectivo.
+
+    El importe se imputa de la operación más vieja a la más nueva dentro de la
+    bolsa que se pida: por defecto la cuenta corriente —fiados y deudas libres—,
+    con `fuentes=CREDITOS` sus préstamos. Cada operación alcanzada asienta su
+    propia línea de caja en la moneda efectivamente cobrada; el residuo del
     redondeo de un cobro cross-moneda cae en la última alcanzada, para que las
     líneas sumen exactamente lo que entró (ver `repartir_cobro_fifo`)."""
     cliente = _cliente_o_error(db, payload.cliente_id)
     cliente_id, cliente_nombre = cliente.id, cliente.nombre
-    renglones = _cargar_renglones(db, cliente_id, payload.moneda_deuda, bloquear=True)
+    renglones = _cargar_renglones(
+        db, cliente_id, payload.moneda_deuda, bloquear=True, fuentes=fuentes
+    )
     if not renglones:
-        raise _error_sin_deuda(db, cliente_id, cliente_nombre, payload.moneda_deuda)
+        raise _sin_renglones(db, cliente_id, cliente_nombre, payload.moneda_deuda, fuentes)
 
     saldo_total = sum((r.saldo for r in renglones), _CERO).quantize(Decimal("0.01"))
     es_cross = payload.moneda_pago != payload.moneda_deuda
@@ -492,15 +552,43 @@ def cobrar_cliente(
     )
 
 
-def cobrar_cliente_con_cheque(
+def cobrar_prestamos_cliente(
+    db: Session, payload: CobroClienteCreate
+) -> CobroClienteResponse:
+    """Importe libre contra los préstamos del cliente, el más viejo primero.
+
+    Es "Kiosco me entregó 200 lucas" cuando lo que debe es un préstamo: el mismo
+    pago libre del botón de Créditos, pero sin que el operador elija contra cuál
+    de sus préstamos va. Reusa entero el reparto del cobro consolidado —cambia
+    la bolsa, no la regla— así que un préstamo cobrado por acá y uno cobrado
+    desde el panel imputan igual y asientan la misma línea de caja."""
+    return cobrar_cliente(db, payload, fuentes=CREDITOS)
+
+
+def cobrar_prestamos_cliente_con_cheque(
     db: Session,
     payload: CobroClienteChequeCreate,
     created_at: datetime | None = None,
 ) -> CobroClienteChequeResponse:
-    """Cobra toda la deuda de un cliente con un solo cheque.
+    """Lo mismo que `cobrar_prestamos_cliente`, pero entregando un cheque.
 
-    Salda por el **valor neto** del cheque, imputado de la operación más vieja a
-    la más nueva igual que el efectivo. **No asienta caja por el cobro**: el
+    El papel entra a cartera a nombre del cliente y salda por su valor neto; no
+    mueve caja. Si cubre de más, el vuelto se resuelve igual que en todos lados
+    (§5): se le devuelve en efectivo o queda como pasivo a su favor."""
+    return cobrar_cliente_con_cheque(db, payload, created_at, fuentes=CREDITOS)
+
+
+def cobrar_cliente_con_cheque(
+    db: Session,
+    payload: CobroClienteChequeCreate,
+    created_at: datetime | None = None,
+    fuentes: tuple[str, ...] = CUENTA,
+) -> CobroClienteChequeResponse:
+    """Cobra con un solo cheque la deuda de un cliente en una de las dos bolsas.
+
+    Por defecto la cuenta corriente; con `fuentes=CREDITOS`, sus préstamos. Salda
+    por el **valor neto** del cheque, imputado de la operación más vieja a la más
+    nueva igual que el efectivo. **No asienta caja por el cobro**: el
     cheque entra a cartera a nombre del cliente y la plata se reconoce recién al
     venderlo o cobrarlo (mismo criterio que §2, §2.b y §3).
 
@@ -511,9 +599,11 @@ def cobrar_cliente_con_cheque(
     su favor."""
     cliente = _cliente_o_error(db, payload.cliente_id)
     cliente_id, cliente_nombre = cliente.id, cliente.nombre
-    renglones = _cargar_renglones(db, cliente_id, payload.moneda_deuda, bloquear=True)
+    renglones = _cargar_renglones(
+        db, cliente_id, payload.moneda_deuda, bloquear=True, fuentes=fuentes
+    )
     if not renglones:
-        raise _error_sin_deuda(db, cliente_id, cliente_nombre, payload.moneda_deuda)
+        raise _sin_renglones(db, cliente_id, cliente_nombre, payload.moneda_deuda, fuentes)
 
     # Solo choca contra un cheque del mismo papel que esté EN CARTERA: uno anulado
     # libera su número, y uno que ya se vendió puede volver por el circuito y

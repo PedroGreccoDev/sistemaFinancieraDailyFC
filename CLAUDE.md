@@ -927,15 +927,25 @@ dos fuentes—; servicio `svc_deudores` (`app/services/deudores.py`), router `/d
   para que el reparto sea determinista, no por prioridad de negocio.
   **No es por vencimiento**: la deuda vencida hace más tiempo no se adelanta a una más
   antigua (decisión del dueño, 2026-08-19).
-- **Dónde se filtra el préstamo.** En `_cargar_renglones`, que es por donde pasa **todo**
-  cobro (efectivo, cheque y compensación): ya no lee la tabla `prestamos`. `armar_renglones`
-  **sigue aceptándolos** —es pura y la usa la consulta del bot—, así que el filtro está en
-  la carga, no en el orden. En el front, `construirResumen` de `DeudoresGeneral.tsx`.
+- **Dónde se separan las bolsas.** En `_cargar_renglones`, que es por donde pasa **todo**
+  cobro (efectivo, cheque y compensación): lee las fuentes que se le pidan y por defecto
+  `CUENTA` —fiados y deudas libres—. Los préstamos entran solo con `fuentes=CREDITOS`, y
+  **nunca en el mismo cobro**. `armar_renglones` sigue ordenando los tres tipos: es pura y la
+  usa la consulta del bot, así que el filtro está en la carga, no en el orden. En el front,
+  `construirResumen` de `DeudoresGeneral.tsx` directamente no consulta `/prestamos`.
 - **"No tiene deuda abierta" no puede ser la respuesta a un cliente que debe un préstamo.**
-  `mensaje_sin_deuda` (compartido con compensaciones y con el bot) mira si hay un préstamo
-  vivo y, si lo hay, contesta que lo que debe se cobra aparte —por chat "pagó la cuota" /
-  "me pagó el interés", en el panel Créditos—. El mensaje pelado mandaba al operador a
-  buscar un error que no existe.
+  `mensaje_sin_deuda` (compartido con compensaciones y con el panel) mira si hay un préstamo
+  vivo y, si lo hay, contesta que lo que debe se cobra aparte —en Créditos—. El mensaje
+  pelado mandaba al operador a buscar un error que no existe.
+- **Por chat las dos bolsas se cobran igual _(régimen definido 2026-09-12)_.** El panel tiene
+  dos pantallas y el operador elige entrando a una; por WhatsApp no hay pantalla, así que la
+  elección la hace `_bolsa_y_moneda` (dispatcher): si el cliente debe de un solo lado, ese;
+  si debe de los dos, **pregunta** —decisión del dueño: "no puede haber errores de cobro"—;
+  y si el operador ya lo dijo en el mensaje ("del préstamo"), el modelo lo manda en `destino`
+  y no se pregunta nada. Vale para el cobro en plata y con cheque. Los servicios son
+  `cobrar_prestamos_cliente` / `cobrar_prestamos_cliente_con_cheque`, que son los mismos
+  `cobrar_cliente*` con `fuentes=CREDITOS`: el reparto, el asiento de caja y el vuelto no se
+  duplican, cambia la bolsa. Tests: `test_bot_bolsa_del_cobro.py`.
 - **Un total por moneda, con su propio botón.** ARS y USD son cajas distintas y no se suman:
   el cobro declara `moneda_deuda`. **Los cheques fiados son siempre en pesos**, así que en un
   cobro en USD solo entran deudas libres. El pago sí puede venir en la otra moneda con su
@@ -2038,13 +2048,10 @@ que sería un loop infinito).
   - **`DEUDORES` cruza las tres fuentes con `svc_deudores.armar_renglones`** —fiados, deudas
     libres **y préstamos**—. Lee las tres tablas de una vez y agrupa en memoria: preguntar
     "quién me debe" no puede disparar una consulta por cliente.
-    **⚠️ Desde 2026-09-12 este total ya no es el que se imputa al cobrar.** Los préstamos
-    salieron del cobro consolidado (§2.c) pero **el dueño decidió que la consulta del bot los
-    siga mostrando**: por chat "me debe" es todo lo que el cliente debe, préstamo incluido.
-    La consecuencia a tener presente: si el operador dicta por WhatsApp el número que le
-    contestó el bot y ese número incluye préstamo, `COBRAR_DEUDA_CLIENTE` **rechaza el cobro**
-    por exceder el saldo cobrable (`calcular_reduccion_saldo` no deja cobrar de más). Las
-    cuotas se cobran con `COBRAR_CUOTA` o desde Créditos.
+    Sigue mostrando las tres juntas por decisión del dueño: por chat "me debe" es todo lo
+    que el cliente debe, préstamo incluido. **Ese total puede no imputarse de una sola vez**:
+    el cobro son dos bolsas (§2.c) y si el cliente debe en las dos, `COBRAR_DEUDA_CLIENTE`
+    pregunta contra cuál va antes de tocar nada.
   - **`CONSULTA` tipo `CLIENTE` tiene que cubrir las tres fuentes de deuda de un cliente:**
     préstamos activos, fiados abiertos y **otras deudas** (§2.b). Una fuente que falte no
     da error: el bot contesta "no tiene deudas activas" con toda seguridad mientras el

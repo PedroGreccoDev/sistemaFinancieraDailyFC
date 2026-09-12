@@ -1570,44 +1570,120 @@ def _cobrar_fiado_efectivo(
     )
 
 
+class _Repreguntar(Exception):
+    """Falta un dato que solo el operador puede dar; se le pregunta y listo.
+
+    No hay estado que guardar: el operador contesta en el siguiente mensaje y el
+    modelo rearma el intent completo (regla de reconstrucción multi-turno del
+    prompt), igual que con la pregunta de la moneda."""
+
+    def __init__(self, mensaje: str) -> None:
+        super().__init__(mensaje)
+        self.mensaje = mensaje
+
+
+def _bolsa_y_moneda(
+    db: Session, cliente: Cliente, data: dict[str, Any], que: str
+) -> tuple[Moneda, str, Decimal, Decimal]:
+    """Contra qué deuda del cliente se imputa: moneda y bolsa.
+
+    Las **dos bolsas** son la cuenta corriente —cheques fiados y deudas libres— y
+    los préstamos (§2.c). Adentro de cada una el reparto es automático y el
+    operador no elige nada; entre las dos, elige él:
+
+    - debe en una sola → esa, sin preguntar;
+    - debe en las dos y no lo aclaró → **se pregunta**. Decisión del dueño: la
+      plata termina en lugares distintos y un default silencioso es un cobro mal
+      imputado que nadie ve hasta que no cierra;
+    - lo aclaró ("del préstamo") → viene en `destino` y no se pregunta nada.
+
+    Devuelve `(moneda, destino, saldo_en_cuenta, saldo_en_prestamos)`; si falta
+    que el operador decida, levanta `_Repreguntar` con la pregunta ya escrita."""
+    def total(moneda: Moneda, fuentes: tuple[str, ...]) -> Decimal:
+        return svc_deudores.resumen_cliente(db, cliente.id, moneda, fuentes).total
+
+    cuenta = {m: total(m, svc_deudores.CUENTA) for m in (Moneda.ARS, Moneda.USD)}
+    credito = {m: total(m, svc_deudores.CREDITOS) for m in (Moneda.ARS, Moneda.USD)}
+    debe = {m: cuenta[m] + credito[m] for m in (Moneda.ARS, Moneda.USD)}
+
+    con_deuda = [m for m in (Moneda.ARS, Moneda.USD) if debe[m] > Decimal("0.00")]
+    if not con_deuda:
+        raise _Repreguntar(f"{cliente.nombre} no tiene deuda abierta.")
+
+    if data.get("moneda_deuda"):
+        moneda = _req_enum(data, "moneda_deuda", Moneda)
+    elif len(con_deuda) == 1:
+        moneda = con_deuda[0]
+    else:
+        raise _Repreguntar(
+            f"{cliente.nombre} debe {_ars(debe[Moneda.ARS])} y "
+            f"U$D{_fmt_num(debe[Moneda.USD])}. "
+            f"¿Contra cuál imputo {que}, la deuda en pesos o la de dólares?"
+        )
+
+    en_cuenta, en_credito = cuenta[moneda], credito[moneda]
+    simbolo = "U$D" if moneda == Moneda.USD else "$"
+    destino = (data.get("destino") or "").upper() or None
+
+    if destino not in ("CUENTA", "PRESTAMO"):
+        if en_cuenta > Decimal("0.00") and en_credito > Decimal("0.00"):
+            raise _Repreguntar(
+                f"{cliente.nombre} debe por dos lados en {moneda.value}: "
+                f"{simbolo}{_fmt_num(en_cuenta)} de cuenta (fiados y deudas) y "
+                f"{simbolo}{_fmt_num(en_credito)} de préstamo. "
+                f"¿Contra cuál imputo {que}?"
+            )
+        destino = "PRESTAMO" if en_credito > Decimal("0.00") else "CUENTA"
+
+    if destino == "PRESTAMO" and en_credito <= Decimal("0.00"):
+        raise _Repreguntar(
+            f"{cliente.nombre} no tiene préstamos abiertos en {moneda.value}."
+        )
+    if destino == "CUENTA" and en_cuenta <= Decimal("0.00"):
+        raise _Repreguntar(
+            svc_deudores.mensaje_sin_deuda(db, cliente.id, cliente.nombre, moneda)
+        )
+
+    return moneda, destino, en_cuenta, en_credito
+
+
 def _cobrar_deuda_cliente(
     db: Session, data: dict[str, Any], msg_at: datetime | None = None
 ) -> DispatchResult:
     """Cobro consolidado: el cliente entregó plata contra lo que debe.
 
-    Es el equivalente por chat del botón de la pestaña General: no se elige a
-    qué deuda va —el importe se imputa de la operación más vieja a la más nueva,
-    cruzando cheques fiados, deudas libres y cuotas de préstamo—. Para cobrar
-    una deuda puntual están `COBRAR_CUOTA` y `COBRAR_FIADO_EFECTIVO`.
+    Es el equivalente por chat del botón de la pestaña General: no se elige
+    contra qué deuda va —el importe se imputa de la operación más vieja a la más
+    nueva—. Para cobrar una deuda puntual están `COBRAR_CUOTA` y
+    `COBRAR_FIADO_EFECTIVO`.
 
-    **La moneda de la deuda se resuelve sola** cuando el operador no la aclara:
-    si el cliente debe en una sola moneda, es esa. Si debe en las dos, se
-    pregunta en vez de elegir — imputar pesos contra la deuda en dólares (o al
-    revés) cambia el saldo de dos cajas distintas.
+    **Dos bolsas, no una** (§2.c): la cuenta corriente —cheques fiados y deudas
+    libres— y los préstamos, que se cobran aparte. Adentro de cada una el
+    reparto es automático y el operador no elige nada; entre las dos, sí:
+
+    - debe en una sola bolsa → se cobra ahí, sin preguntar;
+    - debe en las dos y el operador no lo aclara → **se pregunta**. Es plata que
+      puede terminar en dos lugares distintos y no hay default honesto;
+    - el operador lo aclaró ("del préstamo", "de lo que me debe de mercadería")
+      → el modelo manda `destino` y no se pregunta nada.
+
+    **La moneda de la deuda se resuelve igual**: si el cliente debe en una sola,
+    es esa; si debe en las dos, se pregunta — imputar pesos contra la deuda en
+    dólares (o al revés) cambia el saldo de dos cajas distintas.
     """
     cliente_nombre = _req_str(data, "cliente_nombre")
     monto_cobrado = _req_decimal(data, "monto_cobrado")
     moneda_pago = _req_enum(data, "moneda_pago", Moneda) if data.get("moneda_pago") else Moneda.ARS
     cotizacion = _opt_decimal(data, "cotizacion")
-
     cliente = _buscar_cliente_o_error(db, cliente_nombre, estricto=True)
 
-    ars = svc_deudores.resumen_cliente(db, cliente.id, Moneda.ARS)
-    usd = svc_deudores.resumen_cliente(db, cliente.id, Moneda.USD)
-    con_deuda = [r for r in (ars, usd) if r.total > Decimal("0.00")]
-    if not con_deuda:
-        # Puede tener un préstamo vivo: eso no se cobra por acá (§2.c).
-        return False, "❓ " + svc_deudores.mensaje_sin_deuda(db, cliente.id, cliente.nombre)
-
-    if data.get("moneda_deuda"):
-        moneda_deuda = _req_enum(data, "moneda_deuda", Moneda)
-    elif len(con_deuda) == 1:
-        moneda_deuda = con_deuda[0].moneda
-    else:
-        return False, (
-            f"❓ {cliente.nombre} debe {_ars(ars.total)} y U$D{_fmt_num(usd.total)}. "
-            "¿Contra cuál imputo el pago, la deuda en pesos o la de dólares?"
+    try:
+        moneda_deuda, destino, en_cuenta, en_credito = _bolsa_y_moneda(
+            db, cliente, data, "lo que te entregó"
         )
+    except _Repreguntar as falta:
+        return False, f"❓ {falta.mensaje}"
+    simbolo_deuda = "U$D" if moneda_deuda == Moneda.USD else "$"
 
     # Cobrar en dólares los hace entrar al stock vendible, y para eso hace falta
     # su costo (§Stock de dólares). Cuando el cobro cruza monedas la `cotizacion`
@@ -1631,10 +1707,13 @@ def _cobrar_deuda_cliente(
         medio_pago=_medio(data),
         fecha_cobro=fecha_local(msg_at),
     )
-    r = svc_deudores.cobrar_cliente(db, payload)
+    r = (
+        svc_deudores.cobrar_prestamos_cliente(db, payload)
+        if destino == "PRESTAMO"
+        else svc_deudores.cobrar_cliente(db, payload)
+    )
 
     simbolo_pago = "U$D" if moneda_pago == Moneda.USD else "$"
-    simbolo_deuda = "U$D" if moneda_deuda == Moneda.USD else "$"
     lines = [
         f"✅ *Cobro registrado* — {r.cliente_nombre}",
         f"Recibido: {simbolo_pago}{_fmt_num(monto_cobrado)}",
@@ -1647,10 +1726,21 @@ def _cobrar_deuda_cliente(
             f"  • {renglon.detalle} — {simbolo_deuda}{_fmt_num(renglon.imputado)}{saldado}"
         )
     lines.append("")
+    # El saldo que vuelve es el de la bolsa cobrada, no el total: decir "no debe
+    # más nada" cuando todavía tiene la otra abierta es mentirle al operador.
+    bolsa = "de préstamo" if destino == "PRESTAMO" else "de cuenta"
+    otra = en_cuenta if destino == "PRESTAMO" else en_credito
     if r.saldo_restante <= Decimal("0.00"):
-        lines.append(f"🎉 No debe más nada en {moneda_deuda.value}.")
+        lines.append(f"🎉 No debe más nada {bolsa} en {moneda_deuda.value}.")
     else:
-        lines.append(f"Sigue debiendo: {simbolo_deuda}{_fmt_num(r.saldo_restante)}")
+        lines.append(
+            f"Sigue debiendo {bolsa}: {simbolo_deuda}{_fmt_num(r.saldo_restante)}"
+        )
+    if otra > Decimal("0.00"):
+        pendiente = (
+            "de cuenta (fiados y deudas)" if destino == "PRESTAMO" else "de préstamo"
+        )
+        lines.append(f"Aparte, {pendiente}: {simbolo_deuda}{_fmt_num(otra)}")
     return True, "\n".join(lines)
 
 
@@ -1813,12 +1903,15 @@ def _vuelto_modo(data: dict[str, Any]) -> str | None:
 def _cobrar_deuda_cliente_con_cheque(
     db: Session, data: dict[str, Any], msg_at: datetime | None = None
 ) -> DispatchResult:
-    """El cliente entrega UN cheque contra todo lo que debe.
+    """El cliente entrega UN cheque contra lo que debe.
 
-    Es el camino del cobro consolidado cuando el que paga tiene más de un fiado
-    abierto: el cheque salda por su **valor neto**, imputado de la operación más
+    Es el camino del cobro consolidado cuando el que paga tiene más de una deuda
+    abierta: el cheque salda por su **valor neto**, imputado de la operación más
     vieja a la más nueva igual que el efectivo, y no asienta caja —entra a
     cartera a nombre del cliente y la plata se reconoce al venderlo o cobrarlo—.
+
+    Vale para las **dos bolsas** (§2.c): la cuenta corriente y los préstamos. Cuál
+    de las dos lo decide `_bolsa_y_moneda`, que pregunta si debe en ambas.
 
     Si el cheque cubre de más, el servicio pide qué hacer con el vuelto. Esa sí
     es una pregunta de negocio y no un callejón: la contesta el operador diciendo
@@ -1827,23 +1920,14 @@ def _cobrar_deuda_cliente_con_cheque(
     cliente_nombre = _req_str(data, "cliente_nombre")
     cliente = _buscar_cliente_o_error(db, cliente_nombre, estricto=True)
 
-    ars = svc_deudores.resumen_cliente(db, cliente.id, Moneda.ARS)
-    usd = svc_deudores.resumen_cliente(db, cliente.id, Moneda.USD)
-    con_deuda = [r for r in (ars, usd) if r.total > Decimal("0.00")]
-    if not con_deuda:
-        # Puede tener un préstamo vivo: eso no se cobra por acá (§2.c).
-        return False, "❓ " + svc_deudores.mensaje_sin_deuda(db, cliente.id, cliente.nombre)
+    try:
+        moneda_deuda, destino, en_cuenta, en_credito = _bolsa_y_moneda(
+            db, cliente, data, "el cheque"
+        )
+    except _Repreguntar as falta:
+        return False, f"❓ {falta.mensaje}"
 
     cotizacion = _opt_decimal(data, "cotizacion")
-    if data.get("moneda_deuda"):
-        moneda_deuda = _req_enum(data, "moneda_deuda", Moneda)
-    elif len(con_deuda) == 1:
-        moneda_deuda = con_deuda[0].moneda
-    else:
-        return False, (
-            f"❓ {cliente.nombre} debe {_ars(ars.total)} y U$D{_fmt_num(usd.total)}. "
-            "¿Contra cuál imputo el cheque, la deuda en pesos o la de dólares?"
-        )
 
     payload = CobroClienteChequeCreate(
         cliente_id=cliente.id,
@@ -1858,7 +1942,11 @@ def _cobrar_deuda_cliente_con_cheque(
         vuelto_modo=_vuelto_modo(data),
         fecha_cobro=fecha_local(msg_at),
     )
-    r = svc_deudores.cobrar_cliente_con_cheque(db, payload, created_at=msg_at)
+    r = (
+        svc_deudores.cobrar_prestamos_cliente_con_cheque(db, payload, created_at=msg_at)
+        if destino == "PRESTAMO"
+        else svc_deudores.cobrar_cliente_con_cheque(db, payload, created_at=msg_at)
+    )
 
     simbolo = "U$D" if moneda_deuda == Moneda.USD else "$"
     lines = [
@@ -1876,10 +1964,17 @@ def _cobrar_deuda_cliente_con_cheque(
     lines.append("")
     if r.vuelto_ars > Decimal("0.00"):
         lines.append(f"Sobró {_ars(r.vuelto_ars)} a favor del cliente.")
+    bolsa = "de préstamo" if destino == "PRESTAMO" else "de cuenta"
+    otra = en_cuenta if destino == "PRESTAMO" else en_credito
     if r.saldo_restante <= Decimal("0.00"):
-        lines.append(f"🎉 No debe más nada en {moneda_deuda.value}.")
+        lines.append(f"🎉 No debe más nada {bolsa} en {moneda_deuda.value}.")
     else:
-        lines.append(f"Sigue debiendo: {simbolo}{_fmt_num(r.saldo_restante)}")
+        lines.append(f"Sigue debiendo {bolsa}: {simbolo}{_fmt_num(r.saldo_restante)}")
+    if otra > Decimal("0.00"):
+        pendiente = (
+            "de cuenta (fiados y deudas)" if destino == "PRESTAMO" else "de préstamo"
+        )
+        lines.append(f"Aparte, {pendiente}: {simbolo}{_fmt_num(otra)}")
     lines.append("")
     lines.append("⚠️ La plata no entró a la caja: el cheque está en cartera.")
     return True, "\n".join(lines)

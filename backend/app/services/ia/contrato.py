@@ -340,9 +340,8 @@ OPERACIONES DISPONIBLES
      - monto: number (el capital que devolvió)
      - medio_pago: "EFECTIVO" o "TRANSFERENCIA" (default EFECTIVO)
    ⚠️ Solo si dice CAPITAL o que devuelve lo prestado. "Me pagó 500 mil" a secas
-      NO es esto: en un cliente con préstamo a interés fijo es COBRAR_INTERES
-      (§7.b) —baja interés, no capital—; si su deuda es fiado o deuda libre, es
-      COBRAR_DEUDA_CLIENTE (§9b).
+      NO es esto: es COBRAR_DEUDA_CLIENTE (§9b) y, si esa plata cae en un préstamo
+      a interés fijo, baja interés, no capital.
 
 7.d CANCELAR_PRESTAMO  ←— préstamo a interés fijo
    Cuándo: El cliente liquida el préstamo: devuelve todo el capital que falta
@@ -395,17 +394,26 @@ OPERACIONES DISPONIBLES
        cubre de más y el operador dice qué hace con la diferencia: "le devolví el
        vuelto" → SALDAR_EFECTIVO; "se lo dejo a favor" / "le quedo debiendo" →
        QUEDA_DEBIENDO. Si no lo dice, null: el sistema pregunta.
+     - destino: "CUENTA" o "PRESTAMO" o null — contra qué deuda va. Ponelo SOLO
+       si el operador lo dice: "del préstamo", "del crédito", "de las cuotas" →
+       PRESTAMO; "del fiado", "del cheque que le fié", "de la mercadería", "de lo
+       que le había prestado en mercadería" → CUENTA. Si no lo aclara, null: el
+       sistema mira qué debe y, si debe por los dos lados, PREGUNTA. Cuando el
+       operador contesta esa pregunta ("al préstamo", "a la cuenta"), rearmá el
+       intent completo con el destino que dijo.
    Regla: si el cliente tiene VARIOS fiados abiertos, el cheque se imputa a toda su
      cuenta de lo más viejo a lo más nuevo. No preguntes a cuál de los fiados va.
+   Un cheque también puede ir contra un préstamo ("me trajo un cheque para el
+     crédito"): es el mismo intent con destino PRESTAMO.
 
 9b. COBRAR_DEUDA_CLIENTE  ←— el cobro por defecto
    Cuándo: Un cliente le entregó plata al operador para bajar lo que debe, SIN
-     decir contra qué deuda va. Es la cuenta corriente del cliente: el sistema
-     imputa el importe a sus deudas de la más vieja a la más nueva, cruzando
-     cheques fiados y deudas libres.
-     ⚠️ NO alcanza los préstamos: las cuotas se cobran con COBRAR_CUOTA y el
-     interés con COBRAR_INTERES. Si el cliente solo debe un préstamo, el sistema
-     lo rechaza y lo aclara; mandá entonces el intent del préstamo.
+     decir qué deuda puntual paga. El sistema imputa el importe de la más vieja a
+     la más nueva.
+     Hay DOS bolsas y no se mezclan: la CUENTA (cheques fiados + deudas libres) y
+     los PRÉSTAMOS. Si el cliente debe en una sola, el sistema la elige; si debe
+     en las dos y el operador no lo aclaró, PREGUNTA contra cuál imputa. Ver
+     `destino` abajo.
    Ej: "Kiosco me entregó 200 lucas", "Cobré 50.000 a Pedrón",
        "Olivero me pagó 300 mil de lo que debía", "Juan me dio 100 dólares"
    data:
@@ -422,6 +430,13 @@ OPERACIONES DISPONIBLES
        al stock). REQUERIDA si moneda_pago es USD **y** moneda_deuda también, que
        es el caso donde no hay `cotizacion`. Si no la dice → ACLARACION_REQUERIDA
        ("¿a cuánto tomás el dólar?"). Ver la regla 14: la cotización nunca se asume.
+     - destino: "CUENTA" o "PRESTAMO" o null — contra qué deuda va. Ponelo SOLO
+       si el operador lo dice: "del préstamo", "del crédito", "de las cuotas" →
+       PRESTAMO; "del fiado", "del cheque que le fié", "de la mercadería", "de lo
+       que le había prestado en mercadería" → CUENTA. Si no lo aclara, null: el
+       sistema mira qué debe y, si debe por los dos lados, PREGUNTA. Cuando el
+       operador contesta esa pregunta ("al préstamo", "a la cuenta"), rearmá el
+       intent completo con el destino que dijo.
 
 ⚠️ CUÁL DE LOS COBROS — decide QUÉ NOMBRA el mensaje:
      "X me pagó 50 lucas" / "cobré 200 mil a X"  → COBRAR_DEUDA_CLIENTE (no dice contra qué)
@@ -850,10 +865,9 @@ REGLAS CRÍTICAS
     decir contra qué ("X me pagó 50 lucas"), elegí COBRAR_DEUDA_CLIENTE — es la
     cuenta corriente del cliente y el sistema imputa a lo más viejo. Elegí uno
     puntual solo si el mensaje nombra la deuda: "la 3", "dos cuotas" → COBRAR_CUOTA;
-    "el fiado", "el cheque que le fié" → COBRAR_FIADO_EFECTIVO. Esa cuenta
-    corriente NO incluye préstamos: si por el historial sabés que lo que ese
-    cliente debe es un préstamo, andá directo a COBRAR_CUOTA (o COBRAR_INTERES si
-    es a interés fijo). Y si no dice cuánta
+    "el fiado", "el cheque que le fié" → COBRAR_FIADO_EFECTIVO. Si además dice
+    de qué lado sale la plata ("del préstamo", "del fiado"), eso NO cambia el
+    intent: sigue siendo COBRAR_DEUDA_CLIENTE, con `destino` cargado. Y si no dice cuánta
     plata le entregaron, preguntá el monto (ACLARACION_REQUERIDA) en vez de asumir
     que pagó una cuota entera.
 12. Números de cheque abreviados: si el operador menciona solo los últimos dígitos
