@@ -1182,7 +1182,7 @@ function PanelInteresFijo({ prestamo }: { prestamo: Prestamo }) {
 
 // ── Página principal ──────────────────────────────────────────────────
 
-export default function DeudoresPrestamos() {
+export default function Creditos() {
   const [creandoPrestamo, setCreandoPrestamo] = useState(false)
   const [cobrandoCuota, setCobrandoCuota] = useState<Prestamo | null>(null)
   const [pagoLibre, setPagoLibre] = useState<DeudaItem | null>(null)
@@ -1263,6 +1263,13 @@ export default function DeudoresPrestamos() {
 
   return (
     <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
+
+      {/* Header — sección propia: el título lo pone la página, no un layout
+          de pestañas como cuando esto vivía adentro de Deudores. */}
+      <div style={{ marginBottom: '1.25rem' }}>
+        <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Créditos</h1>
+        <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>La plata prestada y sus cuotas: préstamos en cuotas y a interés fijo. Se cobran acá, no en Deudores</p>
+      </div>
 
       {/* Leyenda + botón Nuevo */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1.5rem' }}>

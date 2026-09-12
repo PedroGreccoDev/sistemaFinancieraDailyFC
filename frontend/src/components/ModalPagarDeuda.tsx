@@ -29,8 +29,9 @@ const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fon
 // libres abiertas de un cliente en una misma moneda, cobradas de una.
 //
 // `deuda_general` es el de la pestaña General y va un paso más allá: **toda** la
-// deuda del cliente en esa moneda, cruzando cheques fiados, deudas libres y
-// préstamos. En los dos el `id` que viaja es el del **cliente**, no el de una
+// deuda del cliente en esa moneda, cruzando cheques fiados y deudas libres. Los
+// préstamos no entran —se cobran en Créditos, con `tipo: 'prestamo'` desde su
+// propia pantalla—. En los dos el `id` que viaja es el del **cliente**, no el de una
 // deuda, y `saldo` es la suma de sus saldos; el backend reparte el importe de la
 // operación más vieja a la más nueva.
 export interface DeudaItem {
@@ -137,8 +138,8 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
     try {
       if (esGeneral) {
         // `deuda.id` es el cliente: el cheque salda TODA su deuda en esa moneda
-        // —fiados, deudas libres y préstamos— de la operación más vieja a la más
-        // nueva. Si sobra, el vuelto se resuelve según vueltoModo.
+        // —fiados y deudas libres, no préstamos— de la operación más vieja a la
+        // más nueva. Si sobra, el vuelto se resuelve según vueltoModo.
         const r = await cobrarClienteConCheque({
           cliente_id: deuda.id,
           moneda_deuda: deuda.moneda,
@@ -237,7 +238,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
         })
       } else if (esGeneral) {
         // `deuda.id` es el cliente: el importe se reparte entre TODAS sus deudas
-        // de esa moneda —fiados, deudas libres y préstamos—, la más vieja primero.
+        // de esa moneda —fiados y deudas libres, no préstamos—, la más vieja primero.
         const r = await cobrarCliente({
           cliente_id: deuda.id,
           moneda_deuda: deuda.moneda,
@@ -308,7 +309,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           {esAgregado && (
             <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '-0.4rem' }}>
               {esGeneral
-                ? 'Se imputa a las operaciones más viejas primero —fiados, deudas y préstamos por igual—, hasta donde alcance.'
+                ? 'Se imputa a las operaciones más viejas primero —fiados y deudas por igual—, hasta donde alcance. Los préstamos se cobran en Créditos.'
                 : 'Se imputa a las deudas más viejas primero, hasta donde alcance.'}
             </p>
           )}

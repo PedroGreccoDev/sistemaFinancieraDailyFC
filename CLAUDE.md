@@ -528,9 +528,11 @@ queda en cero, lo que le debés a Pedro baja a $400.000, y la caja no se movió.
   deshacerse)_. Cada renglón alcanzado guarda cuánto se le imputó en
   `compensacion_imputaciones` —**medido** contra su saldo antes y después, no
   recalculado— y la reversión devuelve exactamente eso. Van ahí las dos patas:
-  las deudas del cliente (del préstamo, la **cuota**, que es donde cae la plata) y
-  cada pasivo del acreedor alcanzado, así restituir es el mismo recorrido para
-  los dos lados. Recalcular el reparto al revés daría distinto apenas alguno
+  las deudas del cliente y cada pasivo del acreedor alcanzado, así restituir es el
+  mismo recorrido para los dos lados. _(Desde 2026-09-12 una compensación nueva no
+  alcanza préstamos —§2.c—, pero el tipo `cuota` sigue vivo en la tabla y en la
+  reversión: las compensaciones viejas que cayeron en una cuota tienen que poder
+  deshacerse.)_ Recalcular el reparto al revés daría distinto apenas alguno
   reciba otro movimiento entre medio, y esa diferencia sería plata que aparece o
   desaparece. Si el excedente que le quedó a favor al cliente
   ya se usó o se pagó, la reversión **se bloquea**.
@@ -902,37 +904,52 @@ y fecha. Conceptualmente "un fiado sin cheque y con divisa". Tabla `deudas_simpl
 
 ### 2.c Deuda consolidada del cliente _(pestaña General — régimen definido 2026-08-19)_
 
-Un cliente puede deberle al negocio por tres caminos a la vez: un cheque fiado (§2), una
-deuda libre (§2.b) y las cuotas de un préstamo (§3). **Cuando entrega plata no está pagando
-una de esas: está pagando lo que debe.** La pestaña **General** de Deudores es esa operación
-—una sola cuota común sobre las tres fuentes—; servicio `svc_deudores`
-(`app/services/deudores.py`), router `/deudores`.
+> **Cambio 2026-09-12 (decisión del dueño): los préstamos salieron de esta cuenta.** Se
+> mudaron a su propia sección de primer nivel, **Créditos** (§3), y se cobran únicamente
+> desde ahí. El motivo es de mostrador: en General el operador cobra contra un total que
+> ve en pantalla, y una cuota de préstamo escondida en ese número se llevaría parte de la
+> plata a una deuda que no está mirando. Lo que **no** cambió: la consulta "quién me debe"
+> del bot sigue mostrando las tres fuentes juntas (§10).
+
+Un cliente puede deberle al negocio por dos caminos a la vez: un cheque fiado (§2) y una
+deuda libre (§2.b). **Cuando entrega plata no está pagando una de esas: está pagando lo que
+debe.** La pestaña **General** de Deudores es esa operación —una sola cuota común sobre las
+dos fuentes—; servicio `svc_deudores` (`app/services/deudores.py`), router `/deudores`.
 
 - **El botón Pagar es del cliente, no del renglón _(pedido de los operadores)_.** La pantalla
   muestra el detalle de cada deuda para que se vea de dónde sale el número, pero **sin botón
   por renglón**: al pie va el total y un único botón. Cobrar una deuda puntual sigue estando
-  en la pestaña de su módulo (Préstamos / Otras deudas / Fiados), que es donde el operador
-  elige contra qué imputa.
+  en la pestaña de su módulo (Otras deudas / Fiados), que es donde el operador elige contra
+  qué imputa; los préstamos, en Créditos.
 - **Imputación FIFO por fecha de ORIGEN, cruzando tipos** (`fecha_fiado`, `fecha` de la deuda
-  libre, `fecha_inicio` del préstamo): si el renglón más viejo es un fiado y el siguiente un
-  préstamo, primero se llena el fiado. Empatan por `created_at` y, si tampoco alcanza, por
-  tipo (`_ORDEN_TIPO`) — solo para que el reparto sea determinista, no por prioridad de
-  negocio. Dentro de un préstamo el importe sigue cayendo en la cuota más vieja (§3).
-  **No es por vencimiento**: la cuota vencida hace más tiempo no se adelanta a una deuda más
+  libre): si el renglón más viejo es un fiado y el siguiente una deuda libre, primero se llena
+  el fiado. Empatan por `created_at` y, si tampoco alcanza, por tipo (`_ORDEN_TIPO`) — solo
+  para que el reparto sea determinista, no por prioridad de negocio.
+  **No es por vencimiento**: la deuda vencida hace más tiempo no se adelanta a una más
   antigua (decisión del dueño, 2026-08-19).
+- **Dónde se filtra el préstamo.** En `_cargar_renglones`, que es por donde pasa **todo**
+  cobro (efectivo, cheque y compensación): ya no lee la tabla `prestamos`. `armar_renglones`
+  **sigue aceptándolos** —es pura y la usa la consulta del bot—, así que el filtro está en
+  la carga, no en el orden. En el front, `construirResumen` de `DeudoresGeneral.tsx`.
+- **"No tiene deuda abierta" no puede ser la respuesta a un cliente que debe un préstamo.**
+  `mensaje_sin_deuda` (compartido con compensaciones y con el bot) mira si hay un préstamo
+  vivo y, si lo hay, contesta que lo que debe se cobra aparte —por chat "pagó la cuota" /
+  "me pagó el interés", en el panel Créditos—. El mensaje pelado mandaba al operador a
+  buscar un error que no existe.
 - **Un total por moneda, con su propio botón.** ARS y USD son cajas distintas y no se suman:
   el cobro declara `moneda_deuda`. **Los cheques fiados son siempre en pesos**, así que en un
-  cobro en USD solo entran deudas libres y préstamos en dólares. El pago sí puede venir en la
-  otra moneda con su cotización, como en cada módulo por separado.
+  cobro en USD solo entran deudas libres. El pago sí puede venir en la otra moneda con su
+  cotización, como en cada módulo por separado.
 - **Cada operación alcanzada asienta su propia línea de caja**, con la categoría y la
   referencia de su módulo (`COBRO_FIADO`/`fiado`, `COBRO_DEUDA`/`deuda_simple_cobro`,
   `COBRO_CUOTA`/`prestamo`). No hay una línea única "cobro al cliente": anular una de esas
   operaciones borra sus líneas por referencia, y una línea compartida se llevaría puesta
   plata de las otras. Por eso tampoco hizo falta tocar `_ENTIDADES` (§Anulación).
-- **Quién imputa es el módulo dueño, no este servicio.** `svc_fiados.imputar_cobro`,
-  `svc_deudas_simples.imputar_cobro` y `svc_prestamos.imputar_pago` son los mismos helpers
-  que usan los cobros de cada pestaña, extraídos para que **no commiteen**: el commit es del
-  cobro consolidado, así que las tres imputaciones y sus líneas entran o no entran juntas.
+- **Quién imputa es el módulo dueño, no este servicio.** `svc_fiados.imputar_cobro` y
+  `svc_deudas_simples.imputar_cobro` son los mismos helpers que usan los cobros de cada
+  pestaña, extraídos para que **no commiteen**: el commit es del cobro consolidado, así que
+  las imputaciones y sus líneas entran o no entran juntas. (`svc_prestamos.imputar_pago`
+  sigue enganchado en `_imputar` pero hoy no se alcanza desde un cobro: ver el recuadro.)
   Duplicar acá las reglas de cada módulo (cuándo cancela, qué categoría de caja) es
   exactamente lo que haría divergir el cobro general del puntual.
 - **Cobro con cheque** (`POST /deudores/cobrar-cliente-con-cheque`): salda por el **valor
@@ -944,14 +961,22 @@ una de esas: está pagando lo que debe.** La pestaña **General** de Deudores es
 - **Endpoints:** `POST /deudores/cobrar-cliente` (efectivo), `POST
   /deudores/cobrar-cliente-con-cheque`, `GET /deudores/clientes/{id}?moneda=` (lo que debe,
   con su detalle — lo consume el bot).
-- **Panel:** `DeudoresGeneral.tsx` arma el consolidado **en el front** con las tres consultas
-  que ya hacía; el cobro va por el modal compartido `ModalPagarDeuda` con tipo
-  `deuda_general`, donde el `id` que viaja es el del **cliente**.
+- **Panel:** `DeudoresGeneral.tsx` arma el consolidado **en el front** con dos consultas
+  (`/fiados` y `/deudas-simples`); el cobro va por el modal compartido `ModalPagarDeuda` con
+  tipo `deuda_general`, donde el `id` que viaja es el del **cliente**.
 - **Bot:** intent `COBRAR_DEUDA_CLIENTE` (ver §Bot).
 
 ---
 
-### 3. Préstamos y Cuotas _(sin cheque asociado)_
+### 3. Préstamos y Cuotas — sección **Créditos** _(sin cheque asociado)_
+
+**Dónde vive (2026-09-12).** En el panel es una **sección de primer nivel del navbar,
+"Créditos"** (`/creditos`, `pages/Creditos.tsx`) — antes era la pestaña "Préstamos" de
+Deudores. Se mudó por pedido del dueño, junto con sacar los préstamos del consolidado de
+§2.c: en Deudores se cobra contra un total, y un préstamo tiene su propio cuadro de cuotas
+que se cobra cuota por cuota. `/deudores/prestamos` redirige a `/creditos` (favoritos
+viejos). El backend **no se movió**: mismo servicio `svc_prestamos`, mismo router
+`/prestamos`, mismos endpoints.
 
 - Monedas soportadas: `ARS` y `USD`.
 - Frecuencias: `diaria | semanal | quincenal | mensual | anual`.
@@ -2010,10 +2035,16 @@ que sería un loop infinito).
   - **`VENTAS` se lee del libro de caja, no del estado del cheque.** El estado dice cómo está
     hoy pero no cuándo salió, y la pregunta es qué pasó en estos días; además, al revertir una
     venta su línea de caja se borra, así que lo que queda es lo que de verdad ocurrió.
-  - **`DEUDORES` cruza las tres fuentes con `svc_deudores.armar_renglones`**, el mismo
-    repartidor que usa el cobro consolidado (§2.c), para que el total que se ve por chat sea
-    exactamente el que se va a imputar al cobrar. Lee las tres tablas de una vez y agrupa en
-    memoria: preguntar "quién me debe" no puede disparar una consulta por cliente.
+  - **`DEUDORES` cruza las tres fuentes con `svc_deudores.armar_renglones`** —fiados, deudas
+    libres **y préstamos**—. Lee las tres tablas de una vez y agrupa en memoria: preguntar
+    "quién me debe" no puede disparar una consulta por cliente.
+    **⚠️ Desde 2026-09-12 este total ya no es el que se imputa al cobrar.** Los préstamos
+    salieron del cobro consolidado (§2.c) pero **el dueño decidió que la consulta del bot los
+    siga mostrando**: por chat "me debe" es todo lo que el cliente debe, préstamo incluido.
+    La consecuencia a tener presente: si el operador dicta por WhatsApp el número que le
+    contestó el bot y ese número incluye préstamo, `COBRAR_DEUDA_CLIENTE` **rechaza el cobro**
+    por exceder el saldo cobrable (`calcular_reduccion_saldo` no deja cobrar de más). Las
+    cuotas se cobran con `COBRAR_CUOTA` o desde Créditos.
   - **`CONSULTA` tipo `CLIENTE` tiene que cubrir las tres fuentes de deuda de un cliente:**
     préstamos activos, fiados abiertos y **otras deudas** (§2.b). Una fuente que falte no
     da error: el bot contesta "no tiene deudas activas" con toda seguridad mientras el
@@ -2030,7 +2061,8 @@ que sería un loop infinito).
 - Las transacciones críticas usan `SELECT ... FOR UPDATE` para evitar race conditions.
 - **Fechas/horas en hora local de Argentina (ART), no UTC.** Usar los helpers de `app/core/fechas.py` (`hoy_local`, etc.); los gastos guardan `hora_operacion` (migración `0008`).
 - **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad. La pantalla agrupa **por acreedor** —una fila desplegable cada uno, con el total por moneda y sus botones— igual que Deudores/Otras deudas agrupa por cliente; ver §5.
-- **Sección "Deudores" (frontend):** agrupa lo que los **clientes** le deben al negocio (≠ "Deudas"/Pasivos, que es al revés). Cuatro pestañas: **General** (índice, `/deudores` → `DeudoresGeneral`), **Préstamos** (`/deudores/prestamos`), **Cheques fiados** (`/deudores/cheques-fiados`) y **Otras deudas** (`/deudores/otras` → `DeudoresOtras`, las deudas simples **agrupadas por cliente** — ver §2.b). La pestaña **General** es una **vista consolidada por cliente** (total ARS y USD sumando préstamos + fiados + deudas simples) armada **en el front** desde `/prestamos`, `/fiados` y `/deudas-simples` (no hay endpoint de agregación); tiene un botón **"Nuevo"** que abre `ModalNuevaDeudaSimple`. El **pago de importe libre** (parcial o total, cross-currency) vive en el componente compartido `components/ModalPagarDeuda.tsx` (llama a `pagar_prestamo`, `cobrar_con_efectivo`, `cobrar_deuda_simple` o `cobrar_deudas_cliente` según el `tipo` de deuda; con `deudas_cliente` el `id` que viaja es el del **cliente**, no el de una deuda) y se usa en General, Préstamos y Otras deudas (botón "Pago libre"/"Cobrar", además del cobro por cuota entera). No reemplaza el cobro directo desde las otras pestañas.
+- **Sección "Deudores" (frontend):** agrupa lo que los **clientes** le deben al negocio (≠ "Deudas"/Pasivos, que es al revés). **Tres** pestañas desde 2026-09-12: **General** (índice, `/deudores` → `DeudoresGeneral`), **Cheques fiados** (`/deudores/cheques-fiados`) y **Otras deudas** (`/deudores/otras` → `DeudoresOtras`, las deudas simples **agrupadas por cliente** — ver §2.b). La pestaña **General** es una **vista consolidada por cliente** (total ARS y USD sumando fiados + deudas simples) armada **en el front** desde `/fiados` y `/deudas-simples` (no hay endpoint de agregación); tiene un botón **"Nuevo"** que abre `ModalNuevaDeudaSimple`. El **pago de importe libre** (parcial o total, cross-currency) vive en el componente compartido `components/ModalPagarDeuda.tsx` (llama a `pagar_prestamo`, `cobrar_con_efectivo`, `cobrar_deuda_simple` o `cobrar_deudas_cliente` según el `tipo` de deuda; con `deudas_cliente` el `id` que viaja es el del **cliente**, no el de una deuda) y se usa en General, Créditos y Otras deudas (botón "Pago libre"/"Cobrar", además del cobro por cuota entera). No reemplaza el cobro directo desde las otras pestañas.
+- **Sección "Créditos" (frontend):** los **préstamos**, en su propia entrada del navbar (`/creditos` → `pages/Creditos.tsx`, ex `DeudoresPrestamos.tsx`). Era la pestaña "Préstamos" de Deudores hasta 2026-09-12; se mudó entera, con las mismas funciones (alta, cuadro de cuotas, cobro por cuota y en lote, cobro con cheque, pago libre, interés fijo, abonar capital, cancelar). `/deudores/prestamos` queda como `<Navigate>` a `/creditos`. Es la **única** pantalla desde donde se cobra un préstamo: el consolidado de Deudores ya no los toca (§2.c).
 
 ---
 

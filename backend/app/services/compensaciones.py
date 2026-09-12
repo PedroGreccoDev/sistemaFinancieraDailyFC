@@ -24,7 +24,8 @@ duplica acá ninguna regla de negocio — duplicarlas es exactamente lo que har�
 divergir la compensación del cobro normal.
 
 **FIFO de los dos lados.** Ni el cliente ni el acreedor son "una deuda": al
-cliente se le imputa cruzando fiados, deudas libres y préstamos, y al acreedor
+cliente se le imputa cruzando fiados y deudas libres —los préstamos no entran en
+la cuota común, se pagan desde Créditos (§3)—, y al acreedor
 se le imputa entre **todas** las deudas que el negocio le tiene, de la más vieja
 a la más nueva. Le comprás tres veces a Pedro sin pagarle y son tres pasivos;
 cuando alguien le transfiere, esa plata no va contra uno elegido a dedo — llena
@@ -173,8 +174,8 @@ def compensar(db: Session, payload: CompensacionCreate) -> CompensacionResponse:
         db, cliente_id, payload.moneda_deuda, bloquear=True
     )
     if not renglones:
-        raise ConflictError(
-            f"{cliente_nombre} no tiene deuda abierta en {payload.moneda_deuda.value}."
+        raise svc_deudores.error_sin_deuda(
+            db, cliente_id, cliente_nombre, payload.moneda_deuda
         )
 
     saldo_total = sum((r.saldo for r in renglones), _CERO).quantize(_CENTAVO)

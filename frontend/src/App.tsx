@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react'
-import { BrowserRouter, Routes, Route, Outlet } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Outlet, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Navbar from './components/Navbar'
 import Dashboard from './pages/Dashboard'
 import Cartera from './pages/Cartera'
 import Deudores from './pages/Deudores'
 import DeudoresGeneral from './pages/DeudoresGeneral'
-import DeudoresPrestamos from './pages/DeudoresPrestamos'
 import DeudoresOtras from './pages/DeudoresOtras'
+import Creditos from './pages/Creditos'
 import Pasivos from './pages/Pasivos'
 import Reportes from './pages/Reportes'
 import Fiados from './pages/Fiados'
@@ -99,10 +99,13 @@ export default function App() {
               <Route path="/cartera"      element={<Cartera />} />
               <Route path="/deudores" element={<Deudores />}>
                 <Route index element={<DeudoresGeneral />} />
-                <Route path="prestamos" element={<DeudoresPrestamos />} />
                 <Route path="cheques-fiados" element={<Fiados />} />
                 <Route path="otras" element={<DeudoresOtras />} />
+                {/* Los préstamos se mudaron a su propia sección. El redirect
+                    queda por los favoritos y links viejos del operador. */}
+                <Route path="prestamos" element={<Navigate to="/creditos" replace />} />
               </Route>
+              <Route path="/creditos"     element={<Creditos />} />
               <Route path="/pasivos"      element={<Pasivos />} />
               <Route path="/reportes"     element={<Reportes />} />
               <Route path="/movimientos" element={<Movimientos />} />

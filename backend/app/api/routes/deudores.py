@@ -27,10 +27,11 @@ DbSession = Annotated[Session, Depends(get_db)]
 def resumen_cliente(
     cliente_id: UUID, db: DbSession, moneda: Moneda = Moneda.ARS
 ) -> DeudaClienteResumen:
-    """Cuánto debe un cliente en una moneda, sumando sus tres fuentes de deuda.
+    """Cuánto debe un cliente en una moneda: cheques fiados + deudas libres.
 
-    Los cheques fiados son siempre en pesos; en USD solo entran deudas libres y
-    préstamos en dólares."""
+    Los préstamos **no suman acá** — viven en Créditos y se cobran desde su
+    propia pantalla (§3). Los cheques fiados son siempre en pesos; en USD solo
+    entran deudas libres."""
     return service.resumen_cliente(db, cliente_id, moneda)
 
 
@@ -40,9 +41,9 @@ def cobrar_cliente(
 ) -> CobroClienteResponse:
     """Cobra un importe libre contra toda la deuda del cliente, en efectivo.
 
-    Se imputa de la operación más vieja a la más nueva cruzando fiados, deudas
-    libres y préstamos; cada operación alcanzada asienta su propia línea de
-    caja."""
+    Se imputa de la operación más vieja a la más nueva cruzando fiados y deudas
+    libres —los préstamos quedan afuera (§3)—; cada operación alcanzada asienta
+    su propia línea de caja."""
     return service.cobrar_cliente(db, payload)
 
 

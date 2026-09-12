@@ -25,8 +25,11 @@ from app.schemas.cheques import ChequeRead
 from app.schemas.pasivos import VueltoModo
 
 
-# Las tres fuentes de deuda de un cliente. Un módulo nuevo de deuda de cliente
-# se da de alta acá y en `svc_deudores._cargar_renglones`.
+# Los tipos de deuda que puede tener un renglón. En un cobro solo aparecen
+# "fiado" y "deuda_simple": los préstamos salieron de la cuota común y viven en
+# Créditos (§3). "prestamo" sigue en la lista porque la consulta "quién me debe"
+# del bot arma renglones de las tres fuentes. Un módulo nuevo de deuda de
+# cliente se da de alta acá y en `svc_deudores._cargar_renglones`.
 RenglonTipo = Literal["fiado", "deuda_simple", "prestamo"]
 
 

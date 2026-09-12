@@ -13,7 +13,6 @@ export default function Deudores() {
         <div style={{ display: 'flex', gap: 0, marginTop: '0.75rem' }}>
           {[
             { to: '/deudores', label: 'General', end: true },
-            { to: '/deudores/prestamos', label: 'Préstamos', end: false },
             { to: '/deudores/cheques-fiados', label: 'Cheques fiados', end: false },
             { to: '/deudores/otras', label: 'Otras deudas', end: false },
           ].map(({ to, label, end }) => (

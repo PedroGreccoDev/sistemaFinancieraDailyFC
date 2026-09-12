@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getPrestamos } from '../api/prestamos'
 import { getFiados } from '../api/fiados'
 import { getDeudasSimples } from '../api/deudas_simples'
 import { getClientes } from '../api/clientes'
@@ -11,7 +10,7 @@ import { SkeletonRows } from '../components/Skeleton'
 import ModalPagarDeuda, { type DeudaItem } from '../components/ModalPagarDeuda'
 import ModalCompensar, { type CompensarCliente } from '../components/ModalCompensar'
 import ModalNuevaDeudaSimple from '../components/ModalNuevaDeudaSimple'
-import type { Moneda, Prestamo, Fiado, DeudaSimple, Cliente } from '../types'
+import type { Moneda, Fiado, DeudaSimple, Cliente } from '../types'
 
 const FM = "'Manrope', sans-serif"
 const FN = "'Bebas Neue', sans-serif"
@@ -31,16 +30,12 @@ interface DeudorResumen {
   deudas: DeudaItem[]
 }
 
-// Saldo pendiente de un préstamo = suma del saldo (monto − monto_pagado) de sus
-// cuotas no cobradas, en la moneda del préstamo.
-function saldoPrestamo(p: Prestamo): number {
-  return p.cuotas_detalle
-    .filter((c) => c.estado !== 'COBRADA')
-    .reduce((acc, c) => acc + (parseFloat(c.monto) - parseFloat(c.monto_pagado || '0')), 0)
-}
-
+// Los préstamos NO entran en este consolidado: viven en la sección Créditos y
+// se cobran solo desde ahí. El motivo es de mostrador — acá el operador cobra
+// contra el total que ve, y una cuota escondida en ese número se llevaría plata
+// de una deuda que no está mirando. El backend hace lo mismo
+// (`svc_deudores._cargar_renglones`).
 function construirResumen(
-  prestamos: Prestamo[],
   fiados: Fiado[],
   deudasSimples: DeudaSimple[],
   clientes: Cliente[],
@@ -55,24 +50,6 @@ function construirResumen(
       map.set(clienteId, r)
     }
     return r
-  }
-
-  for (const p of prestamos) {
-    if (p.estado === 'CANCELADO') continue // ACTIVO o EN_MORA con saldo siguen contando
-    const saldo = saldoPrestamo(p)
-    if (saldo <= 0.009) continue
-    const r = bucket(p.cliente_id)
-    const pendientes = p.cuotas_detalle.filter((c) => c.estado !== 'COBRADA').length
-    r.deudas.push({
-      tipo: 'prestamo',
-      id: p.id,
-      clienteNombre: r.nombre,
-      label: `Préstamo · ${pendientes}/${p.cuotas} cuota${p.cuotas > 1 ? 's' : ''} pend.`,
-      saldo,
-      moneda: p.moneda,
-    })
-    if (p.moneda === 'USD') r.totalUsd += saldo
-    else r.totalArs += saldo
   }
 
   for (const f of fiados) {
@@ -179,7 +156,7 @@ function DeudorCard({ deudor, onPagar, onCompensar }: { deudor: DeudorResumen; o
         {deudor.deudas.map((d) => (
           <div key={`${d.tipo}-${d.id}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
-              <span style={chip(d.tipo === 'prestamo' ? 'primary' : d.tipo === 'deuda_simple' ? 'warning' : 'secondary')}>{d.tipo === 'prestamo' ? 'Préstamo' : d.tipo === 'deuda_simple' ? 'Deuda' : 'Fiado'}</span>
+              <span style={chip(d.tipo === 'deuda_simple' ? 'warning' : 'secondary')}>{d.tipo === 'deuda_simple' ? 'Deuda' : 'Fiado'}</span>
               <span style={{ fontFamily: FM, fontSize: '0.76rem', color: 'rgba(100,116,139,0.85)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span>
             </div>
             <span style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-1)', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtMoneda(d.saldo, d.moneda)}</span>
@@ -209,11 +186,6 @@ export default function DeudoresGeneral() {
   const [creando, setCreando] = useState(false)
   const queryClient = useQueryClient()
 
-  const { data: prestamos, isLoading: loadingP, error: errP } = useQuery({
-    queryKey: ['prestamos'],
-    queryFn: () => getPrestamos(),
-    refetchInterval: 30_000,
-  })
   const { data: fiados, isLoading: loadingF, error: errF } = useQuery({
     queryKey: ['fiados', 'ABIERTO'],
     queryFn: () => getFiados('ABIERTO'),
@@ -226,15 +198,14 @@ export default function DeudoresGeneral() {
   })
   const { data: clientes } = useQuery({ queryKey: ['clientes'], queryFn: getClientes, staleTime: 60_000 })
 
-  const isLoading = loadingP || loadingF || loadingD
-  const error = errP || errF || errD
-  const resumen = construirResumen(prestamos ?? [], fiados ?? [], deudasSimples ?? [], clientes ?? [])
+  const isLoading = loadingF || loadingD
+  const error = errF || errD
+  const resumen = construirResumen(fiados ?? [], deudasSimples ?? [], clientes ?? [])
 
   const totalArs = resumen.reduce((acc, r) => acc + r.totalArs, 0)
   const totalUsd = resumen.reduce((acc, r) => acc + r.totalUsd, 0)
 
   function invalidar() {
-    queryClient.invalidateQueries({ queryKey: ['prestamos'] })
     queryClient.invalidateQueries({ queryKey: ['fiados'] })
     queryClient.invalidateQueries({ queryKey: ['deudas-simples'] })
   }
@@ -256,7 +227,7 @@ export default function DeudoresGeneral() {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
           <h1 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>General</h1>
-          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Lo que cada cliente debe en total: cheques fiados, deudas y préstamos en una sola cuota</p>
+          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Lo que cada cliente debe en total: cheques fiados y deudas en una sola cuota. Los préstamos se cobran en Créditos</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button onClick={() => setCreando(true)} style={{ ...btnSolid('primary'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', padding: '0.45rem 0.875rem' }}><IconPlus size={15} />Nuevo</button>

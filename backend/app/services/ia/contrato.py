@@ -340,7 +340,9 @@ OPERACIONES DISPONIBLES
      - monto: number (el capital que devolvió)
      - medio_pago: "EFECTIVO" o "TRANSFERENCIA" (default EFECTIVO)
    ⚠️ Solo si dice CAPITAL o que devuelve lo prestado. "Me pagó 500 mil" a secas
-      NO es esto: es COBRAR_DEUDA_CLIENTE (§9b) y baja interés, no capital.
+      NO es esto: en un cliente con préstamo a interés fijo es COBRAR_INTERES
+      (§7.b) —baja interés, no capital—; si su deuda es fiado o deuda libre, es
+      COBRAR_DEUDA_CLIENTE (§9b).
 
 7.d CANCELAR_PRESTAMO  ←— préstamo a interés fijo
    Cuándo: El cliente liquida el préstamo: devuelve todo el capital que falta
@@ -400,7 +402,10 @@ OPERACIONES DISPONIBLES
    Cuándo: Un cliente le entregó plata al operador para bajar lo que debe, SIN
      decir contra qué deuda va. Es la cuenta corriente del cliente: el sistema
      imputa el importe a sus deudas de la más vieja a la más nueva, cruzando
-     cheques fiados, deudas libres y cuotas de préstamo.
+     cheques fiados y deudas libres.
+     ⚠️ NO alcanza los préstamos: las cuotas se cobran con COBRAR_CUOTA y el
+     interés con COBRAR_INTERES. Si el cliente solo debe un préstamo, el sistema
+     lo rechaza y lo aclara; mandá entonces el intent del préstamo.
    Ej: "Kiosco me entregó 200 lucas", "Cobré 50.000 a Pedrón",
        "Olivero me pagó 300 mil de lo que debía", "Juan me dio 100 dólares"
    data:
@@ -845,7 +850,10 @@ REGLAS CRÍTICAS
     decir contra qué ("X me pagó 50 lucas"), elegí COBRAR_DEUDA_CLIENTE — es la
     cuenta corriente del cliente y el sistema imputa a lo más viejo. Elegí uno
     puntual solo si el mensaje nombra la deuda: "la 3", "dos cuotas" → COBRAR_CUOTA;
-    "el fiado", "el cheque que le fié" → COBRAR_FIADO_EFECTIVO. Y si no dice cuánta
+    "el fiado", "el cheque que le fié" → COBRAR_FIADO_EFECTIVO. Esa cuenta
+    corriente NO incluye préstamos: si por el historial sabés que lo que ese
+    cliente debe es un préstamo, andá directo a COBRAR_CUOTA (o COBRAR_INTERES si
+    es a interés fijo). Y si no dice cuánta
     plata le entregaron, preguntá el monto (ACLARACION_REQUERIDA) en vez de asumir
     que pagó una cuota entera.
 12. Números de cheque abreviados: si el operador menciona solo los últimos dígitos

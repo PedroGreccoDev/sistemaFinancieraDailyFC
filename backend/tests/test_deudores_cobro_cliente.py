@@ -1,11 +1,17 @@
 """Cobro consolidado de la deuda de un cliente (pestaña General).
 
-Lo que se custodia acá es la parte que no vive en ningún módulo: que las tres
-fuentes de deuda de un cliente —cheques fiados, deudas libres y préstamos— se
-ordenen en una sola cuota común por fecha de origen, y que un importe imputado
-sobre esa cuota caiga en el módulo correcto con la línea de caja que le
-corresponde. El reparto en sí (`repartir_cobro_fifo`) y el vuelto de un cheque
-(`calcular_imputacion_y_vuelto`) se cubren en `test_deudas_simples.py`.
+Lo que se custodia acá es la parte que no vive en ningún módulo: que las deudas
+de un cliente se ordenen en una sola cuota común por fecha de origen, y que un
+importe imputado sobre esa cuota caiga en el módulo correcto con la línea de
+caja que le corresponde. El reparto en sí (`repartir_cobro_fifo`) y el vuelto de
+un cheque (`calcular_imputacion_y_vuelto`) se cubren en `test_deudas_simples.py`.
+
+**Qué entra en esa cuota común.** Cheques fiados y deudas libres. Los préstamos
+salieron: viven en la sección Créditos y se cobran solo desde ahí. `armar_renglones`
+igual los sabe ordenar —la consulta "quién me debe" del bot muestra las tres
+fuentes juntas—, así que los tests de orden siguen mezclando los tres tipos; el
+que custodia que un **cobro** no los toque es
+`test_los_prestamos_no_entran_en_la_cuota_comun`.
 """
 
 from __future__ import annotations
@@ -28,8 +34,10 @@ from app.db.models import (
 )
 from app.services.deudas_simples import repartir_cobro_fifo
 from app.services.deudores import (
+    _cargar_renglones,
     _imputar,
     armar_renglones,
+    mensaje_sin_deuda,
     saldo_prestamo,
 )
 
@@ -166,6 +174,70 @@ def test_saldo_de_prestamo_descuenta_los_pagos_parciales() -> None:
 
 
 # ── La imputación cae en el módulo correcto ───────────────────────────
+
+
+class DBPorEntidad:
+    """Stand-in de Session que contesta según la tabla que se le pide.
+
+    Tiene préstamos cargados a propósito: si `_cargar_renglones` volviera a
+    consultarlos, se los devolvería. Así el test de que no entran en la cuota
+    común no pasa por casualidad."""
+
+    def __init__(
+        self, fiados: list[Fiado], deudas: list[DeudaSimple], prestamos: list[Prestamo]
+    ) -> None:
+        self._por_entidad = {Fiado: fiados, DeudaSimple: deudas, Prestamo: prestamos}
+
+    def scalars(self, stmt):  # noqa: ANN001, ANN202
+        entidad = stmt.column_descriptions[0]["entity"]
+        return iter(self._por_entidad.get(entidad, []))
+
+
+def test_los_prestamos_no_entran_en_la_cuota_comun() -> None:
+    # El cliente debe por los tres caminos, pero el cobro de Deudores solo ve
+    # dos: el préstamo se cobra desde Créditos. Si entrara, parte de la plata
+    # caería en una cuota que el operador no tiene en pantalla.
+    fiado = _fiado("50000", date(2026, 3, 10))
+    deuda = _deuda("30000", date(2026, 1, 5))
+    prestamo = _prestamo(["20000", "20000"], date(2026, 2, 1))
+
+    renglones = _cargar_renglones(
+        DBPorEntidad([fiado], [deuda], [prestamo]),
+        fiado.cliente_id,
+        Moneda.ARS,
+        bloquear=False,
+    )
+
+    assert [r.tipo for r in renglones] == ["deuda_simple", "fiado"]
+    assert sum((r.saldo for r in renglones), Decimal("0.00")) == Decimal("80000")
+
+
+class DBConPrestamos:
+    """Contesta si el cliente tiene o no un préstamo vivo."""
+
+    def __init__(self, tiene: bool) -> None:
+        self._tiene = tiene
+
+    def scalar(self, _stmt):  # noqa: ANN001, ANN202
+        return uuid.uuid4() if self._tiene else None
+
+
+def test_el_que_solo_debe_un_prestamo_no_lee_que_no_debe_nada() -> None:
+    # "Kiosco no tiene deuda abierta" con un préstamo de Kiosco en pantalla es
+    # un malentendido, no una respuesta: el mensaje dice dónde se cobra.
+    msg = mensaje_sin_deuda(DBConPrestamos(True), uuid.uuid4(), "Kiosco", Moneda.ARS)
+
+    assert "préstamo" in msg
+    assert "Créditos" in msg
+
+
+def test_sin_prestamo_el_mensaje_sigue_siendo_el_de_siempre() -> None:
+    msg = mensaje_sin_deuda(DBConPrestamos(False), uuid.uuid4(), "Kiosco", Moneda.ARS)
+
+    assert msg == "Kiosco no tiene deuda abierta en ARS."
+
+
+# ── La imputación ─────────────────────────────────────────────────────
 
 
 def test_un_cobro_llena_la_deuda_mas_vieja_y_derrama_en_la_siguiente() -> None:

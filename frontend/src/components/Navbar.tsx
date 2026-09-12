@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import type { ComponentType } from 'react'
-import { IconHome, IconWallet, IconUsers, IconReceipt, IconChart, IconExchange, IconSettings, IconLogout } from './icons'
+import { IconHome, IconWallet, IconUsers, IconBanknote, IconReceipt, IconChart, IconExchange, IconSettings, IconLogout } from './icons'
 import { DolarPill, DolarBlock } from './DolarInline'
 import { useDarkMode } from '../hooks/useDarkMode'
 import { useCurrentUser } from '../lib/auth'
@@ -33,6 +33,7 @@ const NAV_LINKS: NavItem[] = [
   { to: '/',               label: 'Inicio',        end: true,  Icon: IconHome },
   { to: '/cartera',        label: 'Cartera',        end: false, Icon: IconWallet },
   { to: '/deudores',       label: 'Deudores',       end: false, Icon: IconUsers },
+  { to: '/creditos',       label: 'Créditos',       end: false, Icon: IconBanknote },
   { to: '/pasivos',        label: 'Deudas',         end: false, Icon: IconReceipt },
   { to: '/reportes',       label: 'Reportes',       end: false, Icon: IconChart },
   { to: '/movimientos',    label: 'Movimientos',    end: false, Icon: IconExchange },

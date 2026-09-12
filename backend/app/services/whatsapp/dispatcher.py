@@ -1596,7 +1596,8 @@ def _cobrar_deuda_cliente(
     usd = svc_deudores.resumen_cliente(db, cliente.id, Moneda.USD)
     con_deuda = [r for r in (ars, usd) if r.total > Decimal("0.00")]
     if not con_deuda:
-        return False, f"❓ {cliente.nombre} no tiene deuda abierta."
+        # Puede tener un préstamo vivo: eso no se cobra por acá (§2.c).
+        return False, "❓ " + svc_deudores.mensaje_sin_deuda(db, cliente.id, cliente.nombre)
 
     if data.get("moneda_deuda"):
         moneda_deuda = _req_enum(data, "moneda_deuda", Moneda)
@@ -1734,7 +1735,8 @@ def _compensar_deuda(
     usd = svc_deudores.resumen_cliente(db, cliente.id, Moneda.USD)
     con_deuda = [r for r in (ars, usd) if r.total > Decimal("0.00")]
     if not con_deuda:
-        return False, f"❓ {cliente.nombre} no tiene deuda abierta."
+        # Puede tener un préstamo vivo: eso no se cobra por acá (§2.c).
+        return False, "❓ " + svc_deudores.mensaje_sin_deuda(db, cliente.id, cliente.nombre)
 
     if data.get("moneda_deuda"):
         moneda_deuda = _req_enum(data, "moneda_deuda", Moneda)
@@ -1829,7 +1831,8 @@ def _cobrar_deuda_cliente_con_cheque(
     usd = svc_deudores.resumen_cliente(db, cliente.id, Moneda.USD)
     con_deuda = [r for r in (ars, usd) if r.total > Decimal("0.00")]
     if not con_deuda:
-        return False, f"❓ {cliente.nombre} no tiene deuda abierta."
+        # Puede tener un préstamo vivo: eso no se cobra por acá (§2.c).
+        return False, "❓ " + svc_deudores.mensaje_sin_deuda(db, cliente.id, cliente.nombre)
 
     cotizacion = _opt_decimal(data, "cotizacion")
     if data.get("moneda_deuda"):
