@@ -2044,8 +2044,12 @@ def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_
     entregados = _cheques_del_pago(data)
 
     fiados = _fiados_abiertos(db, cliente_nombre)
+    # Sin fiado abierto el cheque no es un callejón: el cliente puede deber por
+    # una deuda libre o un préstamo, y el cobro por cuenta sabe contra cuál va
+    # (o avisar que no debe nada). Cortar acá con "no encontré un fiado" mandaba
+    # al operador a buscar un error que no existía.
     if not fiados:
-        return False, f"❓ No encontré un fiado abierto para '{cliente_nombre}'."
+        return _cobrar_deuda_cliente_con_cheque(db, data, msg_at)
     # Con más de un fiado —o con más de un papel— el cobro se va por la cuenta
     # del cliente, que sabe repartir de lo más viejo a lo más nuevo y entrar
     # varios cheques de una. Este camino queda para el caso simple: un fiado, un

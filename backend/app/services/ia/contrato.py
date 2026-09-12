@@ -387,8 +387,13 @@ OPERACIONES DISPONIBLES
       COMPLETAS y extraé TODOS los cheques que veas, aunque estén apilados,
       superpuestos o girados — la misma regla del §1. El que se te escape es
       plata que el operador da por cobrada y no entró.
-   ⚠️ EL PORCENTAJE ES DE TODOS. "estos tres al 5%" significa 5% en cada uno; no
-      lo pongas solo en el primero.
+   ⚠️ EL PORCENTAJE PUEDE SER UNO PARA TODOS O UNO POR CHEQUE. Las dos formas
+      son normales y cada objeto lleva el suyo:
+        • "estos tres al 5%" → 5% en LOS TRES (no lo pongas solo en el primero).
+        • "el 81001 al 5% y los otros dos al 8%" → 5% en ese y 8% en los otros.
+          Un plazo más largo o un librador más flojo se toman más caro.
+      Si el operador da un porcentaje para el lote y después corrige uno, vale la
+      corrección para ese y el del lote para el resto.
    data:
      - cliente_nombre: string
      - cheques: ARRAY con un objeto por cheque (aunque sea uno solo). Cada objeto:

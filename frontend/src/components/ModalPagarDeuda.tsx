@@ -117,6 +117,12 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   // cartera por separado, con su nominal y su descuento, y la deuda baja por la
   // suma de los netos.
   const [cheques, setCheques] = useState<ChequeFila[]>([filaVacia()])
+  // El descuento se pacta para la entrega, no papel por papel: "me entregó
+  // estos tres al 5%". Se carga una vez y vale para todos. Solo cuando alguno
+  // se toma distinto —otro plazo, otro librador— se abre el % por cheque.
+  const [pctComun, setPctComun] = useState('')
+  const [pctPorCheque, setPctPorCheque] = useState(false)
+  const pctDe = (fila: ChequeFila) => (pctPorCheque ? fila.pct : pctComun)
   const setFila = (i: number, campo: keyof ChequeFila, valor: string) =>
     setCheques((prev) => prev.map((f, j) => (j === i ? { ...f, [campo]: valor } : f)))
   const agregarFila = () => setCheques((prev) => [...prev, filaVacia()])
@@ -150,7 +156,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   const chValorNeto = Math.round(
     cheques.reduce((acc, f) => {
       const monto = parseFloat(f.monto) || 0
-      return acc + (monto > 0 ? monto * (100 - (parseFloat(f.pct) || 0)) / 100 : 0)
+      return acc + (monto > 0 ? monto * (100 - (parseFloat(pctDe(f)) || 0)) / 100 : 0)
     }, 0) * 100,
   ) / 100
   // El cheque siempre es en pesos: si la deuda es en USD hay que convertir.
@@ -171,7 +177,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   // Cada fila tiene que estar completa: una a medio cargar es un cheque que el
   // operador cree que entregó y no entró.
   const filasCompletas = cheques.every(
-    (f) => f.nro.trim().length > 0 && (parseFloat(f.monto) || 0) > 0 && f.pct !== '',
+    (f) => f.nro.trim().length > 0 && (parseFloat(f.monto) || 0) > 0 && pctDe(f) !== '',
   )
   const puedeEnviarCheque = cheques.length > 0 && filasCompletas && chEquivalente !== null
   // Lo que viaja al backend, ya normalizado.
@@ -179,7 +185,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
     nro_cheque: f.nro.trim() || null,
     banco: f.banco.trim() || null,
     monto: parseFloat(f.monto) || 0,
-    porcentaje_compra: parseFloat(f.pct) || 0,
+    porcentaje_compra: parseFloat(pctDe(f)) || 0,
     fecha_pago: f.fechaPago || null,
   }))
 
@@ -398,6 +404,15 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
 
           {forma === 'cheque' ? (
             <>
+              {/* El descuento del lote. Arriba de los papeles porque es lo que
+                  el operador dice primero: "me entregó estos tres al 5%". */}
+              {!pctPorCheque && (
+                <div>
+                  <label style={LABEL_STYLE}>% de descuento <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(para todos los cheques)</span></label>
+                  <input type="number" step="0.01" min="0" max="100" value={pctComun} onChange={(e) => setPctComun(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
+                </div>
+              )}
+
               {cheques.map((fila, i) => (
                 <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', paddingTop: i > 0 ? '0.6rem' : 0, borderTop: i > 0 ? '1px solid var(--bd-006)' : 'none' }}>
                   {cheques.length > 1 && (
@@ -420,15 +435,17 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
                       <input type="text" value={fila.banco} onChange={(e) => setFila(i, 'banco', e.target.value)} placeholder="Opcional" style={INPUT_STYLE} />
                     </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: pctPorCheque ? '1fr 1fr 1fr' : '1fr 1fr', gap: '0.75rem' }}>
                     <div>
                       <label style={LABEL_STYLE}>Monto</label>
                       <input type="number" step="0.01" min="0.01" value={fila.monto} onChange={(e) => setFila(i, 'monto', e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
                     </div>
-                    <div>
-                      <label style={LABEL_STYLE}>% de dcto.</label>
-                      <input type="number" step="0.01" min="0" max="100" value={fila.pct} onChange={(e) => setFila(i, 'pct', e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
-                    </div>
+                    {pctPorCheque && (
+                      <div>
+                        <label style={LABEL_STYLE}>% de dcto.</label>
+                        <input type="number" step="0.01" min="0" max="100" value={fila.pct} onChange={(e) => setFila(i, 'pct', e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
+                      </div>
+                    )}
                     <div>
                       <label style={LABEL_STYLE}>Fecha de pago</label>
                       <input type="date" value={fila.fechaPago} onChange={(e) => setFila(i, 'fechaPago', e.target.value)} style={INPUT_STYLE} />
@@ -436,9 +453,26 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
                   </div>
                 </div>
               ))}
-              <button type="button" onClick={agregarFila} style={{ ...btnBordered('primary'), padding: '0.4rem', fontSize: '0.72rem' }}>
-                + Agregar otro cheque
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button type="button" onClick={agregarFila} style={{ ...btnBordered('primary'), flex: '1 1 10rem', padding: '0.4rem', fontSize: '0.72rem' }}>
+                  + Agregar otro cheque
+                </button>
+                {cheques.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Al abrir el % por cheque, cada fila arranca con el común:
+                      // el operador cambia el que difiere y no recarga los otros.
+                      if (!pctPorCheque) setCheques((prev) => prev.map((f) => ({ ...f, pct: f.pct || pctComun })))
+                      setPctPorCheque((v) => !v)
+                    }}
+                    title="Cuando uno se toma a otro porcentaje: otro plazo, otro librador"
+                    style={{ ...btnBordered('neutral'), flex: '1 1 10rem', padding: '0.4rem', fontSize: '0.72rem' }}
+                  >
+                    {pctPorCheque ? 'Un solo descuento' : 'Descuento distinto por cheque'}
+                  </button>
+                )}
+              </div>
 
               {chCross && (
                 <div>
@@ -457,7 +491,10 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
                     <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(chValorNeto)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)' }}>
-                    <span>{cheques.length === 1 ? 'Nominal' : `${cheques.length} cheques · nominal`}</span>
+                    <span>
+                      {cheques.length === 1 ? 'Nominal' : `${cheques.length} cheques · nominal`}
+                      {!pctPorCheque && pctComun !== '' && ` · ${pctComun}% a todos`}
+                    </span>
                     <span>{fmtARS(chNominal)}</span>
                   </div>
                   {chDiferencia !== null && (

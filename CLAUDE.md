@@ -976,7 +976,12 @@ dos fuentes—; servicio `svc_deudores` (`app/services/deudores.py`), router `/d
   - **Cada papel entra a cartera por separado** (vence y se cobra por su cuenta) pero la
     deuda baja **una sola vez, por la suma de los netos**: tres de $500.000 al 5% saldan
     $1.425.000, no $1.500.000. Sumar nominales sería regalar el descuento en cada cobro.
-  - **El descuento es por cheque**, no del lote: uno a 30 días y otro a 90 no valen lo mismo.
+  - **El descuento se carga de las dos formas, según cómo se pactó.** Lo normal es uno para
+    toda la entrega ("estos tres al 5%") y así se carga: un campo en el panel, una frase en
+    el chat. Pero cada cheque guarda el suyo, porque un plazo más largo o un librador más
+    flojo se toman más caro ("el 81001 al 5% y los otros dos al 8%"). En el panel el botón
+    "Descuento distinto por cheque" abre el % por fila, arrancando con el común para que el
+    operador corrija solo el que difiere.
   - **El mismo número dos veces en un pago se rechaza** (`ingresar_cheques_de_pago`, en
     `svc_cheques`): con la foto pasa que el modelo lee dos veces el de arriba de la pila, y
     cargarlo doble mete en cartera plata que no existe.
