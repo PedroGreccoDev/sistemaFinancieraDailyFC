@@ -21,6 +21,8 @@ from app.schemas.prestamos import (
     CuotasLoteCobrarRequest,
     InteresFijoUpdate,
     PrestamoCreate,
+    PrestamoPagarConChequeRequest,
+    PrestamoPagarConChequeResponse,
     PrestamoPagoRequest,
     PrestamoRead,
     PrestamoUpdate,
@@ -113,6 +115,23 @@ def pagar_prestamo(
     db: DbSession,
 ) -> PrestamoRead:
     return service.pagar_prestamo(db, prestamo_id, payload)
+
+
+@router.post(
+    "/{prestamo_id}/pagar-con-cheque", response_model=PrestamoPagarConChequeResponse
+)
+def pagar_con_cheque(
+    prestamo_id: UUID,
+    payload: PrestamoPagarConChequeRequest,
+    db: DbSession,
+) -> PrestamoPagarConChequeResponse:
+    """Paga un importe libre contra el préstamo entregando un cheque.
+
+    Salda por el valor neto, de la cuota más vieja a la más nueva, y no mueve
+    caja: el cheque entra a cartera. Si sobra, `sobrante_modo` decide —bajarlo
+    del capital (solo interés fijo), devolverlo en efectivo o quedar debiéndolo—
+    y sin ese dato la operación se rechaza en vez de elegir por el operador."""
+    return service.pagar_con_cheque(db, prestamo_id, payload)
 
 
 @router.post("/{prestamo_id}/cuotas/{cuota_id}/cobros", response_model=CuotaRead)

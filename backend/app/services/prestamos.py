@@ -3,7 +3,7 @@ from __future__ import annotations
 import calendar
 import logging
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -34,9 +34,13 @@ from app.schemas.prestamos import (
     CuotasLoteCobrarConChequeRequest,
     InteresFijoUpdate,
     PrestamoCreate,
+    PrestamoPagarConChequeRequest,
+    PrestamoPagarConChequeResponse,
     PrestamoPagoRequest,
+    PrestamoRead,
     PrestamoUpdate,
 )
+from app.schemas.cheques import ChequeRead
 from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
 from app.services import stock_usd as svc_stock
@@ -243,6 +247,7 @@ def construir_cuotas(
 CICLO_DIAS = 30
 
 _CERO = Decimal("0.00")
+_CIEN = Decimal("100")
 
 
 def fecha_de_periodo(dia_cobro: date, numero: int) -> date:
@@ -1219,6 +1224,173 @@ def imputar_pago(
         detalle=f"Stock por {detalle}",
     )
     return cancelado
+
+
+def _saldo_en_cuotas(prestamo: Prestamo) -> Decimal:
+    """Lo que falta cobrar de las cuotas vivas, en la moneda del préstamo.
+
+    En un préstamo a interés fijo eso es el **interés devengado impago**, nunca
+    el capital: el capital no vive en ninguna cuota (§Interés fijo)."""
+    return sum(
+        (saldo_cuota(c) for c in prestamo.cuotas_detalle if c.estado != CuotaEstado.COBRADA),
+        _CERO,
+    ).quantize(Decimal("0.01"))
+
+
+def pagar_con_cheque(
+    db: Session,
+    prestamo_id: uuid.UUID,
+    payload: PrestamoPagarConChequeRequest,
+    created_at: datetime | None = None,
+) -> PrestamoPagarConChequeResponse:
+    """El cliente entrega un cheque contra lo que debe de este préstamo.
+
+    Es el hermano de `pagar_prestamo` para cuando en vez de plata entrega un
+    papel. Salda por el **valor neto** del cheque, de la cuota más vieja a la más
+    nueva —en el interés fijo, del período más viejo al más nuevo—, y **no mueve
+    caja**: el cheque entra `EN_CARTERA` a nombre del cliente y la plata se
+    reconoce al venderlo o cobrarlo. Mismo criterio que §2, §2.b y §2.c.
+
+    **El sobrante lo decide el operador, no el sistema** _(decisión del dueño)_.
+    Un cheque no se recorta a medida y casi nunca vale exactamente lo que el
+    cliente debe, así que si sobra hace falta `sobrante_modo`:
+
+    - `A_CAPITAL` —solo en interés fijo— devuelve capital con esa diferencia. No
+      asienta caja: la plata sigue siendo el cheque que entró a cartera, lo único
+      que cambia es cuánto capital queda afuera (y por lo tanto el interés que se
+      va a devengar de acá en adelante).
+    - `SALDAR_EFECTIVO` / `QUEDA_DEBIENDO` son los de siempre (§5): se lo devolvés
+      en efectivo o le queda a favor como pasivo del negocio.
+
+    Si con `A_CAPITAL` **todavía** sobra —el cheque cubrió cuotas y capital—, ese
+    resto no se pierde: queda a favor del cliente, que es la única salida que no
+    inventa plata ni la hace desaparecer.
+    """
+    # Imports locales: `pasivos` importa este módulo (`repartir_pago_en_cuotas`) y
+    # `cheques`/`deudas_simples` importan `pasivos`, así que al tope serían ciclos.
+    from app.services import cheques as svc_cheques
+    from app.services import pasivos as svc_pasivos
+    from app.services.deudas_simples import calcular_imputacion_y_vuelto
+
+    prestamo = db.scalar(
+        select(Prestamo)
+        .options(selectinload(Prestamo.cuotas_detalle))
+        .where(Prestamo.id == prestamo_id)
+        .with_for_update()
+    )
+    if prestamo is None:
+        raise NotFoundError("Prestamo no encontrado.")
+    if prestamo.estado == PrestamoEstado.CANCELADO:
+        raise ConflictError("El préstamo ya está cancelado.")
+    # Pone al día los períodos de interés fijo antes de mirar el saldo: cobrar el
+    # día que arranca un ciclo tiene que imputar contra ese, no contra el anterior.
+    devengar_periodos(db, prestamo)
+
+    en_cuotas = _saldo_en_cuotas(prestamo)
+    capital = (prestamo.capital_pendiente or _CERO) if es_interes_fijo(prestamo) else _CERO
+    if en_cuotas <= _CERO and capital <= _CERO:
+        raise ConflictError("El préstamo no tiene saldo pendiente.")
+
+    # Solo choca contra un cheque del mismo papel que siga EN CARTERA (§Recompra).
+    svc_cheques.verificar_no_esta_en_cartera(db, payload.nro_cheque, payload.banco)
+
+    valor_neto = (
+        payload.monto * (_CIEN - payload.porcentaje_compra) / _CIEN
+    ).quantize(Decimal("0.01"))
+
+    # Cuánto del préstamo (en su moneda) salda el cheque, y cuánto sobra. El
+    # cheque es un papel en pesos: contra un préstamo en dólares hace falta la
+    # cotización, igual que en el cobro consolidado.
+    imputado, sobrante = calcular_imputacion_y_vuelto(
+        prestamo.moneda, en_cuotas, valor_neto, payload.cotizacion
+    )
+    if sobrante > _CERO and payload.sobrante_modo is None:
+        de_mas = (
+            f"El cheque cubre el interés y sobran ${sobrante}."
+            if es_interes_fijo(prestamo)
+            else f"El cheque cubre todo el préstamo y sobran ${sobrante}."
+        )
+        opciones = (
+            "Indicá qué hacer con la diferencia: bajarla del capital, pagarla en "
+            "efectivo o quedar debiéndola."
+            if capital > _CERO
+            else "Indicá qué hacer con la diferencia: pagarla en efectivo o quedar "
+            "debiéndola."
+        )
+        raise ValidationError(f"{de_mas} {opciones}")
+
+    fecha = payload.fecha_cobro or hoy_local()
+
+    cheque = Cheque(
+        nro_cheque=payload.nro_cheque,
+        banco=payload.banco,
+        monto=payload.monto,
+        porcentaje_compra=payload.porcentaje_compra,
+        fecha_emision=payload.fecha_emision,
+        fecha_pago=payload.fecha_pago,
+        estado=ChequeEstado.EN_CARTERA,
+        ganancia=_CERO,
+        cliente_origen_id=prestamo.cliente_id,
+    )
+    if created_at is not None:
+        cheque.created_at = created_at
+    # db.add() y no create_cheque(): recibir un cheque como pago NO es comprarlo,
+    # así que no corresponde el egreso COMPRA_CHEQUE.
+    db.add(cheque)
+    db.flush()  # necesita id para la referencia de caja del vuelto
+
+    if imputado > _CERO:
+        imputar_pago(
+            db,
+            prestamo,
+            reduccion=imputado,
+            fecha=fecha,
+            monto_caja=None,  # el cheque no mueve caja: entra a cartera
+            moneda_pago=Moneda.ARS,
+            medio_pago=MedioPago.EFECTIVO,
+            cotizacion=payload.cotizacion if prestamo.moneda != Moneda.ARS else None,
+        )
+
+    a_capital = _CERO
+    if sobrante > _CERO and payload.sobrante_modo == "A_CAPITAL":
+        if capital <= _CERO:
+            raise ValidationError(
+                "Este préstamo no tiene capital pendiente al que bajarle el "
+                "sobrante. Pagalo en efectivo o dejalo a favor del cliente."
+            )
+        a_capital = min(sobrante, capital)
+        prestamo.capital_pendiente = (capital - a_capital).quantize(Decimal("0.01"))
+        sobrante = (sobrante - a_capital).quantize(Decimal("0.01"))
+
+    # Lo que quedó después de cuotas y capital sale por el camino de siempre. Un
+    # `A_CAPITAL` que no alcanzó a comerse todo termina acá como saldo a favor:
+    # devolverlo en efectivo sin que el operador lo haya pedido movería la caja.
+    if sobrante > _CERO:
+        modo = payload.sobrante_modo if payload.sobrante_modo != "A_CAPITAL" else "QUEDA_DEBIENDO"
+        svc_pasivos.aplicar_vuelto_cheque(db, cheque, modo, sobrante, fecha)
+
+    try:
+        recalcular_estado(prestamo)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError(
+            "Ya existe un cheque con ese número y banco en cartera."
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo registrar el pago con cheque.") from exc
+
+    db.refresh(cheque)
+    return PrestamoPagarConChequeResponse(
+        prestamo=PrestamoRead.model_validate(get_prestamo(db, prestamo_id)),
+        cheque=ChequeRead.model_validate(cheque),
+        imputado=imputado,
+        sobrante=sobrante,
+        sobrante_modo=payload.sobrante_modo,
+        a_capital=a_capital,
+        vuelto_ars=sobrante if payload.sobrante_modo != "A_CAPITAL" or sobrante > _CERO else _CERO,
+    )
 
 
 def pagar_prestamo(

@@ -1403,6 +1403,26 @@ export default function Creditos() {
                     >
                       Cancelar
                     </button>
+                    {/* Un importe suelto contra el interés devengado —o un
+                        cheque, que es el caso que las tres operaciones de arriba
+                        no cubren: ellas cobran el período entero y solo en
+                        plata—. El sobrante del cheque puede bajar el capital. */}
+                    <button
+                      type="button"
+                      onClick={() => setPagoLibre({
+                        tipo: 'prestamo',
+                        id: p.id,
+                        clienteNombre: nombre,
+                        label: 'Interés fijo · interés devengado impago',
+                        saldo: saldoPrestamo(p),
+                        moneda: p.moneda,
+                        capitalPendiente: parseFloat(p.capital_pendiente ?? '0'),
+                      })}
+                      title="Pagar un importe libre contra el interés, en plata o con un cheque"
+                      style={{ ...btnBordered('primary'), flex: '1 1 8rem', padding: '0.45rem', fontSize: '0.75rem', textAlign: 'center' }}
+                    >
+                      Pago libre
+                    </button>
                     <button
                       type="button"
                       onClick={() => setEditandoInteres(p)}
@@ -1431,7 +1451,7 @@ export default function Creditos() {
                         saldo: saldoPrestamo(p),
                         moneda: p.moneda,
                       })}
-                      title="Pagar un importe libre (parcial o total), en cualquier moneda"
+                      title="Pagar un importe libre (parcial o total), en plata o con un cheque"
                       style={{ ...btnBordered('primary'), flex: '1 1 8rem', padding: '0.45rem', fontSize: '0.75rem', textAlign: 'center' }}
                     >
                       Pago libre

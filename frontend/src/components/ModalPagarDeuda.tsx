@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { pagarPrestamo } from '../api/prestamos'
+import { pagarPrestamo, pagarPrestamoConCheque } from '../api/prestamos'
 import { cobrarEfectivo } from '../api/fiados'
 import {
   cobrarDeudaSimple,
@@ -34,11 +34,20 @@ const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fon
 // propia pantalla—. En los dos el `id` que viaja es el del **cliente**, no el de una
 // deuda, y `saldo` es la suma de sus saldos; el backend reparte el importe de la
 // operación más vieja a la más nueva.
+// Lo que se puede hacer con el sobrante de un cheque que cubre de más. Los dos
+// primeros son los de siempre (§5); `A_CAPITAL` solo aparece en un préstamo a
+// interés fijo, donde el capital es la otra mitad de lo que el cliente debe.
+type SobranteModo = VueltoModo | 'A_CAPITAL'
+
 export interface DeudaItem {
   tipo: 'prestamo' | 'fiado' | 'deuda_simple' | 'deudas_cliente' | 'deuda_general'
   id: string
   clienteNombre: string
   label: string
+  // Solo en un préstamo a interés fijo: lo que queda prestado. Habilita mandar
+  // el sobrante de un cheque contra el capital, que es la otra mitad de lo que
+  // debe y no está en `saldo` (ahí va el interés devengado impago).
+  capitalPendiente?: number
   saldo: number
   moneda: Moneda
 }
@@ -69,18 +78,27 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   const toast = useToast()
 
   // Forma de pago. El cheque está disponible donde el cobro no apunta a una
-  // cuota concreta: una deuda libre suelta, todas las del cliente y el total
-  // general de la pestaña General. Cobrar con cheque UNA cuota de préstamo o UN
-  // fiado vive en sus propias pestañas, que sí necesitan saber a cuál imputarlo.
+  // cuota concreta: una deuda libre suelta, todas las del cliente, el total
+  // general de la pestaña General y el pago libre de un préstamo. Cobrar con
+  // cheque UNA cuota o UN fiado vive en sus propias pantallas, que sí necesitan
+  // saber a cuál imputarlo.
   const [forma, setForma] = useState<'efectivo' | 'cheque'>('efectivo')
   const esGeneral = deuda.tipo === 'deuda_general'
+  const esPrestamo = deuda.tipo === 'prestamo'
   const chequeDisponible =
-    deuda.tipo === 'deuda_simple' || deuda.tipo === 'deudas_cliente' || esGeneral
+    deuda.tipo === 'deuda_simple' || deuda.tipo === 'deudas_cliente' || esGeneral || esPrestamo
+  // Un préstamo a interés fijo suma una tercera salida para el sobrante: bajarlo
+  // del capital. No es un vuelto —no sale ni entra plata—, es menos plata afuera.
+  const capitalPendiente = deuda.capitalPendiente ?? 0
+  const puedeIrACapital = esPrestamo && capitalPendiente > 0.009
   const esAgregado = deuda.tipo === 'deudas_cliente' || esGeneral
 
   // Qué hacer con el vuelto cuando el cheque cubre todo y sobra. Solo aplica al
   // cobro agregado: en una deuda suelta el excedente se informa y listo.
-  const [vueltoModo, setVueltoModo] = useState<VueltoModo>('QUEDA_DEBIENDO')
+  const [vueltoModo, setVueltoModo] = useState<SobranteModo>('QUEDA_DEBIENDO')
+  // Fuera del préstamo el sobrante solo tiene dos salidas: el botón del capital
+  // ni siquiera se muestra, así que esto nunca cambia lo que el operador eligió.
+  const vueltoClasico: VueltoModo = vueltoModo === 'A_CAPITAL' ? 'QUEDA_DEBIENDO' : vueltoModo
 
   const [chNro, setChNro] = useState('')
   const [chBanco, setChBanco] = useState('')
@@ -149,7 +167,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           porcentaje_compra_cheque: chPctNum,
           fecha_pago: chFechaPago || null,
           cotizacion: chCross ? cotizNum : null,
-          vuelto_modo: chVueltoArs > 0 ? vueltoModo : null,
+          vuelto_modo: chVueltoArs > 0 ? vueltoClasico : null,
         })
         const vuelto = parseFloat(r.vuelto_ars)
         toast(
@@ -159,6 +177,37 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
               ? `Saldó ${r.canceladas} operación(es) · le devolviste ${fmtARS(vuelto)} de vuelto`
               : `Saldó ${r.canceladas} operación(es) · le quedás debiendo ${fmtARS(vuelto)}`
             : `Cobrado · saldó ${r.canceladas} operación(es), quedan ${fmtMoneda(parseFloat(r.saldo_restante), deuda.moneda)}`,
+        )
+        onSuccess()
+        return
+      }
+      if (esPrestamo) {
+        // El cheque salda las cuotas —o los períodos de interés— más viejas
+        // primero. Si sobra, `sobrante_modo` decide: bajarlo del capital (solo
+        // interés fijo), devolverlo o quedar debiéndolo.
+        const r = await pagarPrestamoConCheque(deuda.id, {
+          nro_cheque: chNro.trim() || null,
+          banco: chBanco.trim() || null,
+          monto: chMontoNum,
+          porcentaje_compra: chPctNum,
+          fecha_pago: chFechaPago || null,
+          cotizacion: chCross ? cotizNum : null,
+          sobrante_modo: chVueltoArs > 0 ? vueltoModo : null,
+        })
+        const aCapital = parseFloat(r.a_capital)
+        const vuelto = parseFloat(r.vuelto_ars)
+        const cancelado = r.prestamo.estado === 'CANCELADO'
+        toast(
+          'success',
+          aCapital > 0
+            ? `Cobrado · ${fmtARS(aCapital)} bajaron el capital${cancelado ? ' · préstamo cancelado' : ''}`
+            : vuelto > 0
+              ? r.sobrante_modo === 'SALDAR_EFECTIVO'
+                ? `Cobrado · le devolviste ${fmtARS(vuelto)} de vuelto`
+                : `Cobrado · le quedás debiendo ${fmtARS(vuelto)}`
+              : cancelado
+                ? 'Préstamo cancelado con el cheque'
+                : `Cobrado · imputado ${fmtMoneda(parseFloat(r.imputado), deuda.moneda)}`,
         )
         onSuccess()
         return
@@ -175,7 +224,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
           porcentaje_compra_cheque: chPctNum,
           fecha_pago: chFechaPago || null,
           cotizacion: chCross ? cotizNum : null,
-          vuelto_modo: chVueltoArs > 0 ? vueltoModo : null,
+          vuelto_modo: chVueltoArs > 0 ? vueltoClasico : null,
         })
         const vuelto = parseFloat(r.vuelto_ars)
         toast(
@@ -196,7 +245,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
         porcentaje_compra_cheque: chPctNum,
         fecha_pago: chFechaPago || null,
         cotizacion: chCross ? cotizNum : null,
-        vuelto_modo: chVueltoArs > 0 ? vueltoModo : null,
+        vuelto_modo: chVueltoArs > 0 ? vueltoClasico : null,
       })
       const dif = parseFloat(r.diferencia)
       const vuelto = parseFloat(r.vuelto_ars)
@@ -393,18 +442,27 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
               {chVueltoArs > 0 && (
                 <div>
                   <label style={LABEL_STYLE}>Qué hacés con los {fmtARS(chVueltoArs)} que sobran</label>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    {([['QUEDA_DEBIENDO', 'Le quedás debiendo'], ['SALDAR_EFECTIVO', 'Se lo devolvés ahora']] as const).map(([v, txt]) => (
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {([
+                      // La opción del capital solo existe en un préstamo a interés
+                      // fijo con plata todavía afuera: es el único lugar donde el
+                      // sobrante tiene contra qué imputarse.
+                      ...(puedeIrACapital ? [['A_CAPITAL', 'Baja el capital'] as const] : []),
+                      ['QUEDA_DEBIENDO', 'Le quedás debiendo'] as const,
+                      ['SALDAR_EFECTIVO', 'Se lo devolvés ahora'] as const,
+                    ]).map(([v, txt]) => (
                       <button key={v} type="button" onClick={() => setVueltoModo(v)}
-                        style={{ ...(vueltoModo === v ? btnSolid('primary') : btnBordered('neutral')), flex: 1, padding: '0.45rem', fontSize: '0.72rem' }}>
+                        style={{ ...(vueltoModo === v ? btnSolid('primary') : btnBordered('neutral')), flex: '1 1 30%', padding: '0.45rem', fontSize: '0.72rem' }}>
                         {txt}
                       </button>
                     ))}
                   </div>
                   <p style={{ fontFamily: FM, fontSize: '0.68rem', marginTop: '0.25rem', color: 'rgba(100,116,139,0.55)' }}>
-                    {vueltoModo === 'QUEDA_DEBIENDO'
-                      ? 'Se anota como deuda del negocio a su favor, en Deudas. No mueve la caja.'
-                      : 'Sale de la caja de pesos hoy, como vuelto.'}
+                    {vueltoModo === 'A_CAPITAL'
+                      ? `Devuelve capital: quedan ${fmtARS(Math.max(0, capitalPendiente - chVueltoArs))} prestados y el interés se calcula sobre eso. No mueve la caja.`
+                      : vueltoModo === 'QUEDA_DEBIENDO'
+                        ? 'Se anota como deuda del negocio a su favor, en Deudas. No mueve la caja.'
+                        : 'Sale de la caja de pesos hoy, como vuelto.'}
                   </p>
                 </div>
               )}

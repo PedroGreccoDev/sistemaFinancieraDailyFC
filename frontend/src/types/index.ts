@@ -359,3 +359,30 @@ export interface TraspasoCreate {
   fecha?: string | null
   detalle?: string | null
 }
+
+/** Qué hacer con lo que sobra de un cheque que cubre de más un préstamo.
+ *  `A_CAPITAL` solo existe en el interés fijo: ahí el capital es la otra mitad
+ *  de lo que el cliente debe y no vive en ninguna cuota. */
+export type SobranteModo = 'A_CAPITAL' | 'SALDAR_EFECTIVO' | 'QUEDA_DEBIENDO'
+
+export interface PagarConChequePayload {
+  nro_cheque: string | null
+  banco: string | null
+  monto: number
+  porcentaje_compra: number
+  fecha_emision?: string | null
+  fecha_pago?: string | null
+  fecha_cobro?: string | null
+  cotizacion?: number | null
+  sobrante_modo?: SobranteModo | null
+}
+
+export interface PagarConChequeResult {
+  prestamo: Prestamo
+  cheque: Cheque
+  imputado: string
+  sobrante: string
+  sobrante_modo: SobranteModo | null
+  a_capital: string
+  vuelto_ars: string
+}

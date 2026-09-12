@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -264,6 +265,58 @@ class CuotaCobrarConChequeRequest(BaseModel):
 class CuotaCobrarConChequeResponse(BaseModel):
     cuota: CuotaRead
     cheque: ChequeRead
+
+
+# ── Pago de importe libre con un cheque ───────────────────────────────
+#
+# Un cheque no se recorta a medida: el cliente entrega el que tiene y casi nunca
+# vale exactamente lo que debe. Cuando sobra, el operador decide —no el sistema—
+# qué hacer con la diferencia, y por eso `sobrante_modo` es obligatorio si sobra.
+
+# `A_CAPITAL` es el que solo existe acá: en un préstamo a interés fijo el
+# excedente puede devolver capital, que es la otra mitad de lo que el cliente
+# debe y no vive en ninguna cuota. Los otros dos son los de siempre (§5): se lo
+# devolvés en efectivo o te lo quedás a favor de él.
+SobranteModo = Literal["A_CAPITAL", "SALDAR_EFECTIVO", "QUEDA_DEBIENDO"]
+
+
+class PrestamoPagarConChequeRequest(BaseModel):
+    """El cliente entrega un cheque contra lo que debe de este préstamo.
+
+    Salda por el **valor neto** (`monto × (1 − %compra)`), imputado a las cuotas
+    —o a los períodos de interés— más viejas primero, igual que el pago en
+    efectivo. **No mueve caja**: el cheque entra a cartera y la plata se reconoce
+    al venderlo o cobrarlo.
+    """
+
+    # Puede faltar: un e-cheq recién emitido todavía no tiene número (§E-cheq).
+    nro_cheque: str | None = Field(default=None, min_length=1, max_length=64)
+    banco: str | None = Field(default=None, max_length=120)
+    monto: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    porcentaje_compra: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
+    fecha_emision: date | None = None
+    fecha_pago: date | None = None
+    fecha_cobro: date | None = None
+    # Obligatoria si el préstamo es en dólares: el cheque es un papel en pesos y
+    # sin cotización no hay forma de saber cuánto de la deuda salda.
+    cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+    sobrante_modo: SobranteModo | None = None
+
+
+class PrestamoPagarConChequeResponse(BaseModel):
+    """Qué pasó con el cheque: cuánto saldó y a dónde fue lo que sobró."""
+
+    prestamo: PrestamoRead
+    cheque: ChequeRead
+    # En la moneda del préstamo.
+    imputado: Decimal
+    # Lo que sobró después de saldar cuotas e interés, y qué se hizo con eso.
+    sobrante: Decimal
+    sobrante_modo: SobranteModo | None = None
+    # Cuánto del sobrante bajó el capital (solo interés fijo) y cuánto quedó
+    # como vuelto —devuelto o a favor del cliente—.
+    a_capital: Decimal
+    vuelto_ars: Decimal
 
 
 class CuotasLoteCobrarRequest(BaseModel):

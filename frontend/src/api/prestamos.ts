@@ -1,5 +1,8 @@
 import { apiFetch } from './client'
-import type { Cuota, CuotaCobrarConChequeResult, CuotasLoteCobrarConChequeResult, Frecuencia, MedioPago, Moneda, Prestamo, PrestamoTipo } from '../types'
+import type {
+  Cuota, CuotaCobrarConChequeResult, CuotasLoteCobrarConChequeResult, Frecuencia,
+  MedioPago, Moneda, PagarConChequePayload, PagarConChequeResult, Prestamo, PrestamoTipo,
+} from '../types'
 
 export const getPrestamos = (estado?: string): Promise<Prestamo[]> =>
   apiFetch<Prestamo[]>(`/prestamos${estado ? `?estado=${estado}` : ''}`)
@@ -61,6 +64,21 @@ export interface PrestamoPagoPayload {
 
 export const pagarPrestamo = (id: string, payload: PrestamoPagoPayload): Promise<Prestamo> =>
   apiFetch<Prestamo>(`/prestamos/${encodeURIComponent(id)}/pagar`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+/** Pago de importe libre entregando un cheque.
+ *
+ * Salda por el valor neto, de la cuota (o período de interés) más vieja a la
+ * más nueva, y no mueve caja: el cheque entra a cartera. Si sobra, el backend
+ * exige `sobrante_modo` en vez de decidir solo.
+ */
+export const pagarPrestamoConCheque = (
+  id: string,
+  payload: PagarConChequePayload,
+): Promise<PagarConChequeResult> =>
+  apiFetch<PagarConChequeResult>(`/prestamos/${encodeURIComponent(id)}/pagar-con-cheque`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })
