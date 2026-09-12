@@ -59,6 +59,7 @@ from app.db.models import (
     PrestamoTipo,
 )
 from app.schemas.cheques import ChequeRead
+from app.schemas.cheques import ChequeEntregado
 from app.schemas.deudores import (
     CobroClienteChequeCreate,
     CobroClienteChequeResponse,
@@ -584,11 +585,13 @@ def cobrar_cliente_con_cheque(
     created_at: datetime | None = None,
     fuentes: tuple[str, ...] = CUENTA,
 ) -> CobroClienteChequeResponse:
-    """Cobra con un solo cheque la deuda de un cliente en una de las dos bolsas.
+    """Cobra con uno o varios cheques la deuda de un cliente en una de las bolsas.
 
     Por defecto la cuenta corriente; con `fuentes=CREDITOS`, sus préstamos. Salda
-    por el **valor neto** del cheque, imputado de la operación más vieja a la más
-    nueva igual que el efectivo. **No asienta caja por el cobro**: el
+    por la **suma de los valores netos**, imputada de la operación más vieja a la
+    más nueva igual que el efectivo. Entregar varios papeles de una es lo normal
+    —"me entregó estos tres al 5%"—: cada uno entra a cartera por su cuenta y la
+    deuda baja una sola vez, por el total. **No asienta caja por el cobro**: el
     cheque entra a cartera a nombre del cliente y la plata se reconoce recién al
     venderlo o cobrarlo (mismo criterio que §2, §2.b y §3).
 
@@ -605,45 +608,30 @@ def cobrar_cliente_con_cheque(
     if not renglones:
         raise _sin_renglones(db, cliente_id, cliente_nombre, payload.moneda_deuda, fuentes)
 
-    # Solo choca contra un cheque del mismo papel que esté EN CARTERA: uno anulado
-    # libera su número, y uno que ya se vendió puede volver por el circuito y
-    # entrar de nuevo (§Recompra, migración 0028).
-    svc_cheques.verificar_no_esta_en_cartera(db, payload.nro_cheque_pago, payload.banco_pago)
-
     saldo_total = sum((r.saldo for r in renglones), _CERO).quantize(Decimal("0.01"))
-    valor_neto = (
-        payload.monto_cheque * (_CIEN - payload.porcentaje_compra_cheque) / _CIEN
-    ).quantize(Decimal("0.01"))
+    valor_neto = sum((c.valor_neto for c in payload.cheques), _CERO).quantize(Decimal("0.01"))
 
     es_cross = payload.moneda_deuda != Moneda.ARS
     reduccion, diferencia = calcular_imputacion_y_vuelto(
         payload.moneda_deuda, saldo_total, valor_neto, payload.cotizacion
     )
     if diferencia > _CERO and payload.vuelto_modo is None:
+        cuantos = (
+            "El cheque cubre toda la deuda"
+            if len(payload.cheques) == 1
+            else f"Los {len(payload.cheques)} cheques cubren toda la deuda"
+        )
         raise ValidationError(
-            f"El cheque cubre toda la deuda y sobran ${diferencia}. Indicá qué "
-            "hacer con el vuelto: pagarlo en efectivo o quedar debiéndolo."
+            f"{cuantos} y sobran ${diferencia}. Indicá qué hacer con el vuelto: "
+            "pagarlo en efectivo o quedar debiéndolo."
         )
 
     fecha = payload.fecha_cobro or hoy_local()
 
-    cheque_nuevo = Cheque(
-        nro_cheque=payload.nro_cheque_pago,
-        banco=payload.banco_pago,
-        monto=payload.monto_cheque,
-        porcentaje_compra=payload.porcentaje_compra_cheque,
-        fecha_emision=payload.fecha_emision,
-        fecha_pago=payload.fecha_pago,
-        estado=ChequeEstado.EN_CARTERA,
-        ganancia=_CERO,
-        cliente_origen_id=cliente_id,
+    cheques_nuevos, _ = svc_cheques.ingresar_cheques_de_pago(
+        db, payload.cheques, cliente_id=cliente_id, created_at=created_at
     )
-    if created_at is not None:
-        cheque_nuevo.created_at = created_at
-    # db.add() y no create_cheque(): recibir un cheque como pago NO es comprarlo,
-    # así que no corresponde el egreso COMPRA_CHEQUE.
-    db.add(cheque_nuevo)
-    db.flush()  # necesita id para la referencia de caja del vuelto
+    cheque_nuevo = cheques_nuevos[0]
 
     # El cheque no mueve caja, así que solo se imputan saldos: el segundo
     # elemento del reparto (el efectivo por renglón) no se usa.
@@ -681,7 +669,8 @@ def cobrar_cliente_con_cheque(
         db.rollback()
         raise DatabaseWriteError("No se pudo registrar el cobro con cheque.") from exc
 
-    db.refresh(cheque_nuevo)
+    for cheque in cheques_nuevos:
+        db.refresh(cheque)
 
     return CobroClienteChequeResponse(
         cliente_id=cliente_id,
@@ -691,6 +680,7 @@ def cobrar_cliente_con_cheque(
         imputado=reduccion,
         canceladas=sum(1 for r in afectados if r.cancelado),
         saldo_restante=(saldo_total - reduccion).quantize(Decimal("0.01")),
+        cheques_ingresados=[ChequeRead.model_validate(c) for c in cheques_nuevos],
         cheque_ingresado=ChequeRead.model_validate(cheque_nuevo),
         vuelto_ars=diferencia,
         vuelto_modo=payload.vuelto_modo if diferencia > _CERO else None,

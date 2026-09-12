@@ -11,6 +11,7 @@ from app.schemas.cheques import ChequeRead
 # El vuelto de un cheque "de más" se resuelve igual que en pasivos (§5): o se
 # paga en efectivo, o el negocio queda debiendo. Se reusa el mismo tipo para que
 # no aparezcan dos vocabularios para la misma decisión.
+from app.schemas.cheques import PagoConCheques
 from app.schemas.pasivos import VueltoModo
 
 
@@ -110,7 +111,7 @@ class DeudaSimpleRead(BaseModel):
     updated_at: datetime
 
 
-class DeudaSimpleCobroClienteChequeCreate(BaseModel):
+class DeudaSimpleCobroClienteChequeCreate(PagoConCheques):
     """Cobro de TODAS las deudas abiertas de un cliente con un solo cheque.
 
     El cheque salda por su **valor neto** (`monto × (1 − %compra)`), imputado de
@@ -124,12 +125,6 @@ class DeudaSimpleCobroClienteChequeCreate(BaseModel):
 
     cliente_id: UUID
     moneda_deuda: Moneda
-    nro_cheque_pago: str = Field(min_length=1, max_length=64)
-    banco_pago: str | None = Field(default=None, max_length=120)
-    monto_cheque: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
-    porcentaje_compra_cheque: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
-    fecha_emision: date | None = None
-    fecha_pago: date | None = None
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     vuelto_modo: VueltoModo | None = None
     fecha_cobro: date | None = None
@@ -145,6 +140,9 @@ class DeudaSimpleCobroClienteChequeResponse(BaseModel):
     """
 
     deudas_afectadas: list[DeudaSimpleRead]
+    # Todos los que entraron a cartera con este pago; `cheque_ingresado` es el
+    # primero, por compatibilidad con quien espera uno solo.
+    cheques_ingresados: list[ChequeRead]
     cheque_ingresado: ChequeRead
     imputado: Decimal
     canceladas: int
@@ -168,7 +166,7 @@ class DeudaSimpleCobroClienteResponse(BaseModel):
     saldo_restante: Decimal
 
 
-class DeudaSimpleCobrarConChequeRequest(BaseModel):
+class DeudaSimpleCobrarConChequeRequest(PagoConCheques):
     """Cobro de una deuda libre entregando un cheque en vez de efectivo.
 
     El cheque entra a cartera a nombre del cliente de la deuda y vale su
@@ -178,12 +176,6 @@ class DeudaSimpleCobrarConChequeRequest(BaseModel):
     cruza monedas y exige `cotizacion` ($/USD) — igual que el cobro en efectivo.
     """
 
-    nro_cheque_pago: str = Field(min_length=1, max_length=64)
-    banco_pago: str | None = Field(default=None, max_length=120)
-    monto_cheque: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
-    porcentaje_compra_cheque: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
-    fecha_emision: date | None = None
-    fecha_pago: date | None = None
     # Obligatoria solo si la deuda es en USD (el cheque siempre entra en ARS).
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     # Obligatorio solo si el cheque cubre de más: qué se hace con el excedente.
@@ -205,6 +197,9 @@ class DeudaSimpleCobrarConChequeResponse(BaseModel):
     """
 
     deuda: DeudaSimpleRead
+    # Todos los que entraron a cartera con este pago; `cheque_ingresado` es el
+    # primero, por compatibilidad con quien espera uno solo.
+    cheques_ingresados: list[ChequeRead]
     cheque_ingresado: ChequeRead
     diferencia: Decimal
     vuelto_ars: Decimal

@@ -16,10 +16,10 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.db.models import MedioPago, Moneda
-from app.schemas.cheques import ChequeRead
+from app.schemas.cheques import ChequeRead, PagoConCheques
 # El vuelto de un cheque "de más" se resuelve igual que en pasivos (§5) y que en
 # el cobro por cliente de deudas libres (§2.b): mismo tipo, mismo vocabulario.
 from app.schemas.pasivos import VueltoModo
@@ -95,29 +95,29 @@ class CobroClienteResponse(BaseModel):
     saldo_restante: Decimal
 
 
-class CobroClienteChequeCreate(BaseModel):
-    """Cobro de toda la deuda de un cliente con un solo cheque.
+class CobroClienteChequeCreate(PagoConCheques):
+    """Cobro de toda la deuda de un cliente con uno o varios cheques.
 
-    El cheque salda por su **valor neto** (`monto × (1 − %compra)`), imputado de
-    la operación más vieja a la más nueva igual que el efectivo, y **no asienta
-    caja**: entra a cartera a nombre del cliente y la plata se reconoce recién
-    al venderlo o cobrarlo.
+    Cada cheque salda por su **valor neto** (`monto × (1 − %compra)`) y la deuda
+    baja por la **suma** de todos, imputada de la operación más vieja a la más
+    nueva igual que el efectivo. **No asienta caja**: los cheques entran a
+    cartera a nombre del cliente y la plata se reconoce al venderlos o cobrarlos.
 
-    Un cheque que vale más que todo lo que el cliente debe es el caso normal —el
-    cliente entrega el que tiene—, así que la diferencia queda a su favor y
-    `vuelto_modo` decide qué se hace con ella (obligatorio solo si sobra).
+    Entregar varios es lo habitual —"me entregó estos tres al 5%"—: el cliente
+    junta los papeles que tiene y con eso salda lo que debe. Se mandan en
+    `cheques`. Los campos sueltos (`nro_cheque_pago`, `monto_cheque`, …) son la
+    forma vieja, de un cheque solo, y siguen andando: se normalizan a una lista
+    de uno.
+
+    Un pago que vale más que todo lo que el cliente debe es el caso normal, así
+    que la diferencia queda a su favor y `vuelto_modo` decide qué se hace con
+    ella (obligatorio solo si sobra).
 
     Los cheques son siempre en pesos: cobrar deuda en USD exige `cotizacion`.
     """
 
     cliente_id: UUID
     moneda_deuda: Moneda
-    nro_cheque_pago: str = Field(min_length=1, max_length=64)
-    banco_pago: str | None = Field(default=None, max_length=120)
-    monto_cheque: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
-    porcentaje_compra_cheque: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
-    fecha_emision: date | None = None
-    fecha_pago: date | None = None
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     vuelto_modo: VueltoModo | None = None
     fecha_cobro: date | None = None
@@ -127,10 +127,14 @@ class CobroClienteChequeResponse(CobroClienteResponse):
     """Resultado del cobro consolidado con cheque.
 
     `vuelto_ars` va en **ARS** aunque las deudas sean en dólares —el excedente de
-    un cheque es plata en pesos y en pesos se devuelve— y es > 0 solo cuando el
-    cheque cubrió todo; `vuelto_modo` dice qué se hizo con él.
+    un cheque es plata en pesos y en pesos se devuelve— y es > 0 solo cuando los
+    cheques cubrieron todo; `vuelto_modo` dice qué se hizo con él.
     """
 
+    # Todos los que entraron a cartera con este pago, en el orden en que se
+    # cargaron. `cheque_ingresado` es el primero: queda por compatibilidad con
+    # quien todavía espera uno solo (el panel viejo, el bot).
+    cheques_ingresados: list[ChequeRead]
     cheque_ingresado: ChequeRead
     vuelto_ars: Decimal
     vuelto_modo: VueltoModo | None = None

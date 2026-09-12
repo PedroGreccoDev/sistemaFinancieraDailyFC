@@ -15,7 +15,7 @@ from app.db.models import (
     PrestamoEstado,
     PrestamoTipo,
 )
-from app.schemas.cheques import ChequeRead
+from app.schemas.cheques import ChequeEntregado, ChequeRead
 
 
 class PrestamoBase(BaseModel):
@@ -281,19 +281,25 @@ SobranteModo = Literal["A_CAPITAL", "SALDAR_EFECTIVO", "QUEDA_DEBIENDO"]
 
 
 class PrestamoPagarConChequeRequest(BaseModel):
-    """El cliente entrega un cheque contra lo que debe de este préstamo.
+    """El cliente entrega uno o varios cheques contra lo que debe del préstamo.
 
-    Salda por el **valor neto** (`monto × (1 − %compra)`), imputado a las cuotas
-    —o a los períodos de interés— más viejas primero, igual que el pago en
-    efectivo. **No mueve caja**: el cheque entra a cartera y la plata se reconoce
-    al venderlo o cobrarlo.
+    Salda por la **suma de los valores netos** (`monto × (1 − %compra)` de cada
+    uno), imputada a las cuotas —o a los períodos de interés— más viejas primero,
+    igual que el pago en efectivo. **No mueve caja**: los cheques entran a
+    cartera y la plata se reconoce al venderlos o cobrarlos.
+
+    Los papeles van en `cheques`. Los campos sueltos son la forma vieja, de un
+    cheque solo, y se normalizan a una lista de uno.
     """
 
-    # Puede faltar: un e-cheq recién emitido todavía no tiene número (§E-cheq).
+    cheques: list[ChequeEntregado] = Field(default_factory=list)
+    # ── Forma vieja: un cheque en campos sueltos ──────────────────────
     nro_cheque: str | None = Field(default=None, min_length=1, max_length=64)
     banco: str | None = Field(default=None, max_length=120)
-    monto: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
-    porcentaje_compra: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
+    monto: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=2)
+    porcentaje_compra: Decimal | None = Field(
+        default=None, ge=0, le=100, max_digits=7, decimal_places=4
+    )
     fecha_emision: date | None = None
     fecha_pago: date | None = None
     fecha_cobro: date | None = None
@@ -302,11 +308,34 @@ class PrestamoPagarConChequeRequest(BaseModel):
     cotizacion: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
     sobrante_modo: SobranteModo | None = None
 
+    @model_validator(mode="after")
+    def normalizar_cheques(self) -> PrestamoPagarConChequeRequest:
+        """Deja siempre `cheques` cargada, venga por donde venga el pago."""
+        if self.cheques:
+            return self
+        if self.monto is None or self.porcentaje_compra is None:
+            raise ValueError(
+                "Falta el cheque: mandá `cheques` o el monto y el porcentaje de uno."
+            )
+        self.cheques = [
+            ChequeEntregado(
+                nro_cheque=self.nro_cheque,
+                banco=self.banco,
+                monto=self.monto,
+                porcentaje_compra=self.porcentaje_compra,
+                fecha_emision=self.fecha_emision,
+                fecha_pago=self.fecha_pago,
+            )
+        ]
+        return self
+
 
 class PrestamoPagarConChequeResponse(BaseModel):
     """Qué pasó con el cheque: cuánto saldó y a dónde fue lo que sobró."""
 
     prestamo: PrestamoRead
+    # Todos los que entraron a cartera; `cheque` es el primero, por compatibilidad.
+    cheques: list[ChequeRead]
     cheque: ChequeRead
     # En la moneda del préstamo.
     imputado: Decimal

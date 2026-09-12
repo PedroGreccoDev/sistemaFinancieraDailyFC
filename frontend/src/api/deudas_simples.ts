@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Cheque, DeudaSimple, DeudaSimpleEstado, MedioPago, Moneda } from '../types'
+import type { Cheque, ChequeEntregado, DeudaSimple, DeudaSimpleEstado, MedioPago, Moneda } from '../types'
 
 export interface DeudaSimpleCreatePayload {
   cliente_id: string
@@ -96,12 +96,15 @@ export const cobrarDeudasCliente = (payload: CobrarDeudasClientePayload): Promis
 export type VueltoModo = 'SALDAR_EFECTIVO' | 'QUEDA_DEBIENDO'
 
 export interface CobrarDeudasClienteConChequePayload {
+  /** Los papeles del pago. Con esto cargados, los campos sueltos de
+   *  abajo —la forma vieja, de un cheque solo— se ignoran. */
+  cheques?: ChequeEntregado[]
   cliente_id: string
   moneda_deuda: Moneda
-  nro_cheque_pago: string
+  nro_cheque_pago?: string | null
   banco_pago?: string | null
-  monto_cheque: number
-  porcentaje_compra_cheque: number
+  monto_cheque?: number
+  porcentaje_compra_cheque?: number
   fecha_emision?: string | null
   fecha_pago?: string | null
   // Requerida solo si las deudas son en USD (el cheque siempre entra en pesos).
@@ -140,10 +143,13 @@ export const cobrarDeudasClienteConCheque = (
  * reconoce recién cuando ese cheque se venda o se cobre.
  */
 export interface CobrarDeudaSimpleConChequePayload {
-  nro_cheque_pago: string
+  /** Los papeles del pago. Con esto cargados, los campos sueltos de
+   *  abajo —la forma vieja, de un cheque solo— se ignoran. */
+  cheques?: ChequeEntregado[]
+  nro_cheque_pago?: string | null
   banco_pago?: string | null
-  monto_cheque: number
-  porcentaje_compra_cheque: number
+  monto_cheque?: number
+  porcentaje_compra_cheque?: number
   fecha_emision?: string | null
   fecha_pago?: string | null
   // Requerida solo si la deuda es en USD (el cheque siempre entra en pesos).

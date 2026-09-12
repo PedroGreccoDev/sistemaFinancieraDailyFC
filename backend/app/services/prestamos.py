@@ -1243,13 +1243,13 @@ def pagar_con_cheque(
     payload: PrestamoPagarConChequeRequest,
     created_at: datetime | None = None,
 ) -> PrestamoPagarConChequeResponse:
-    """El cliente entrega un cheque contra lo que debe de este préstamo.
+    """El cliente entrega uno o varios cheques contra lo que debe del préstamo.
 
-    Es el hermano de `pagar_prestamo` para cuando en vez de plata entrega un
-    papel. Salda por el **valor neto** del cheque, de la cuota más vieja a la más
-    nueva —en el interés fijo, del período más viejo al más nuevo—, y **no mueve
-    caja**: el cheque entra `EN_CARTERA` a nombre del cliente y la plata se
-    reconoce al venderlo o cobrarlo. Mismo criterio que §2, §2.b y §2.c.
+    Es el hermano de `pagar_prestamo` para cuando en vez de plata entrega
+    papeles. Salda por la **suma de los valores netos**, de la cuota más vieja a
+    la más nueva —en el interés fijo, del período más viejo al más nuevo—, y **no
+    mueve caja**: cada cheque entra `EN_CARTERA` a nombre del cliente y la plata
+    se reconoce al venderlo o cobrarlo. Mismo criterio que §2, §2.b y §2.c.
 
     **El sobrante lo decide el operador, no el sistema** _(decisión del dueño)_.
     Un cheque no se recorta a medida y casi nunca vale exactamente lo que el
@@ -1267,7 +1267,8 @@ def pagar_con_cheque(
     inventa plata ni la hace desaparecer.
     """
     # Imports locales: `pasivos` importa este módulo (`repartir_pago_en_cuotas`) y
-    # `cheques`/`deudas_simples` importan `pasivos`, así que al tope serían ciclos.
+    # `cheques`/`deudas_simples`/`deudores` importan `pasivos`, así que al tope
+    # serían ciclos.
     from app.services import cheques as svc_cheques
     from app.services import pasivos as svc_pasivos
     from app.services.deudas_simples import calcular_imputacion_y_vuelto
@@ -1291,11 +1292,8 @@ def pagar_con_cheque(
     if en_cuotas <= _CERO and capital <= _CERO:
         raise ConflictError("El préstamo no tiene saldo pendiente.")
 
-    # Solo choca contra un cheque del mismo papel que siga EN CARTERA (§Recompra).
-    svc_cheques.verificar_no_esta_en_cartera(db, payload.nro_cheque, payload.banco)
-
-    valor_neto = (
-        payload.monto * (_CIEN - payload.porcentaje_compra) / _CIEN
+    valor_neto = sum(
+        (c.valor_neto for c in payload.cheques), _CERO
     ).quantize(Decimal("0.01"))
 
     # Cuánto del préstamo (en su moneda) salda el cheque, y cuánto sobra. El
@@ -1305,10 +1303,11 @@ def pagar_con_cheque(
         prestamo.moneda, en_cuotas, valor_neto, payload.cotizacion
     )
     if sobrante > _CERO and payload.sobrante_modo is None:
+        sujeto = "El cheque cubre" if len(payload.cheques) == 1 else f"Los {len(payload.cheques)} cheques cubren"
         de_mas = (
-            f"El cheque cubre el interés y sobran ${sobrante}."
+            f"{sujeto} el interés y sobran ${sobrante}."
             if es_interes_fijo(prestamo)
-            else f"El cheque cubre todo el préstamo y sobran ${sobrante}."
+            else f"{sujeto} todo el préstamo y sobran ${sobrante}."
         )
         opciones = (
             "Indicá qué hacer con la diferencia: bajarla del capital, pagarla en "
@@ -1321,23 +1320,10 @@ def pagar_con_cheque(
 
     fecha = payload.fecha_cobro or hoy_local()
 
-    cheque = Cheque(
-        nro_cheque=payload.nro_cheque,
-        banco=payload.banco,
-        monto=payload.monto,
-        porcentaje_compra=payload.porcentaje_compra,
-        fecha_emision=payload.fecha_emision,
-        fecha_pago=payload.fecha_pago,
-        estado=ChequeEstado.EN_CARTERA,
-        ganancia=_CERO,
-        cliente_origen_id=prestamo.cliente_id,
+    cheques, _ = svc_cheques.ingresar_cheques_de_pago(
+        db, payload.cheques, cliente_id=prestamo.cliente_id, created_at=created_at
     )
-    if created_at is not None:
-        cheque.created_at = created_at
-    # db.add() y no create_cheque(): recibir un cheque como pago NO es comprarlo,
-    # así que no corresponde el egreso COMPRA_CHEQUE.
-    db.add(cheque)
-    db.flush()  # necesita id para la referencia de caja del vuelto
+    cheque = cheques[0]
 
     if imputado > _CERO:
         imputar_pago(
@@ -1381,9 +1367,11 @@ def pagar_con_cheque(
         db.rollback()
         raise DatabaseWriteError("No se pudo registrar el pago con cheque.") from exc
 
-    db.refresh(cheque)
+    for papel in cheques:
+        db.refresh(papel)
     return PrestamoPagarConChequeResponse(
         prestamo=PrestamoRead.model_validate(get_prestamo(db, prestamo_id)),
+        cheques=[ChequeRead.model_validate(c) for c in cheques],
         cheque=ChequeRead.model_validate(cheque),
         imputado=imputado,
         sobrante=sobrante,

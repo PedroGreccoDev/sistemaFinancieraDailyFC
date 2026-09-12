@@ -10,6 +10,85 @@ from app.db.models import ChequeEstado, ChequeTipo, MedioPago
 from app.schemas.fiados import FiadoRead
 
 
+# ── Los cheques que el cliente entrega para pagar ─────────────────────
+#
+# Un pago casi nunca es un solo papel: el cliente junta los cheques que tiene a
+# mano —"me entregó estos tres al 5%"— y con eso salda lo que debe. Los tres
+# entran a cartera por separado (cada uno vence y se cobra por su cuenta) pero
+# la deuda baja por la **suma de sus valores netos**, que es una sola operación.
+# Vive acá porque lo usan los dos cobros consolidados (§2.c) y el de un préstamo
+# (§3): si cada uno definiera el suyo, terminarían aceptando cosas distintas.
+
+
+class ChequeEntregado(BaseModel):
+    """Uno de los cheques de un pago, con el descuento al que se toma."""
+
+    # Puede faltar: un e-cheq recién emitido todavía no trae número (§E-cheq).
+    nro_cheque: str | None = Field(default=None, min_length=1, max_length=64)
+    banco: str | None = Field(default=None, max_length=120)
+    monto: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    # El descuento pactado. Suele ser el mismo para todos los del lote, pero se
+    # declara por cheque: un papel a 30 días y otro a 90 no valen lo mismo.
+    porcentaje_compra: Decimal = Field(ge=0, le=100, max_digits=7, decimal_places=4)
+    fecha_emision: date | None = None
+    fecha_pago: date | None = None
+
+    @property
+    def valor_neto(self) -> Decimal:
+        """Lo que este cheque salda: nominal menos el descuento."""
+        return (self.monto * (Decimal("100") - self.porcentaje_compra) / Decimal("100")).quantize(
+            Decimal("0.01")
+        )
+
+
+class PagoConCheques(BaseModel):
+    """Los cheques con los que se paga, en lista o en la forma vieja de uno solo.
+
+    Los cobros que la heredan aceptan las dos maneras: `cheques` con todos los
+    papeles, o los campos sueltos de un único cheque —que es como venían las
+    llamadas viejas del panel y del bot—. El validador normaliza a `cheques`, de
+    modo que el servicio tiene **un solo camino** para leer el pago.
+    """
+
+    cheques: list[ChequeEntregado] = Field(default_factory=list)
+    # ── Forma vieja: un cheque en campos sueltos ──────────────────────
+    nro_cheque_pago: str | None = Field(default=None, min_length=1, max_length=64)
+    banco_pago: str | None = Field(default=None, max_length=120)
+    monto_cheque: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=2)
+    porcentaje_compra_cheque: Decimal | None = Field(
+        default=None, ge=0, le=100, max_digits=7, decimal_places=4
+    )
+    fecha_emision: date | None = None
+    fecha_pago: date | None = None
+
+    @model_validator(mode="after")
+    def normalizar_cheques(self) -> PagoConCheques:
+        if self.cheques:
+            return self
+        if self.monto_cheque is None or self.porcentaje_compra_cheque is None:
+            raise ValueError(
+                "Falta el cheque: mandá `cheques` o el monto y el porcentaje de uno."
+            )
+        self.cheques = [
+            ChequeEntregado(
+                nro_cheque=self.nro_cheque_pago,
+                banco=self.banco_pago,
+                monto=self.monto_cheque,
+                porcentaje_compra=self.porcentaje_compra_cheque,
+                fecha_emision=self.fecha_emision,
+                fecha_pago=self.fecha_pago,
+            )
+        ]
+        return self
+
+    @property
+    def valor_neto_total(self) -> Decimal:
+        """Lo que el pago salda: la suma de los netos de todos los papeles."""
+        return sum((c.valor_neto for c in self.cheques), Decimal("0.00")).quantize(
+            Decimal("0.01")
+        )
+
+
 class ChequeCreate(BaseModel):
     # Opcional: el comprobante de emisión de un e-cheq no trae número (§E-cheq).
     # Se carga sin él y se completa después; el bot avisa cuando falta.

@@ -379,17 +379,27 @@ OPERACIONES DISPONIBLES
      preguntes a cuál de los fiados va: no está pagando uno, está pagando lo que debe.
 
 9. COBRAR_FIADO_CON_CHEQUE
-   Cuándo: Un cliente con fiado abierto paga entregando un nuevo cheque.
+   Cuándo: Un cliente paga entregando uno o VARIOS cheques.
    Ej: "Juan me trajo un cheque de $100000 al 2% para saldar el fiado"
-   El sistema calculará si el cheque cubre toda la deuda o solo una parte.
+       "Kiosco me entregó estos tres al 5%" (con la foto)
+   El sistema calcula si alcanzan para toda la deuda o solo una parte.
+   ⚠️ CASI SIEMPRE SON VARIOS, Y CASI SIEMPRE VIENEN EN UNA FOTO. Miralas
+      COMPLETAS y extraé TODOS los cheques que veas, aunque estén apilados,
+      superpuestos o girados — la misma regla del §1. El que se te escape es
+      plata que el operador da por cobrada y no entró.
+   ⚠️ EL PORCENTAJE ES DE TODOS. "estos tres al 5%" significa 5% en cada uno; no
+      lo pongas solo en el primero.
    data:
      - cliente_nombre: string
-     - nro_cheque_pago: string (número del cheque que entrega como pago)
-     - banco_pago: string o null (banco del cheque que entrega; leerlo del cheque o del mensaje)
-     - monto_cheque: number (valor nominal del cheque)
-     - porcentaje_compra_cheque: number (% de compra de ese cheque)
-     - fecha_emision: "YYYY-MM-DD" o null
-     - fecha_pago: "YYYY-MM-DD" o null
+     - cheques: ARRAY con un objeto por cheque (aunque sea uno solo). Cada objeto:
+         * nro_cheque: string o null (null si es un e-cheq de emisión, §1)
+         * banco: string o null (CLAVE: el número solo es único dentro de un banco)
+         * monto: number (valor nominal)
+         * porcentaje_compra: number (el % de descuento al que se toma)
+         * fecha_emision: "YYYY-MM-DD" o null
+         * fecha_pago: "YYYY-MM-DD" o null
+       Lo que salda el pago es la SUMA de los netos (`nominal × (1 − %)`), no el
+       nominal: tres de $500.000 al 5% saldan $1.425.000, no $1.500.000.
      - vuelto_modo: "SALDAR_EFECTIVO" o "QUEDA_DEBIENDO" o null — SOLO si el cheque
        cubre de más y el operador dice qué hace con la diferencia: "le devolví el
        vuelto" → SALDAR_EFECTIVO; "se lo dejo a favor" / "le quedo debiendo" →
@@ -908,6 +918,9 @@ REGLAS CRÍTICAS
     varias de una vez, cada uno con su array: REGISTRAR_CHEQUE (`cheques`),
     VENDER_CHEQUE (`ventas`), FIAR_CHEQUE (`fiados`), COBRAR_CHEQUE (`cobros`),
     RECHAZAR_CHEQUE (`rechazos`) y REGISTRAR_GASTO (`gastos`).
+    Aparte van COBRAR_FIADO_CON_CHEQUE (`cheques`) y COBRAR_DEUDA_CLIENTE
+    (`cheques`), que son UN pago con varios papeles: "me entregó estos tres al
+    5%" es una sola operación y la deuda baja una vez, por la suma de los netos.
     En TODOS los demás entra UNA sola: si el mensaje trae dos ("le pagué 500 a
     Cuello y 300 a Pedro", "compré 1000 a 1250 y vendí 500 a 1300") NO elijas una
     ni las mezcles → ACLARACION_REQUERIDA, repitiendo las dos que entendiste y

@@ -39,6 +39,18 @@ const LABEL_STYLE: React.CSSProperties = { display: 'block', fontFamily: FM, fon
 // interés fijo, donde el capital es la otra mitad de lo que el cliente debe.
 type SobranteModo = VueltoModo | 'A_CAPITAL'
 
+// Una fila del formulario de cheques. Strings: es lo que hay tipeado en los
+// inputs, y se convierte a número recién al calcular.
+interface ChequeFila {
+  nro: string
+  banco: string
+  monto: string
+  pct: string
+  fechaPago: string
+}
+
+const filaVacia = (): ChequeFila => ({ nro: '', banco: '', monto: '', pct: '', fechaPago: '' })
+
 export interface DeudaItem {
   tipo: 'prestamo' | 'fiado' | 'deuda_simple' | 'deudas_cliente' | 'deuda_general'
   id: string
@@ -100,11 +112,15 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   // ni siquiera se muestra, así que esto nunca cambia lo que el operador eligió.
   const vueltoClasico: VueltoModo = vueltoModo === 'A_CAPITAL' ? 'QUEDA_DEBIENDO' : vueltoModo
 
-  const [chNro, setChNro] = useState('')
-  const [chBanco, setChBanco] = useState('')
-  const [chMonto, setChMonto] = useState('')
-  const [chPorcentaje, setChPorcentaje] = useState('')
-  const [chFechaPago, setChFechaPago] = useState('')
+  // Los papeles que entrega. Casi siempre es más de uno —"me entregó estos tres
+  // al 5%"—: el cliente junta los que tiene y con eso salda. Cada uno entra a
+  // cartera por separado, con su nominal y su descuento, y la deuda baja por la
+  // suma de los netos.
+  const [cheques, setCheques] = useState<ChequeFila[]>([filaVacia()])
+  const setFila = (i: number, campo: keyof ChequeFila, valor: string) =>
+    setCheques((prev) => prev.map((f, j) => (j === i ? { ...f, [campo]: valor } : f)))
+  const agregarFila = () => setCheques((prev) => [...prev, filaVacia()])
+  const quitarFila = (i: number) => setCheques((prev) => prev.filter((_, j) => j !== i))
 
   const saldo = deuda.saldo
   const montoNum = parseFloat(monto) || 0
@@ -128,9 +144,15 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   const puedeEnviar = montoNum > 0 && !faltaCotiz && equivalente !== null && !superaSaldo
 
   // ── Cheque: valor neto y qué salda ─────────────────────────────────
-  const chMontoNum = parseFloat(chMonto) || 0
-  const chPctNum = parseFloat(chPorcentaje) || 0
-  const chValorNeto = chMontoNum > 0 ? Math.round(chMontoNum * (100 - chPctNum)) / 100 : 0
+  const chNominal = cheques.reduce((acc, f) => acc + (parseFloat(f.monto) || 0), 0)
+  // El neto de cada uno y no del total: dos cheques al mismo porcentaje dan lo
+  // mismo, pero uno a 30 días y otro a 90 se toman distinto.
+  const chValorNeto = Math.round(
+    cheques.reduce((acc, f) => {
+      const monto = parseFloat(f.monto) || 0
+      return acc + (monto > 0 ? monto * (100 - (parseFloat(f.pct) || 0)) / 100 : 0)
+    }, 0) * 100,
+  ) / 100
   // El cheque siempre es en pesos: si la deuda es en USD hay que convertir.
   const chCross = deuda.moneda !== 'ARS'
   const chEquivalente = chValorNeto > 0 && (!chCross || cotizNum > 0)
@@ -146,8 +168,20 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
   const chVueltoArs = chDiferencia !== null && chDiferencia > 0
     ? Math.round((chCross ? chDiferencia * cotizNum : chDiferencia) * 100) / 100
     : 0
-  const puedeEnviarCheque =
-    chNro.trim().length > 0 && chMontoNum > 0 && chPorcentaje !== '' && chEquivalente !== null
+  // Cada fila tiene que estar completa: una a medio cargar es un cheque que el
+  // operador cree que entregó y no entró.
+  const filasCompletas = cheques.every(
+    (f) => f.nro.trim().length > 0 && (parseFloat(f.monto) || 0) > 0 && f.pct !== '',
+  )
+  const puedeEnviarCheque = cheques.length > 0 && filasCompletas && chEquivalente !== null
+  // Lo que viaja al backend, ya normalizado.
+  const chequesPayload = cheques.map((f) => ({
+    nro_cheque: f.nro.trim() || null,
+    banco: f.banco.trim() || null,
+    monto: parseFloat(f.monto) || 0,
+    porcentaje_compra: parseFloat(f.pct) || 0,
+    fecha_pago: f.fechaPago || null,
+  }))
 
   async function handleSubmitCheque(e: React.FormEvent) {
     e.preventDefault()
@@ -161,11 +195,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
         const r = await cobrarClienteConCheque({
           cliente_id: deuda.id,
           moneda_deuda: deuda.moneda,
-          nro_cheque_pago: chNro.trim(),
-          banco_pago: chBanco.trim() || null,
-          monto_cheque: chMontoNum,
-          porcentaje_compra_cheque: chPctNum,
-          fecha_pago: chFechaPago || null,
+          cheques: chequesPayload,
           cotizacion: chCross ? cotizNum : null,
           vuelto_modo: chVueltoArs > 0 ? vueltoClasico : null,
         })
@@ -186,11 +216,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
         // primero. Si sobra, `sobrante_modo` decide: bajarlo del capital (solo
         // interés fijo), devolverlo o quedar debiéndolo.
         const r = await pagarPrestamoConCheque(deuda.id, {
-          nro_cheque: chNro.trim() || null,
-          banco: chBanco.trim() || null,
-          monto: chMontoNum,
-          porcentaje_compra: chPctNum,
-          fecha_pago: chFechaPago || null,
+          cheques: chequesPayload,
           cotizacion: chCross ? cotizNum : null,
           sobrante_modo: chVueltoArs > 0 ? vueltoModo : null,
         })
@@ -218,11 +244,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
         const r = await cobrarDeudasClienteConCheque({
           cliente_id: deuda.id,
           moneda_deuda: deuda.moneda,
-          nro_cheque_pago: chNro.trim(),
-          banco_pago: chBanco.trim() || null,
-          monto_cheque: chMontoNum,
-          porcentaje_compra_cheque: chPctNum,
-          fecha_pago: chFechaPago || null,
+          cheques: chequesPayload,
           cotizacion: chCross ? cotizNum : null,
           vuelto_modo: chVueltoArs > 0 ? vueltoClasico : null,
         })
@@ -239,11 +261,7 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
         return
       }
       const r = await cobrarDeudaSimpleConCheque(deuda.id, {
-        nro_cheque_pago: chNro.trim(),
-        banco_pago: chBanco.trim() || null,
-        monto_cheque: chMontoNum,
-        porcentaje_compra_cheque: chPctNum,
-        fecha_pago: chFechaPago || null,
+        cheques: chequesPayload,
         cotizacion: chCross ? cotizNum : null,
         vuelto_modo: chVueltoArs > 0 ? vueltoClasico : null,
       })
@@ -380,30 +398,47 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
 
           {forma === 'cheque' ? (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div>
-                  <label style={LABEL_STYLE}>Nº de cheque</label>
-                  <input type="text" value={chNro} onChange={(e) => setChNro(e.target.value)} required autoFocus style={INPUT_STYLE} />
+              {cheques.map((fila, i) => (
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', paddingTop: i > 0 ? '0.6rem' : 0, borderTop: i > 0 ? '1px solid var(--bd-006)' : 'none' }}>
+                  {cheques.length > 1 && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontFamily: FM, fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)' }}>
+                        Cheque {i + 1} de {cheques.length}
+                      </span>
+                      <button type="button" onClick={() => quitarFila(i)} style={{ ...btnBordered('danger'), fontSize: '0.68rem', padding: '0.2rem 0.6rem' }}>
+                        Quitar
+                      </button>
+                    </div>
+                  )}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label style={LABEL_STYLE}>Nº de cheque</label>
+                      <input type="text" value={fila.nro} onChange={(e) => setFila(i, 'nro', e.target.value)} required autoFocus={i === 0} style={INPUT_STYLE} />
+                    </div>
+                    <div>
+                      <label style={LABEL_STYLE}>Banco</label>
+                      <input type="text" value={fila.banco} onChange={(e) => setFila(i, 'banco', e.target.value)} placeholder="Opcional" style={INPUT_STYLE} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label style={LABEL_STYLE}>Monto</label>
+                      <input type="number" step="0.01" min="0.01" value={fila.monto} onChange={(e) => setFila(i, 'monto', e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
+                    </div>
+                    <div>
+                      <label style={LABEL_STYLE}>% de dcto.</label>
+                      <input type="number" step="0.01" min="0" max="100" value={fila.pct} onChange={(e) => setFila(i, 'pct', e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
+                    </div>
+                    <div>
+                      <label style={LABEL_STYLE}>Fecha de pago</label>
+                      <input type="date" value={fila.fechaPago} onChange={(e) => setFila(i, 'fechaPago', e.target.value)} style={INPUT_STYLE} />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label style={LABEL_STYLE}>Banco</label>
-                  <input type="text" value={chBanco} onChange={(e) => setChBanco(e.target.value)} placeholder="Opcional" style={INPUT_STYLE} />
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div>
-                  <label style={LABEL_STYLE}>Monto del cheque</label>
-                  <input type="number" step="0.01" min="0.01" value={chMonto} onChange={(e) => setChMonto(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
-                </div>
-                <div>
-                  <label style={LABEL_STYLE}>% de descuento</label>
-                  <input type="number" step="0.01" min="0" max="100" value={chPorcentaje} onChange={(e) => setChPorcentaje(e.target.value)} placeholder="0,00" required style={INPUT_STYLE} />
-                </div>
-              </div>
-              <div>
-                <label style={LABEL_STYLE}>Fecha de pago del cheque <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(opcional)</span></label>
-                <input type="date" value={chFechaPago} onChange={(e) => setChFechaPago(e.target.value)} style={INPUT_STYLE} />
-              </div>
+              ))}
+              <button type="button" onClick={agregarFila} style={{ ...btnBordered('primary'), padding: '0.4rem', fontSize: '0.72rem' }}>
+                + Agregar otro cheque
+              </button>
 
               {chCross && (
                 <div>
@@ -420,6 +455,10 @@ export default function ModalPagarDeuda({ deuda, onClose, onSuccess }: { deuda: 
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: 'rgba(100,116,139,0.7)' }}>Vale (neto)</span>
                     <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(chValorNeto)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)' }}>
+                    <span>{cheques.length === 1 ? 'Nominal' : `${cheques.length} cheques · nominal`}</span>
+                    <span>{fmtARS(chNominal)}</span>
                   </div>
                   {chDiferencia !== null && (
                     <span style={{ color: chDiferencia > 0 ? '#fbbf24' : chDiferencia < 0 ? 'rgba(100,116,139,0.8)' : '#4ade80' }}>

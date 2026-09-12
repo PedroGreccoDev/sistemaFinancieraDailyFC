@@ -968,6 +968,24 @@ dos fuentes—; servicio `svc_deudores` (`app/services/deudores.py`), router `/d
   excedente lo resuelve `svc_pasivos.aplicar_vuelto_cheque` (§5), el mismo mecanismo que el
   vuelto de un pasivo y el de §2.b: `vuelto_modo` es **obligatorio si sobra**, y el vuelto va
   en **ARS** aunque la deuda sea en dólares.
+- **Casi nunca es un cheque: son varios** _(régimen definido 2026-09-12)_. "Me entregó estos
+  tres al 5%", con la foto, es la forma normal de cobrar. Van en `cheques` (schema
+  `PagoConCheques`, `app/schemas/cheques.py`), que **todos** los cobros con cheque heredan
+  —el consolidado, el de deudas libres, el de un préstamo—, así el bot arma un solo payload
+  para la misma frase. Reglas:
+  - **Cada papel entra a cartera por separado** (vence y se cobra por su cuenta) pero la
+    deuda baja **una sola vez, por la suma de los netos**: tres de $500.000 al 5% saldan
+    $1.425.000, no $1.500.000. Sumar nominales sería regalar el descuento en cada cobro.
+  - **El descuento es por cheque**, no del lote: uno a 30 días y otro a 90 no valen lo mismo.
+  - **El mismo número dos veces en un pago se rechaza** (`ingresar_cheques_de_pago`, en
+    `svc_cheques`): con la foto pasa que el modelo lee dos veces el de arriba de la pila, y
+    cargarlo doble mete en cartera plata que no existe.
+  - La forma vieja —un cheque en campos sueltos (`nro_cheque_pago`, `monto_cheque`, …)—
+    **sigue andando**: el validador la normaliza a una lista de uno, así que hay un solo
+    camino de dinero adentro.
+  - En el bot, `cheques` está en `_CLAVES_DE_LOTE` para **COBRAR_FIADO_CON_CHEQUE** y
+    **COBRAR_DEUDA_CLIENTE**: varios cheques no son varias operaciones (§Bot, regla 16), y sin
+    eso la guarda de lotes frena el pago entero. Tests: `test_pago_multicheque.py`.
 - **Endpoints:** `POST /deudores/cobrar-cliente` (efectivo), `POST
   /deudores/cobrar-cliente-con-cheque`, `GET /deudores/clientes/{id}?moneda=` (lo que debe,
   con su detalle — lo consume el bot).

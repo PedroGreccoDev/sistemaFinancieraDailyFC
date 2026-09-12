@@ -360,16 +360,29 @@ export interface TraspasoCreate {
   detalle?: string | null
 }
 
+/** Uno de los cheques con los que se paga. El pago salda por la SUMA de los
+ *  netos: cada papel entra a cartera por separado, con su nominal y su dcto. */
+export interface ChequeEntregado {
+  nro_cheque: string | null
+  banco?: string | null
+  monto: number
+  porcentaje_compra: number
+  fecha_emision?: string | null
+  fecha_pago?: string | null
+}
+
 /** Qué hacer con lo que sobra de un cheque que cubre de más un préstamo.
  *  `A_CAPITAL` solo existe en el interés fijo: ahí el capital es la otra mitad
  *  de lo que el cliente debe y no vive en ninguna cuota. */
 export type SobranteModo = 'A_CAPITAL' | 'SALDAR_EFECTIVO' | 'QUEDA_DEBIENDO'
 
 export interface PagarConChequePayload {
-  nro_cheque: string | null
-  banco: string | null
-  monto: number
-  porcentaje_compra: number
+  /** Los papeles del pago; con esto, los campos sueltos de abajo se ignoran. */
+  cheques?: ChequeEntregado[]
+  nro_cheque?: string | null
+  banco?: string | null
+  monto?: number
+  porcentaje_compra?: number
   fecha_emision?: string | null
   fecha_pago?: string | null
   fecha_cobro?: string | null
@@ -379,6 +392,7 @@ export interface PagarConChequePayload {
 
 export interface PagarConChequeResult {
   prestamo: Prestamo
+  cheques: Cheque[]
   cheque: Cheque
   imputado: string
   sobrante: string

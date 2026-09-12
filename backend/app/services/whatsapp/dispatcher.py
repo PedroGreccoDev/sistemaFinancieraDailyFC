@@ -41,7 +41,12 @@ from app.schemas.gastos_operativos import GastoOperativoCreate
 from app.services import gastos_operativos as svc_gastos
 from app.schemas.pasivos import PasivoCreate, PasivoUpdate
 from app.services import pasivos as svc_pasivos
-from app.schemas.cheques import ChequeFiarRequest, ChequeCreate, ChequeManualTransition
+from app.schemas.cheques import (
+    ChequeCreate,
+    ChequeEntregado,
+    ChequeFiarRequest,
+    ChequeManualTransition,
+)
 from app.schemas.clientes import ClienteCreate
 from app.schemas.deudas_simples import DeudaSimpleCreate
 from app.services import deudas_simples as svc_deudas_simples
@@ -113,6 +118,11 @@ _CLAVES_DE_LOTE: dict[str, tuple[str, ...]] = {
     "COBRAR_CHEQUE":    ("cobros",),
     "RECHAZAR_CHEQUE":  ("rechazos",),
     "REGISTRAR_GASTO":  ("gastos",),
+    # Varios cheques NO son varias operaciones: es un pago solo, con los papeles
+    # que el cliente juntó ("me entregó estos tres al 5%"). La deuda baja una
+    # vez, por la suma de los netos (§2.c).
+    "COBRAR_FIADO_CON_CHEQUE": ("cheques",),
+    "COBRAR_DEUDA_CLIENTE":    ("cheques",),
 }
 
 # Los intents que tocan la BD. La guarda no corre sobre las consultas ni sobre
@@ -1929,15 +1939,11 @@ def _cobrar_deuda_cliente_con_cheque(
 
     cotizacion = _opt_decimal(data, "cotizacion")
 
+    entregados = _cheques_del_pago(data)
     payload = CobroClienteChequeCreate(
         cliente_id=cliente.id,
         moneda_deuda=moneda_deuda,
-        nro_cheque_pago=_req_str(data, "nro_cheque_pago"),
-        banco_pago=(str(data["banco_pago"]).strip() or None) if data.get("banco_pago") else None,
-        monto_cheque=_req_decimal(data, "monto_cheque"),
-        porcentaje_compra_cheque=_req_decimal(data, "porcentaje_compra_cheque"),
-        fecha_emision=_opt_date(data, "fecha_emision"),
-        fecha_pago=_opt_date(data, "fecha_pago"),
+        cheques=entregados,
         cotizacion=cotizacion,
         vuelto_modo=_vuelto_modo(data),
         fecha_cobro=fecha_local(msg_at),
@@ -1949,10 +1955,10 @@ def _cobrar_deuda_cliente_con_cheque(
     )
 
     simbolo = "U$D" if moneda_deuda == Moneda.USD else "$"
+    titulo = "Cheque recibido a cuenta" if len(entregados) == 1 else "Cheques recibidos a cuenta"
     lines = [
-        f"✅ *Cheque recibido a cuenta* — {r.cliente_nombre}",
-        f"Cheque Nº {r.cheque_ingresado.nro_cheque} | Nominal: "
-        f"{_ars(payload.monto_cheque)} | Compra: {_pct(payload.porcentaje_compra_cheque)}%",
+        f"✅ *{titulo}* — {r.cliente_nombre}",
+        _detalle_cheques(entregados),
         "",
         "Se imputó a:",
     ]
@@ -1980,21 +1986,77 @@ def _cobrar_deuda_cliente_con_cheque(
     return True, "\n".join(lines)
 
 
+def _cheques_del_pago(data: dict[str, Any]) -> list[ChequeEntregado]:
+    """Los papeles que el cliente entregó, vengan como vengan.
+
+    El modelo los manda en `cheques` —una foto trae varios, y "estos tres al 5%"
+    es la forma normal de entregarlos—. Los campos sueltos (`nro_cheque_pago`,
+    `monto_cheque`, …) son la forma vieja de un cheque solo y se siguen
+    aceptando: un mensaje dictado sin foto suele traer uno.
+    """
+    crudos = data.get("cheques")
+    if isinstance(crudos, list) and crudos:
+        return [
+            ChequeEntregado(
+                nro_cheque=(str(c["nro_cheque"]).strip() or None) if c.get("nro_cheque") else None,
+                banco=(str(c["banco"]).strip() or None) if c.get("banco") else None,
+                monto=_req_decimal(c, "monto"),
+                porcentaje_compra=_req_decimal(c, "porcentaje_compra"),
+                fecha_emision=_opt_date(c, "fecha_emision"),
+                fecha_pago=_opt_date(c, "fecha_pago"),
+            )
+            for c in crudos
+        ]
+    return [
+        ChequeEntregado(
+            nro_cheque=(str(data["nro_cheque_pago"]).strip() or None)
+            if data.get("nro_cheque_pago")
+            else None,
+            banco=(str(data["banco_pago"]).strip() or None) if data.get("banco_pago") else None,
+            monto=_req_decimal(data, "monto_cheque"),
+            porcentaje_compra=_req_decimal(data, "porcentaje_compra_cheque"),
+            fecha_emision=_opt_date(data, "fecha_emision"),
+            fecha_pago=_opt_date(data, "fecha_pago"),
+        )
+    ]
+
+
+def _detalle_cheques(cheques: list[ChequeEntregado]) -> str:
+    """Una línea que muestra lo que entró, para que el operador lo verifique."""
+    if len(cheques) == 1:
+        c = cheques[0]
+        return (
+            f"Cheque Nº {c.nro_cheque or 's/n'} | Nominal: {_ars(c.monto)} | "
+            f"Compra: {_pct(c.porcentaje_compra)}%"
+        )
+    nominal = sum((c.monto for c in cheques), Decimal("0.00"))
+    neto = sum((c.valor_neto for c in cheques), Decimal("0.00"))
+    lineas = [f"{len(cheques)} cheques | Nominal: {_ars(nominal)} | Neto: {_ars(neto)}"]
+    for c in cheques:
+        lineas.append(
+            f"  • Nº {c.nro_cheque or 's/n'} — {_ars(c.monto)} al {_pct(c.porcentaje_compra)}%"
+        )
+    return "\n".join(lineas)
+
+
 def _cobrar_fiado_con_cheque(db: Session, phone: str, data: dict[str, Any], msg_at: datetime | None = None) -> DispatchResult:
     cliente_nombre = _req_str(data, "cliente_nombre")
-    nro_cheque_pago = _req_str(data, "nro_cheque_pago")
-    banco_pago = (str(data["banco_pago"]).strip() or None) if data.get("banco_pago") else None
-    monto_cheque = _req_decimal(data, "monto_cheque")
-    pct_compra = _req_decimal(data, "porcentaje_compra_cheque")
-    fecha_emision = _opt_date(data, "fecha_emision")
-    fecha_pago = _opt_date(data, "fecha_pago")
+    entregados = _cheques_del_pago(data)
 
     fiados = _fiados_abiertos(db, cliente_nombre)
     if not fiados:
         return False, f"❓ No encontré un fiado abierto para '{cliente_nombre}'."
-    if len(fiados) > 1:
+    # Con más de un fiado —o con más de un papel— el cobro se va por la cuenta
+    # del cliente, que sabe repartir de lo más viejo a lo más nuevo y entrar
+    # varios cheques de una. Este camino queda para el caso simple: un fiado, un
+    # cheque, que es donde el mensaje de respuesta puede hablar del fiado.
+    if len(fiados) > 1 or len(entregados) > 1:
         return _cobrar_deuda_cliente_con_cheque(db, data, msg_at)
     fiado = fiados[0]
+    unico = entregados[0]
+    nro_cheque_pago, banco_pago = unico.nro_cheque or "", unico.banco
+    monto_cheque, pct_compra = unico.monto, unico.porcentaje_compra
+    fecha_emision, fecha_pago = unico.fecha_emision, unico.fecha_pago
 
     payload = FiadoCobrarConChequeRequest(
         nro_cheque_pago=nro_cheque_pago,

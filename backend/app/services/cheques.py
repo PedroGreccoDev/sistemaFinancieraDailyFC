@@ -25,6 +25,7 @@ from app.db.models import (
 from app.core.fechas import fecha_local, hoy_local
 from app.schemas.cheques import (
     ChequeCreate,
+    ChequeEntregado,
     ChequeFiarRequest,
     ChequeManualTransition,
     ChequeUpdate,
@@ -76,6 +77,61 @@ def _nombre_vendedor(db: Session, cliente_id: uuid.UUID | None) -> str:
             "quedás debiendo."
         )
     return cliente.nombre
+
+
+def ingresar_cheques_de_pago(
+    db: Session,
+    entregados: list[ChequeEntregado],
+    *,
+    cliente_id: uuid.UUID,
+    created_at: datetime | None = None,
+) -> tuple[list[Cheque], Decimal]:
+    """Mete a cartera los cheques que el cliente entregó y devuelve su neto total.
+
+    Cada papel entra **por separado** —vence y se cobra por su cuenta, y así se
+    ve en la cartera— pero la deuda baja por la suma de los netos: para el
+    cliente fue un solo pago. `db.add()` y no `create_cheque()`: recibir un
+    cheque como pago NO es comprarlo, así que no corresponde el egreso
+    COMPRA_CHEQUE.
+
+    Choca contra los que ya están EN CARTERA y también **entre sí**: dos papeles
+    con el mismo número y banco en el mismo mensaje son casi siempre el mismo
+    cheque tipeado dos veces, y cargarlo doble duplicaría plata que no existe.
+    Sin commit: lo hace el cobro que orquesta la operación."""
+    vistos: set[tuple[str, str]] = set()
+    cheques: list[Cheque] = []
+    for entregado in entregados:
+        if entregado.nro_cheque:
+            clave = (entregado.nro_cheque.strip().lower(), (entregado.banco or "").strip().lower())
+            if clave in vistos:
+                raise ValidationError(
+                    f"El cheque Nº {entregado.nro_cheque} viene dos veces en el mismo pago."
+                )
+            vistos.add(clave)
+        # Solo choca contra un cheque del mismo papel que esté EN CARTERA: uno
+        # anulado libera su número, y uno que ya se vendió puede volver por el
+        # circuito y entrar de nuevo (§Recompra, migración 0028).
+        verificar_no_esta_en_cartera(db, entregado.nro_cheque, entregado.banco)
+
+        cheque = Cheque(
+            nro_cheque=entregado.nro_cheque,
+            banco=entregado.banco,
+            monto=entregado.monto,
+            porcentaje_compra=entregado.porcentaje_compra,
+            fecha_emision=entregado.fecha_emision,
+            fecha_pago=entregado.fecha_pago,
+            estado=ChequeEstado.EN_CARTERA,
+            ganancia=Decimal("0.00"),
+            cliente_origen_id=cliente_id,
+        )
+        if created_at is not None:
+            cheque.created_at = created_at
+        db.add(cheque)
+        cheques.append(cheque)
+
+    db.flush()  # necesitan id para la referencia de caja del vuelto
+    neto = sum((e.valor_neto for e in entregados), Decimal("0.00")).quantize(Decimal("0.01"))
+    return cheques, neto
 
 
 def create_cheque(

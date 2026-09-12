@@ -585,18 +585,14 @@ def cobrar_deudas_cliente_con_cheque(
 
     # Solo choca contra un cheque del mismo papel que esté EN CARTERA: uno anulado
     # libera su número, y uno que ya se vendió puede volver por el circuito y
-    # entrar de nuevo (§Recompra, migración 0028).
-    svc_cheques.verificar_no_esta_en_cartera(db, payload.nro_cheque_pago, payload.banco_pago)
+    # entrar de nuevo (§Recompra, migración 0028) — lo chequea
+    # `ingresar_cheques_de_pago`, para todos los papeles del pago.
 
     saldo_total = sum(
         (d.saldo_pendiente for d in deudas), Decimal("0.00")
     ).quantize(Decimal("0.01"))
 
-    valor_neto = (
-        payload.monto_cheque
-        * (_CIEN - payload.porcentaje_compra_cheque)
-        / _CIEN
-    ).quantize(Decimal("0.01"))
+    valor_neto = payload.valor_neto_total
 
     es_cross = payload.moneda_deuda != Moneda.ARS
     reduccion, diferencia = calcular_imputacion_y_vuelto(
@@ -610,17 +606,10 @@ def cobrar_deudas_cliente_con_cheque(
 
     fecha = payload.fecha_cobro or hoy_local()
 
-    cheque_nuevo = Cheque(
-        nro_cheque=payload.nro_cheque_pago,
-        banco=payload.banco_pago,
-        monto=payload.monto_cheque,
-        porcentaje_compra=payload.porcentaje_compra_cheque,
-        fecha_emision=payload.fecha_emision,
-        fecha_pago=payload.fecha_pago,
-        estado=ChequeEstado.EN_CARTERA,
-        ganancia=Decimal("0.00"),
-        cliente_origen_id=cliente.id,
+    cheques_nuevos, _ = svc_cheques.ingresar_cheques_de_pago(
+        db, payload.cheques, cliente_id=cliente.id, created_at=created_at
     )
+    cheque_nuevo = cheques_nuevos[0]
     if created_at is not None:
         cheque_nuevo.created_at = created_at
     # db.add() y no create_cheque(): recibir un cheque como pago NO es comprarlo,
@@ -676,6 +665,7 @@ def cobrar_deudas_cliente_con_cheque(
 
     return DeudaSimpleCobroClienteChequeResponse(
         deudas_afectadas=[DeudaSimpleRead.model_validate(d) for d in afectadas],
+        cheques_ingresados=[ChequeRead.model_validate(c) for c in cheques_nuevos],
         cheque_ingresado=ChequeRead.model_validate(cheque_nuevo),
         imputado=reduccion,
         canceladas=canceladas,
@@ -719,14 +709,10 @@ def cobrar_con_cheque(
 
     # Solo choca contra un cheque del mismo papel que esté EN CARTERA: uno anulado
     # libera su número, y uno que ya se vendió puede volver por el circuito y
-    # entrar de nuevo (§Recompra, migración 0028).
-    svc_cheques.verificar_no_esta_en_cartera(db, payload.nro_cheque_pago, payload.banco_pago)
+    # entrar de nuevo (§Recompra, migración 0028) — lo chequea
+    # `ingresar_cheques_de_pago`, para todos los papeles del pago.
 
-    valor_neto = (
-        payload.monto_cheque
-        * (_CIEN - payload.porcentaje_compra_cheque)
-        / _CIEN
-    ).quantize(Decimal("0.01"))
+    valor_neto = payload.valor_neto_total
 
     # El cheque vale pesos; si la deuda es en USD hay que convertir para saber
     # cuánto del saldo salda. `calcular_imputacion_y_vuelto` usa
@@ -754,17 +740,10 @@ def cobrar_con_cheque(
         )
 
     fecha = payload.fecha_cobro or hoy_local()
-    cheque_nuevo = Cheque(
-        nro_cheque=payload.nro_cheque_pago,
-        banco=payload.banco_pago,
-        monto=payload.monto_cheque,
-        porcentaje_compra=payload.porcentaje_compra_cheque,
-        fecha_emision=payload.fecha_emision,
-        fecha_pago=payload.fecha_pago,
-        estado=ChequeEstado.EN_CARTERA,
-        ganancia=Decimal("0.00"),
-        cliente_origen_id=deuda.cliente_id,
+    cheques_nuevos, _ = svc_cheques.ingresar_cheques_de_pago(
+        db, payload.cheques, cliente_id=deuda.cliente_id, created_at=created_at
     )
+    cheque_nuevo = cheques_nuevos[0]
     # Se inserta con db.add() y no con create_cheque(): recibir un cheque como
     # pago NO es comprarlo, así que no corresponde el egreso COMPRA_CHEQUE. Mismo
     # criterio que fiados (§2) y que el cobro de cuotas con cheque (§3).
@@ -799,6 +778,7 @@ def cobrar_con_cheque(
 
     return DeudaSimpleCobrarConChequeResponse(
         deuda=DeudaSimpleRead.model_validate(deuda),
+        cheques_ingresados=[ChequeRead.model_validate(c) for c in cheques_nuevos],
         cheque_ingresado=ChequeRead.model_validate(cheque_nuevo),
         diferencia=diferencia,
         vuelto_ars=vuelto_ars,

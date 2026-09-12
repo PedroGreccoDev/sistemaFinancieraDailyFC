@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { Cheque, MedioPago, Moneda } from '../types'
+import type { Cheque, ChequeEntregado, MedioPago, Moneda } from '../types'
 import type { VueltoModo } from './deudas_simples'
 
 /**
@@ -70,12 +70,15 @@ export const cobrarCliente = (payload: CobrarClientePayload): Promise<CobroClien
  * diferencia —que va en pesos, porque el cheque es un instrumento en pesos—.
  */
 export interface CobrarClienteConChequePayload {
+  /** Los papeles del pago. Con esto cargados, los campos sueltos de
+   *  abajo —la forma vieja, de un cheque solo— se ignoran. */
+  cheques?: ChequeEntregado[]
   cliente_id: string
   moneda_deuda: Moneda
-  nro_cheque_pago: string
+  nro_cheque_pago?: string | null
   banco_pago?: string | null
-  monto_cheque: number
-  porcentaje_compra_cheque: number
+  monto_cheque?: number
+  porcentaje_compra_cheque?: number
   fecha_emision?: string | null
   fecha_pago?: string | null
   // Requerida solo si la deuda es en USD (el cheque siempre entra en pesos).
