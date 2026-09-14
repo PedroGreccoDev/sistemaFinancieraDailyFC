@@ -150,6 +150,37 @@ def test_la_foto_retomada_vale_por_un_solo_turno(banco):
     assert banco.vistas[-1] is None
 
 
+def test_cobrar_deuda_cliente_con_papeles_va_por_el_camino_del_cheque(monkeypatch):
+    """`COBRAR_DEUDA_CLIENTE` también puede traer `cheques`, y no son efectivo.
+
+    El prompt lo habilita (regla 16) y `_CLAVES_DE_LOTE` lo lista, pero el
+    handler de efectivo no los miraba: los papeles se perdían y, con un
+    `monto_cobrado` estimado por el modelo, la deuda bajaba como si hubiera
+    entrado plata que nunca entró. Vale para las dos bolsas —cuenta y crédito—:
+    cuál de las dos es lo decide `_bolsa_y_moneda` del otro lado.
+    """
+    from app.services.whatsapp import dispatcher
+
+    llamadas: list[dict] = []
+    monkeypatch.setattr(
+        dispatcher,
+        "_cobrar_deuda_cliente_con_cheque",
+        lambda db, data, msg_at=None: (llamadas.append(data), (True, "✅"))[1],
+    )
+
+    dispatcher._cobrar_deuda_cliente(
+        None,
+        {
+            "cliente_nombre": "Kiosco",
+            "monto_cobrado": 1_507_650,   # el modelo lo estimó: no es plata que entró
+            "destino": "PRESTAMO",
+            "cheques": [{"nro_cheque": "68771912", "monto": 687_000, "porcentaje_compra": 5}],
+        },
+    )
+
+    assert llamadas and llamadas[0]["destino"] == "PRESTAMO"
+
+
 def test_una_foto_nueva_no_se_mezcla_con_la_retomada(banco):
     """El mensaje que trae su propia foto manda: la vieja se descarta, no se apila."""
     banco.respuestas.extend([_aclaracion(), _aclaracion(), _cobro()])

@@ -1681,6 +1681,16 @@ def _cobrar_deuda_cliente(
     es esa; si debe en las dos, se pregunta — imputar pesos contra la deuda en
     dólares (o al revés) cambia el saldo de dos cajas distintas.
     """
+    # **Si trae papeles, es un pago con cheques y no efectivo.** El prompt
+    # habilita `cheques` en este intent (regla 16) y `_CLAVES_DE_LOTE` lo
+    # lista, pero acá abajo no se los mira: sin esta puerta los cheques se
+    # ignoran y —si el modelo además estimó el `monto_cobrado`— la deuda baja
+    # como si hubiera entrado plata que nunca entró, con los papeles fuera de
+    # cartera. Las dos bolsas se resuelven igual del otro lado, así que la
+    # elección de crédito o cuenta no cambia por esta puerta.
+    if data.get("cheques"):
+        return _cobrar_deuda_cliente_con_cheque(db, data, msg_at)
+
     cliente_nombre = _req_str(data, "cliente_nombre")
     monto_cobrado = _req_decimal(data, "monto_cobrado")
     moneda_pago = _req_enum(data, "moneda_pago", Moneda) if data.get("moneda_pago") else Moneda.ARS
