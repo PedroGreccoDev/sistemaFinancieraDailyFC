@@ -12,6 +12,7 @@ from app.db.models import (
     CajaTipo,
     Cheque,
     ChequeEstado,
+    Compensacion,
     ConfiguracionApertura,
     Cuota,
     CuotaEstado,
@@ -262,6 +263,45 @@ _LABEL_ESTADO_CHEQUE: dict[ChequeEstado, str] = {
 }
 
 
+def _plata(monto: Decimal, moneda: Moneda) -> str:
+    """Un importe con el signo de su moneda, para meterlo dentro de un texto."""
+    signo = "U$D " if moneda == Moneda.USD else "$"
+    return f"{signo}{monto:,.2f}"
+
+
+def describir_compensacion(comp: Compensacion) -> str:
+    """Quién le transfirió a quién, y cuánto bajó cada lado.
+
+    La línea tiene que contar la operación entera sola: es la única pantalla
+    donde una compensación se ve al lado del resto del día, y sin el detalle
+    sería un renglón que no explica por qué bajaron dos deudas (§Compensación).
+
+    El monto transferido **no** va en el texto: lo muestra la columna de monto,
+    igual que el nombre de un cheque (`describir`, `con_monto=False`). Las bajas
+    de cada lado se agregan solo cuando dicen algo distinto de ese monto —cruce
+    de monedas o excedente—; en la compensación común los tres números son el
+    mismo y repetirlos tres veces es ruido.
+    """
+    cliente = comp.cliente.nombre if comp.cliente is not None else "El cliente"
+    partes = [f"Compensación: {cliente} le transfirió a {comp.acreedor}"]
+
+    if comp.moneda_deuda != comp.moneda or comp.imputado_cliente != comp.monto:
+        partes.append(
+            f"baja la deuda de {cliente}: "
+            f"{_plata(comp.imputado_cliente, comp.moneda_deuda)}"
+        )
+    if comp.moneda_pasivo != comp.moneda or comp.imputado_pasivo != comp.monto:
+        partes.append(
+            f"baja la deuda con {comp.acreedor}: "
+            f"{_plata(comp.imputado_pasivo, comp.moneda_pasivo)}"
+        )
+    if comp.excedente and comp.excedente > Decimal("0.00"):
+        partes.append(
+            f"a favor de {cliente}: {_plata(comp.excedente, comp.moneda)}"
+        )
+    return " · ".join(partes)
+
+
 def get_movimientos_unificados(
     db: Session,
     desde: date,
@@ -270,9 +310,11 @@ def get_movimientos_unificados(
     """Historial unificado: TODA operación del negocio en el período.
 
     Fuente principal: el libro de caja `movimientos_caja` (toda entrada/salida
-    de plata, venga del bot o del panel). Se le suma el ingreso de cheques a
-    cartera, que es un evento sin movimiento de efectivo (flujo NEUTRO) y por
-    eso no vive en el libro de caja. Ordenado por fecha descendente.
+    de plata, venga del bot o del panel). Se le suman los **eventos sin
+    movimiento de efectivo** (flujo NEUTRO), que por eso no viven en el libro de
+    caja: el ingreso de cheques a cartera y las compensaciones —el cliente le
+    transfirió derecho a un acreedor del negocio (§Compensación)—. Ordenado por
+    fecha descendente.
     """
     if desde > hasta:
         raise ValidationError(
@@ -349,6 +391,52 @@ def get_movimientos_unificados(
                 cotizacion=None,
                 referencia_tipo="cheque",
                 referencia_id=c.id,
+            )
+        )
+
+    # ── Compensaciones (evento sin efectivo) ─────────────────────────────
+    # X le transfirió derecho a Y y bajaron las dos deudas sin que la caja se
+    # moviera (§Compensación): no hay línea en el libro que traerla acá, y por
+    # eso la operación no figuraba en ningún lado del día. Es el mismo caso que
+    # el cheque que entra a cartera —un hecho del negocio sin plata de por
+    # medio—, con la diferencia de que acá hay dos personas involucradas: la
+    # descripción las nombra a las dos porque el registro de quién le transfirió
+    # a quién es todo lo que queda de esa operación.
+    #
+    # La fecha es la operativa que se cargó (`fecha`), no `created_at`: el
+    # operador puede cargarla al otro día y la transferencia pasó cuando pasó.
+    compensaciones = list(
+        db.scalars(
+            select(Compensacion)
+            .where(
+                Compensacion.fecha >= desde,
+                Compensacion.fecha <= hasta,
+                Compensacion.anulado_at.is_(None),
+            )
+            .order_by(Compensacion.created_at.asc())
+        )
+    )
+    for comp in compensaciones:
+        items.append(
+            MovimientoUnificadoRead(
+                id=f"compensacion:{comp.id}",
+                fecha=comp.fecha,
+                # La moneda del ítem es la de lo que se transfirió: es el hecho
+                # real. Las dos deudas pueden estar en otra, y eso lo cuenta la
+                # descripción.
+                moneda=comp.moneda.value,
+                grupo="COMPENSACIONES",
+                categoria="COMPENSACION",
+                flujo="NEUTRO",
+                descripcion=describir_compensacion(comp),
+                monto=_money(comp.monto),
+                ganancia=None,
+                # Ninguna de las dos cajas se movió: la plata fue de un tercero
+                # a otro. Un medio de pago acá haría pensar que salió de acá.
+                medio_pago=None,
+                cotizacion=comp.cotizacion,
+                referencia_tipo="compensacion",
+                referencia_id=comp.id,
             )
         )
 

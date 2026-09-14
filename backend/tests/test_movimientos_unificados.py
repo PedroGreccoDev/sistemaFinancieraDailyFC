@@ -13,6 +13,7 @@ from app.db.models import (
     ChequeEstado,
     ChequeTipo,
     Cliente,
+    Compensacion,
     MedioPago,
     Moneda,
     MovimientoCaja,
@@ -24,15 +25,18 @@ from app.services.exceptions import ValidationError
 class FakeDB:
     """Stand-in mínimo de Session: `scalars` devuelve los result-sets encolados.
 
-    El servicio consulta primero `movimientos_caja` y luego `cheques`; este stub
-    ignora el statement y va entregando las listas en ese orden.
+    El servicio consulta `movimientos_caja`, después `cheques` y después
+    `compensaciones`; este stub ignora el statement y va entregando las listas
+    en ese orden. Una consulta para la que no se encoló nada devuelve vacío: el
+    día que el feed sume otra fuente, los tests que no la miran no tienen por
+    qué romperse.
     """
 
     def __init__(self, *result_sets: list) -> None:
         self._queue = list(result_sets)
 
     def scalars(self, _stmt):  # noqa: ANN001
-        return iter(self._queue.pop(0))
+        return iter(self._queue.pop(0) if self._queue else [])
 
 
 def _caja(
@@ -183,3 +187,114 @@ def test_un_echeq_con_numero_se_nombra_como_echeq():
     con_numero.tipo = ChequeTipo.ELECTRONICO
     items = service.get_movimientos_unificados(FakeDB([], [con_numero]), DESDE, HASTA)
     assert "e-cheq Nº 00001020 — Galicia" in items[0].descripcion
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Compensaciones: el evento sin efectivo que no se veía en ningún lado
+# ══════════════════════════════════════════════════════════════════════
+
+def _compensacion(
+    *,
+    fecha: date = date(2026, 7, 18),
+    cliente: str = "Juan",
+    acreedor: str = "Pedro",
+    monto: str = "600000",
+    moneda: Moneda = Moneda.ARS,
+    moneda_deuda: Moneda = Moneda.ARS,
+    moneda_pasivo: Moneda = Moneda.ARS,
+    imputado_cliente: str | None = None,
+    imputado_pasivo: str | None = None,
+    excedente: str = "0",
+    cotizacion: str | None = None,
+) -> Compensacion:
+    comp = Compensacion(
+        id=uuid.uuid4(),
+        fecha=fecha,
+        cliente_id=uuid.uuid4(),
+        acreedor=acreedor,
+        moneda_pasivo=moneda_pasivo,
+        moneda=moneda,
+        monto=Decimal(monto),
+        moneda_deuda=moneda_deuda,
+        cotizacion=None if cotizacion is None else Decimal(cotizacion),
+        imputado_cliente=Decimal(imputado_cliente if imputado_cliente is not None else monto),
+        imputado_pasivo=Decimal(imputado_pasivo if imputado_pasivo is not None else monto),
+        excedente=Decimal(excedente),
+    )
+    comp.cliente = Cliente(id=comp.cliente_id, nombre=cliente)
+    return comp
+
+
+def test_la_compensacion_aparece_como_evento_sin_efectivo():
+    """Sin línea de caja, la operación no figuraba en ninguna pantalla del día.
+
+    Bajan dos deudas y la caja no se mueve (§Compensación), así que el libro no
+    la tiene; el operador igual necesita verla, y con los dos nombres: el
+    registro de quién le transfirió a quién es todo lo que queda de ella.
+    """
+    items = service.get_movimientos_unificados(
+        FakeDB([], [], [_compensacion()]), DESDE, HASTA
+    )
+    assert len(items) == 1
+    it = items[0]
+    assert it.categoria == "COMPENSACION"
+    assert it.grupo == "COMPENSACIONES"
+    assert it.flujo == "NEUTRO"
+    assert it.monto == Decimal("600000.00")
+    assert it.referencia_tipo == "compensacion"
+    # Las dos puntas, en la dirección correcta: Juan le transfirió a Pedro.
+    assert it.descripcion == "Compensación: Juan le transfirió a Pedro"
+
+
+def test_la_compensacion_no_declara_medio_de_pago():
+    # Ninguna de las dos cajas se movió: la plata fue de un tercero a otro.
+    items = service.get_movimientos_unificados(
+        FakeDB([], [], [_compensacion()]), DESDE, HASTA
+    )
+    assert items[0].medio_pago is None
+
+
+def test_cross_moneda_muestra_cuanto_bajo_cada_lado():
+    # Juan transfirió $600.000 contra una deuda suya en dólares: el monto de la
+    # columna y lo que bajó la deuda son números distintos, y sin decirlo la
+    # línea no se entiende.
+    comp = _compensacion(
+        moneda=Moneda.ARS,
+        monto="600000",
+        moneda_deuda=Moneda.USD,
+        imputado_cliente="500",
+        cotizacion="1200",
+    )
+    items = service.get_movimientos_unificados(FakeDB([], [], [comp]), DESDE, HASTA)
+    it = items[0]
+    assert "baja la deuda de Juan: U$D 500.00" in it.descripcion
+    assert it.cotizacion == Decimal("1200")
+
+
+def test_el_excedente_a_favor_se_nombra():
+    # Transfirió más de lo que debía: la diferencia le quedó a favor y eso es
+    # parte de lo que pasó ese día.
+    comp = _compensacion(monto="700000", imputado_cliente="600000", excedente="100000")
+    items = service.get_movimientos_unificados(FakeDB([], [], [comp]), DESDE, HASTA)
+    descripcion = items[0].descripcion
+    assert "baja la deuda de Juan: $600,000.00" in descripcion
+    assert "a favor de Juan: $100,000.00" in descripcion
+
+
+def test_compensacion_comun_no_repite_el_mismo_numero_tres_veces():
+    # Misma moneda y sin excedente: el monto transferido, lo que bajó el cliente
+    # y lo que bajó el acreedor son el mismo número, y la columna ya lo muestra.
+    items = service.get_movimientos_unificados(
+        FakeDB([], [], [_compensacion()]), DESDE, HASTA
+    )
+    assert "baja la deuda" not in items[0].descripcion
+
+
+def test_las_compensaciones_se_ordenan_con_el_resto_del_dia():
+    caja = [
+        _caja(fecha=date(2026, 7, 20), categoria=CajaCategoria.GASTO,
+              tipo=CajaTipo.EGRESO, monto="10.00"),
+    ]
+    comp = [_compensacion(fecha=date(2026, 7, 25))]
+    items = service.get_movimientos_unificados(FakeDB(caja, [], comp), DESDE, HASTA)
+    assert [i.fecha for i in items] == [date(2026, 7, 25), date(2026, 7, 20)]

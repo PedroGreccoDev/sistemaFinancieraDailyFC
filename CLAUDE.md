@@ -540,6 +540,19 @@ queda en cero, lo que le debés a Pedro baja a $400.000, y la caja no se movió.
   y el bot la deshagan por la misma puerta que el resto, con operador y motivo.
   Es la **única entidad con `refs` vacío**, a propósito: no tiene líneas de caja
   que revertir. `anular` delega en `svc_compensaciones.revertir`.
+- **Se ve en Movimientos** _(pedido del dueño, 2026-09-14)_. No asentar caja la
+  dejaba fuera de la única pantalla donde el día se lee completo: bajaban dos
+  deudas y no había renglón que lo explicara. Entra al feed unificado como
+  **evento sin efectivo** (`flujo=NEUTRO`, grupo `COMPENSACIONES`, categoría
+  `COMPENSACION`), igual que el cheque que entra a cartera, y por eso **no suma
+  a los chips de ingresos/egresos del día** — la caja sigue sin moverse. La
+  descripción la arma `svc_reportes.describir_compensacion` y nombra a **los
+  dos**: "Compensación: Juan le transfirió a Pedro". El monto transferido va en
+  su columna y no se repite en el texto (mismo criterio que `describir` de
+  cheques); las bajas de cada lado se agregan solo cuando dicen otra cosa —cruce
+  de monedas o excedente—: "· baja la deuda de Juan: U$D 500,00 · a favor de
+  Juan: $100.000,00". La fecha del feed es la **operativa** (`compensaciones.fecha`),
+  no `created_at`: se puede cargar al otro día y la transferencia pasó cuando pasó.
 - **Endpoints:** `POST /compensaciones`, `GET /compensaciones` (filtrable por
   cliente o acreedor), `POST /compensaciones/{id}/revertir`.
 - **Panel:** el mismo `ModalCompensar` con **dos entradas** —botón "Compensar" en
@@ -1382,13 +1395,16 @@ el panel; sí la sesión de carga): es la vista por cuota, con su vencimiento.
   `svc_reportes.get_movimientos_unificados`):** feed con **TODA operación** del período, venga
   del bot o del panel. Fuente principal: el libro `movimientos_caja` completo (cobros parciales
   y totales, ventas/compras/cobros de cheque, compra/venta USD, otorgamientos, gastos, pagos de
-  pasivo y vueltos). Se le suma el **ingreso de cheques a cartera** (tabla `cheques`), un evento
-  **sin efectivo** (`flujo=NEUTRO`) que por eso no vive en el libro de caja. Cada ítem trae
-  `grupo` (COBROS/CHEQUES/DIVISAS/GASTOS/OTORGAMIENTOS/PASIVOS/APERTURA/AJUSTES), `flujo`
+  pasivo y vueltos). Se le suman los **eventos sin efectivo** (`flujo=NEUTRO`), que por eso no
+  viven en el libro de caja: el **ingreso de cheques a cartera** (tabla `cheques`) y las
+  **compensaciones** (tabla `compensaciones`, §Compensación). Cada ítem trae
+  `grupo` (COBROS/CHEQUES/DIVISAS/GASTOS/OTORGAMIENTOS/PASIVOS/APERTURA/AJUSTES/COMPENSACIONES), `flujo`
   (INGRESO/EGRESO/NEUTRO) y `referencia_tipo/id`. El front (`pages/Movimientos.tsx`) lo consume
   vía `getMovimientosUnificados` con filtro combinado grupo × flujo; el botón "Editar" sigue solo
   en las filas de divisas (referencia_tipo `movimiento`). **Al agregar una operación nueva que
   asiente en el libro de caja, aparece sola en Movimientos —no hay que tocar esta pantalla.**
+  La contracara: **una operación que NO asiente caja no aparece hasta que se la traiga a mano**,
+  que es lo que le pasó a la compensación hasta 2026-09-14.
   - **Un `grupo` nuevo en el backend hay que darlo de alta en el front.** `MovimientoGrupo`
     (`types/index.ts`) y `GRUPO_CONFIG` son la contraparte del `_GRUPO_POR_CATEGORIA` del
     servidor: un grupo desconocido dejaba `cfg` en `undefined` y el render tiraba la página

@@ -179,11 +179,12 @@ export interface ReporteCaja {
   gastos_periodo: GastoPorConcepto[]
 }
 
-// Feed unificado de Movimientos: TODA operación (libro de caja + ingresos de
-// cheques a cartera), venga del bot o del panel. Lo sirve GET /reportes/movimientos.
+// Feed unificado de Movimientos: TODA operación (libro de caja + los eventos sin
+// efectivo: ingresos de cheques a cartera y compensaciones), venga del bot o del
+// panel. Lo sirve GET /reportes/movimientos.
 export type MovimientoGrupo =
   | 'COBROS' | 'CHEQUES' | 'DIVISAS' | 'GASTOS' | 'OTORGAMIENTOS' | 'PASIVOS'
-  | 'APERTURA' | 'AJUSTES' | 'TRASPASOS' | 'OTROS'
+  | 'APERTURA' | 'AJUSTES' | 'TRASPASOS' | 'COMPENSACIONES' | 'OTROS'
 export type MovimientoFlujo = 'INGRESO' | 'EGRESO' | 'NEUTRO'
 
 export interface MovimientoUnificado {

@@ -265,6 +265,10 @@ const GRUPO_CONFIG: Record<MovimientoGrupo, { label: string; color: string; bg: 
   // Depósitos y extracciones: la plata cambia de caja sin entrar ni salir, así
   // que sus dos líneas se cancelan solas en el neto del día (§Las dos cajas).
   TRASPASOS:     { label: 'Entre cajas',   color: '#818cf8', bg: 'rgba(129,140,248,0.13)', initial: '⇄' },
+  // El cliente le transfirió derecho a un acreedor del negocio: bajaron las dos
+  // deudas y la caja no se movió, por eso la fila va en gris de NEUTRO y no
+  // suma a los chips del día (§Compensación).
+  COMPENSACIONES:{ label: 'Compensaciones', color: '#22d3ee', bg: 'rgba(34,211,238,0.13)', initial: '↹' },
   OTROS:         { label: 'Otros',         color: '#94a3b8', bg: 'rgba(148,163,184,0.13)', initial: '•' },
 }
 
@@ -290,6 +294,7 @@ const CATEGORIA_LABEL: Record<string, string> = {
   PAGO_PASIVO:           'Pago de pasivo',
   VUELTO_PASIVO:         'Vuelto de pasivo',
   INGRESO_CHEQUE:        'Ingreso a cartera',
+  COMPENSACION:          'Compensación',
   SALDO_INICIAL:         'Saldo inicial de caja',
   AJUSTE_CAJA:           'Ajuste de caja',
 }
@@ -447,7 +452,7 @@ export default function Movimientos() {
     setShowPicker(p === 'PERSONALIZADO')
   }
 
-  const gruposFiltro: GrupoFiltro[] = ['TODOS', 'COBROS', 'CHEQUES', 'DIVISAS', 'GASTOS', 'OTORGAMIENTOS', 'PASIVOS', 'AJUSTES', 'APERTURA']
+  const gruposFiltro: GrupoFiltro[] = ['TODOS', 'COBROS', 'CHEQUES', 'DIVISAS', 'GASTOS', 'OTORGAMIENTOS', 'PASIVOS', 'COMPENSACIONES', 'AJUSTES', 'APERTURA']
 
   return (
     <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>

@@ -108,22 +108,25 @@ class MovimientoUnificadoRead(BaseModel):
       totales), ventas/compras/cobros de cheque, compra/venta de USD,
       otorgamientos, gastos, pagos de pasivo y vueltos.
     - Los ingresos de cheques a cartera (evento sin movimiento de efectivo).
+    - Las compensaciones: el cliente le transfirió derecho a un acreedor del
+      negocio y bajaron las dos deudas sin que la caja se moviera
+      (§Compensación). La descripción dice quién le transfirió a quién.
 
     `flujo` = INGRESO | EGRESO (según el tipo de caja) | NEUTRO (eventos sin
-    plata, como el ingreso de un cheque a cartera). `grupo` es la familia de
-    operación para filtrar en el panel.
+    plata: un cheque que entra a cartera, una compensación). `grupo` es la
+    familia de operación para filtrar en el panel.
     """
     id: str
     fecha: date
     moneda: str  # ARS | USD
-    grupo: str  # COBROS | CHEQUES | DIVISAS | GASTOS | OTORGAMIENTOS | PASIVOS
-    categoria: str  # CajaCategoria original o INGRESO_CHEQUE
+    grupo: str  # COBROS | CHEQUES | DIVISAS | GASTOS | OTORGAMIENTOS | PASIVOS | COMPENSACIONES
+    categoria: str  # CajaCategoria original, INGRESO_CHEQUE o COMPENSACION
     flujo: str  # INGRESO | EGRESO | NEUTRO
     descripcion: str
     monto: Decimal
     ganancia: Decimal | None  # solo VENTA_USD
-    # Null solo en los eventos sin efectivo (un cheque que entra a cartera):
-    # no pasaron por ninguna de las dos cajas.
+    # Null solo en los eventos sin efectivo (un cheque que entra a cartera, una
+    # compensación): no pasaron por ninguna de las dos cajas.
     medio_pago: str | None
     cotizacion: Decimal | None  # $/USD si el pago cruzó monedas
     referencia_tipo: str | None
