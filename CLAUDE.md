@@ -1928,6 +1928,31 @@ que sería un loop infinito).
   operador cargaba el cheque de la foto, decía "dale" pensando en ese, y confirmaba el
   anterior. Ahora una foto entra por `other`, igual que cualquier otra cosa que no sea un sí
   o un no: descarta lo pendiente avisando y se procesa como la operación nueva que es.
+- **Una foto de cheques no dice qué operación es: lo dice el verbo del operador**
+  _(corregido 2026-09-14)_. "Kiosco me pagó con estos cheques" + la foto se cargó como
+  **compra de cartera**: salió de la caja plata que nunca salió **y** la deuda del Kiosco
+  quedó viva. El error no es simétrico —descuadra dos cosas de una y no se nota hasta el
+  cierre—; al revés solo falta un alta. Eran dos agujeros:
+  - **El prompt no contrastaba las dos frases.** Con foto, el §1 es un imán ("el operador
+    manda foto(s) de cheque"), y nada decía que *"me pagó con estos"* / *"me los entregó
+    por lo que debía"* es el cobro del §9. Ahora se contrastan en un bloque, con la
+    asimetría escrita, y el verbo ambiguo ("me trajo estos dos") va a
+    `ACLARACION_REQUERIDA`.
+  - **La foto no sobrevivía a la pregunta.** El bot pide el porcentaje, el operador
+    contesta "al 5%" — y ese turno es **texto**: lo atendía el modelo de texto **sin la
+    imagen**, rearmando los cheques *y la operación* desde el historial, donde lo único
+    escrito era una pregunta redactada como compra ("¿con qué porcentaje los tomo?").
+    `session.set_foto_aclaracion` / `tomar_foto_aclaracion` la conservan **un solo turno**
+    —arrastrarla más mandaría un "cuánto hay en caja" por el camino del OCR— y de paso el
+    cheque que se cargue queda **con su foto**, que hasta acá se perdía en toda alta
+    completada después de una aclaración.
+  - **El porcentaje no desempata**: se pregunta igual en los dos casos, así que preguntarlo
+    solo deja la duda viva para el turno siguiente. Por eso el prompt manda preguntar las
+    dos cosas juntas, **nombrar la operación** en la pregunta (el historial es todo lo que
+    hay después) y reconstruir el **intent** —no solo el dato— en el turno que la contesta.
+  - Tests: `test_bot_cheque_pago_vs_compra.py`. Verificado además contra el modelo real con
+    la foto del caso: 3/3 corridas clasifican el cobro, y "compré estos dos al 5%" sigue
+    siendo un alta.
 - **El umbral de confirmación lo impone el SISTEMA, no el modelo** _(régimen definido
   2026-08-21)_. La regla 10 del prompt manda pedir confirmación arriba de **$20.000.000 ARS /
   15.000 USD** _(subidos desde $700.000 / 500 el 2026-08-26 — ver abajo)_, y el modelo la cumple casi siempre —y además redacta mejor el mensaje, porque

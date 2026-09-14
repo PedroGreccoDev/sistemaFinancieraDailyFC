@@ -9,13 +9,14 @@ _TTL_MINUTES = 30        # Tiempo de inactividad antes de expirar la sesión
 
 
 class _SessionData:
-    __slots__ = ("history", "last_active", "pending_intent", "pending_foto")
+    __slots__ = ("history", "last_active", "pending_intent", "pending_foto", "foto_aclaracion")
 
     def __init__(self) -> None:
         self.history: list[dict[str, Any]] = []
         self.last_active: datetime = datetime.now(UTC)
         self.pending_intent: Any = None  # IntentResult | None
         self.pending_foto: tuple[bytes, str] | None = None  # (bytes, mime) | None
+        self.foto_aclaracion: tuple[bytes, str] | None = None  # (bytes, mime) | None
 
     def touch(self) -> None:
         self.last_active = datetime.now(UTC)
@@ -95,6 +96,37 @@ def get_pending_foto(phone: str) -> tuple[bytes, str] | None:
     _purge_expired()
     session = _sessions.get(phone)
     return session.pending_foto if session is not None else None
+
+
+def set_foto_aclaracion(phone: str, foto: tuple[bytes, str] | None) -> None:
+    """Guarda la foto del mensaje que quedó a medias esperando una aclaración.
+
+    Una foto que se contesta con una pregunta (el porcentaje, de quién es) se
+    perdía ahí mismo: el turno siguiente es texto, así que lo atendía el modelo
+    de texto **sin la imagen** y tenía que reconstruir los cheques —y la
+    operación— de lo que el historial hubiera escrito. Ahí es donde un cobro con
+    cheques se volvió una compra, con la caja pagando lo que nunca salió.
+    """
+    if foto is None:
+        return
+    session = _get_or_create(phone)
+    session.foto_aclaracion = foto
+
+
+def tomar_foto_aclaracion(phone: str) -> tuple[bytes, str] | None:
+    """Devuelve la foto que quedó esperando aclaración y **la consume**.
+
+    Vale por un solo turno, a propósito: es la respuesta a la pregunta lo que la
+    necesita. Arrastrarla más allá haría que un mensaje cualquiera —"cuánto hay
+    en caja"— entrara por el camino del OCR con una foto que no tiene nada que
+    ver.
+    """
+    _purge_expired()
+    session = _sessions.get(phone)
+    if session is None:
+        return None
+    foto, session.foto_aclaracion = session.foto_aclaracion, None
+    return foto
 
 
 def clear_session(phone: str) -> None:

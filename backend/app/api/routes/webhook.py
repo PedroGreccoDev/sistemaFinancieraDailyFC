@@ -326,11 +326,22 @@ async def _procesar_mensaje(
         if image_bytes is not None
         else None
     )
+    # La foto de un mensaje que quedó esperando una aclaración vuelve con la
+    # respuesta. Se consume siempre —haya foto nueva o no— para que valga por un
+    # solo turno. Sin esto, contestar "al 5%" se atendía por el camino de texto y
+    # sin la imagen: el modelo tenía que rearmar los cheques Y la operación desde
+    # lo que dijera el historial, que es donde un cobro se volvió una compra. De
+    # paso, el cheque que se cargue en este turno queda con su foto guardada.
+    foto_retomada = wa_session.tomar_foto_aclaracion(phone)
+    if foto is None and foto_retomada is not None:
+        logger.info("Se retoma la foto de la aclaración pendiente (phone=%s)", phone)
+        foto = foto_retomada
+        image_bytes = foto[0]
     intent_result = await ia_motor.extraer_intencion(
         text=text_content,
         image_bytes=image_bytes,
         history=history,
-        media_mime_type=msg.media_mime_type if msg.message_type == "image" else "image/jpeg",
+        media_mime_type=foto[1] if foto is not None else "image/jpeg",
     )
     logger.info("Intent extraído: %s (phone=%s)", intent_result.intent, phone)
 
@@ -358,6 +369,10 @@ async def _procesar_mensaje(
             )
 
     # ── 3f. Dispatch ─────────────────────────────────────────────────────────
+    if intent_result.intent == "ACLARACION_REQUERIDA":
+        # Falta un dato y el bot va a preguntar: la foto tiene que seguir viva
+        # para el turno en que el operador conteste (ver `set_foto_aclaracion`).
+        wa_session.set_foto_aclaracion(phone, foto)
     if intent_result.confirmacion_requerida:
         wa_session.set_pending_intent(phone, intent_result)
         wa_session.set_pending_foto(phone, foto)
