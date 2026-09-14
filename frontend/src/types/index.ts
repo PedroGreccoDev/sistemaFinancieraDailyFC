@@ -117,6 +117,19 @@ export interface SaldoPasivos {
  * (sección Deudores). En los dos casos es **lo que falta cobrar**, no lo que se
  * entregó, y las monedas nunca se suman entre sí.
  */
+/**
+ * Cuánto se gastó en una cosa dentro del período consultado.
+ *
+ * A diferencia de los dos snapshots del pie, esto **sí sigue el filtro de fecha**:
+ * es plata que salió en estos días. El `concepto` es texto libre, así que la
+ * agrupación es aproximada (ver `agrupar_gastos_por_concepto` en el backend).
+ */
+export interface GastoPorConcepto {
+  concepto: string
+  moneda: Moneda
+  total: string
+}
+
 export interface PlataEnLaCalle {
   creditos_ars: string
   creditos_usd: string
@@ -163,6 +176,7 @@ export interface ReporteCaja {
   ganancia_divisas: string
   saldo_pasivos: SaldoPasivos
   plata_en_calle: PlataEnLaCalle
+  gastos_periodo: GastoPorConcepto[]
 }
 
 // Feed unificado de Movimientos: TODA operación (libro de caja + ingresos de

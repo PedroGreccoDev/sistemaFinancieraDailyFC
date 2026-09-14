@@ -4,7 +4,7 @@ import { getReporteCaja } from '../api/reportes'
 import { fmtARS, fmtUSD, fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
 import DropdownFilter from '../components/DropdownFilter'
 import DateRangePicker from '../components/DateRangePicker'
-import type { CajaMoneda, Moneda } from '../types'
+import type { CajaMoneda, GastoPorConcepto, Moneda } from '../types'
 
 type Preset = 'hoy' | 'semana' | 'mes' | 'custom'
 
@@ -68,6 +68,61 @@ function SnapshotCard({ label, value, sub, tono }: {
         overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums',
       }}>{value}</p>
       <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
+    </div>
+  )
+}
+
+/** En qué se fue la plata del período, por concepto y de mayor a menor.
+ *
+ *  A diferencia de los dos snapshots que tiene al lado, **este sigue el filtro de
+ *  fecha**: son los gastos de esos días. Por eso lo dice en el subtítulo — dos
+ *  recuadros pegados que se leen igual y uno filtra y el otro no es la forma más
+ *  fácil de leer mal un número. */
+function GastosBloque({ gastos }: { gastos: GastoPorConcepto[] }) {
+  const porMoneda = (['ARS', 'USD'] as const)
+    .map((m) => ({ moneda: m, items: gastos.filter((g) => g.moneda === m) }))
+    .filter(({ items }) => items.length > 0)
+
+  return (
+    <div style={{ ...CARD, overflow: 'hidden' }}>
+      {porMoneda.length === 0 ? (
+        <p style={{ fontFamily: FM, fontSize: '0.78rem', color: 'rgba(100,116,139,0.55)', padding: '1rem' }}>
+          Sin gastos en el período.
+        </p>
+      ) : porMoneda.map(({ moneda, items }) => {
+        const total = items.reduce((a, g) => a + parseFloat(g.total), 0)
+        const fmt = (v: string | number) => fmtMonto(v, moneda as Moneda)
+        return (
+          <div key={moneda}>
+            {/* Encabezado: la moneda y su total. Las dos nunca se suman. */}
+            <div style={{
+              display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+              padding: '0.6rem 1rem', background: 'var(--ov-0025)',
+              borderBottom: '1px solid var(--bd-006)',
+            }}>
+              <span style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.8)' }}>
+                Total {moneda}
+              </span>
+              <span style={{ fontFamily: FN, fontSize: '1.15rem', letterSpacing: '0.02em', color: 'var(--danger)', fontVariantNumeric: 'tabular-nums' }}>
+                {fmt(total)}
+              </span>
+            </div>
+            {items.map((g) => (
+              <div key={`${moneda}-${g.concepto}`} style={{
+                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                gap: '0.75rem', padding: '0.5rem 1rem', borderBottom: '1px solid var(--ov-004)',
+              }}>
+                <span style={{ fontFamily: FM, fontSize: '0.8rem', color: 'var(--text-1)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {g.concepto}
+                </span>
+                <span style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-2)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                  {fmt(g.total)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -270,15 +325,28 @@ export default function Reportes() {
             ))}
           </div>
 
-          {/* Pasivos snapshot */}
-          <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Pasivos pendientes (snapshot actual)</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: 'Deudas ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars), sub: 'cuentas a pagar' },
-              { label: 'Deudas USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd), sub: 'cuentas a pagar' },
-            ].map(({ label, value, sub }) => (
-              <SnapshotCard key={label} label={label} value={value} sub={sub} tono="sale" />
-            ))}
+          {/* Lo que se debe y en qué se fue la plata, uno al lado del otro.
+              OJO: no se leen igual. El de la izquierda es un saldo de hoy (no
+              mira el filtro de fecha) y el de la derecha son los gastos DEL
+              PERÍODO. Cada subtítulo lo aclara, porque pegados invitan a
+              leerlos como si fueran la misma clase de número. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '1.25rem' }}>
+            <div>
+              <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Pasivos pendientes (snapshot actual)</p>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Deudas ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars), sub: 'cuentas a pagar' },
+                  { label: 'Deudas USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd), sub: 'cuentas a pagar' },
+                ].map(({ label, value, sub }) => (
+                  <SnapshotCard key={label} label={label} value={value} sub={sub} tono="sale" />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Gastos del período, por concepto</p>
+              <GastosBloque gastos={data.gastos_periodo} />
+            </div>
           </div>
         </>
       )}

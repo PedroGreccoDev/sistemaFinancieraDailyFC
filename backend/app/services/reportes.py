@@ -32,6 +32,7 @@ from app.schemas.reportes import (
     CajaMoneda,
     CajaPorMedio,
     CuotaCobradaHistorialItem,
+    GastoPorConcepto,
     MovimientoUnificadoRead,
     PlataEnLaCalle,
     ReporteCajaRead,
@@ -199,6 +200,7 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
         ganancia_divisas=ganancia_divisas,
         saldo_pasivos=_get_saldo_pasivos(db),
         plata_en_calle=_get_plata_en_calle(db),
+        gastos_periodo=_get_gastos_periodo(db, desde, hasta),
     )
 
 
@@ -428,6 +430,59 @@ def _falta_cobrar(prestamo: Prestamo) -> Decimal:
     if prestamo.tipo_prestamo == PrestamoTipo.INTERES_FIJO:
         saldo += prestamo.capital_pendiente or Decimal("0.00")
     return _money(saldo)
+
+
+def agrupar_gastos_por_concepto(
+    lineas: list[tuple[str | None, Moneda, Decimal]],
+) -> list[GastoPorConcepto]:
+    """Junta los gastos del período por concepto, de mayor a menor. ARS primero.
+
+    Recibe `(detalle, moneda, monto)` de las líneas `GASTO` del libro. **El concepto
+    es texto libre**, así que agrupar es siempre una aproximación: se normaliza
+    espacios y mayúsculas —"Nafta" y "nafta " son la misma cosa— pero "Nafta" y
+    "Nafta YPF" siguen siendo dos. No hay forma de saber que no lo son, y adivinarlo
+    sería peor: juntaría gastos distintos sin que nadie lo note.
+
+    Se muestra la **primera grafía** que aparece, no la normalizada, para que en
+    pantalla se lea como lo escribió el operador y no en minúsculas.
+
+    Las monedas nunca se suman entre sí. Pura (sin BD): testeable en el estilo de
+    `tests/`."""
+    # clave (moneda, concepto normalizado) → [grafía a mostrar, total]
+    acumulado: dict[tuple[Moneda, str], list] = {}
+    for detalle, moneda, monto in lineas:
+        crudo = (detalle or "").strip() or "Sin concepto"
+        clave = (moneda, " ".join(crudo.lower().split()))
+        if clave not in acumulado:
+            acumulado[clave] = [crudo, Decimal("0.00")]
+        acumulado[clave][1] += monto
+
+    orden = {Moneda.ARS: 0, Moneda.USD: 1}
+    return [
+        GastoPorConcepto(concepto=grafia, moneda=moneda.value, total=_money(total))
+        for (moneda, _), (grafia, total) in sorted(
+            acumulado.items(),
+            key=lambda kv: (orden.get(kv[0][0], 9), -kv[1][1]),
+        )
+    ]
+
+
+def _get_gastos_periodo(db: Session, desde: date, hasta: date) -> list[GastoPorConcepto]:
+    """Los gastos del período, agrupados por concepto.
+
+    Lee las líneas `GASTO` del libro —la misma fuente que los egresos de la caja de
+    arriba— y no `gastos_operativos`: con dos fuentes, el día que una operación
+    escriba en una y no en la otra el recuadro y el total dejarían de cerrar, sin
+    que nada falle. Un gasto anulado no tiene línea, así que queda afuera solo.
+    """
+    filas = db.execute(
+        select(MovimientoCaja.detalle, MovimientoCaja.moneda, MovimientoCaja.monto).where(
+            MovimientoCaja.categoria == CajaCategoria.GASTO,
+            MovimientoCaja.fecha >= desde,
+            MovimientoCaja.fecha <= hasta,
+        )
+    ).all()
+    return agrupar_gastos_por_concepto([(d, m, monto) for d, m, monto in filas])
 
 
 def _get_plata_en_calle(db: Session) -> PlataEnLaCalle:

@@ -1352,6 +1352,23 @@ el panel; sí la sesión de carga): es la vista por cuota, con su vencimiento.
   - **Devenga antes de sumar**, como toda lectura (§3.b): sin eso, el día que arranca un
     ciclo el reporte mostraría un interés menos que Créditos. La sesión del request no
     commitea, así que las cuotas nuevas se descartan y se rehacen a la próxima.
+- **`gastos_periodo` — en qué se fue la plata** _(agregado 2026-09-14, a pedido del dueño)_.
+  Al lado de los pasivos, el desglose de los gastos **por concepto**, de mayor a menor.
+  - **Este SÍ sigue el filtro de fecha**, al revés que los dos snapshots que tiene al lado.
+    Están pegados y se leen parecido, así que cada subtítulo lo dice: dos recuadros vecinos
+    donde uno filtra y el otro no es la forma más fácil de leer mal un número.
+  - **Sale del libro de caja (líneas `GASTO`), no de `gastos_operativos`.** Con dos fuentes,
+    el día que una operación escriba en una y no en la otra el recuadro y los egresos de la
+    caja de arriba dejarían de cerrar sin que nada falle. De yapa, un gasto anulado no tiene
+    línea y queda afuera solo.
+  - **El concepto es texto libre, así que agrupar es una aproximación.**
+    `agrupar_gastos_por_concepto` (pura) normaliza espacios y mayúsculas —"Nafta", "nafta" y
+    " NAFTA " son la misma cosa— y **muestra la primera grafía**, no la normalizada. "Nafta"
+    y "Nafta YPF" siguen siendo dos: no hay forma de saber que no lo son, y adivinarlo
+    juntaría gastos distintos sin que nadie lo note. Un gasto sin concepto cae en "Sin
+    concepto" en vez de desaparecer —perderlo descuadraría el recuadro contra los egresos—.
+  - Las monedas no se suman y **los pesos van primero**: ordenadas juntas, 200 USD quedarían
+    arriba de $150.000.
 - **Neto ≠ saldo.** El `neto` es el **flujo** del período; el **saldo** es la plata que hay.
   Cada moneda expone `saldo_apertura` (todo lo anterior al período, vía `_saldo_hasta`, más el
   `SALDO_INICIAL` que caiga dentro) y `saldo_cierre = apertura + ingresos − egresos`. Un día de

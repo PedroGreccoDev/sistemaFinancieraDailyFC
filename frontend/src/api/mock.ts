@@ -214,6 +214,13 @@ const reporte: ReporteCaja = {
     creditos_ars: '1850000', creditos_usd: '2400',
     deudores_ars: '980000',  deudores_usd: '600',
   },
+  gastos_periodo: [
+    { concepto: 'Insumos oficina', moneda: 'ARS', total: '62000' },
+    { concepto: 'Nafta',           moneda: 'ARS', total: '50000' },
+    { concepto: 'Comida',          moneda: 'ARS', total: '22000' },
+    { concepto: 'Parking',         moneda: 'ARS', total: '8000'  },
+    { concepto: 'Envío',           moneda: 'USD', total: '120'   },
+  ],
 }
 
 // ── Router ────────────────────────────────────────────────────────────

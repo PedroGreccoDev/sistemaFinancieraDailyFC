@@ -13,6 +13,20 @@ class SaldoPasivos(BaseModel):
     pendiente_usd: Decimal
 
 
+class GastoPorConcepto(BaseModel):
+    """Cuánto se gastó en una cosa dentro del período consultado.
+
+    A diferencia de los dos snapshots, esto **sí se filtra por período**: es plata
+    que salió en estos días, no un saldo. Sale del libro de caja —las líneas
+    `GASTO`— y no de la tabla `gastos_operativos`, para que el total no pueda
+    diferir de los egresos que muestra la caja de arriba: es la misma fuente.
+    """
+
+    concepto: str
+    moneda: str
+    total: Decimal
+
+
 class PlataEnLaCalle(BaseModel):
     """Lo que el negocio tiene AFUERA al momento del arqueo (no filtrado por período).
 
@@ -82,6 +96,8 @@ class ReporteCajaRead(BaseModel):
     # Lo que está afuera, el espejo del anterior. Snapshot al día de hoy, sin
     # filtro de período: no es plata que se movió, es plata que falta volver.
     plata_en_calle: PlataEnLaCalle
+    # En qué se fue la plata en el período. Ordenado de mayor a menor, ARS primero.
+    gastos_periodo: list[GastoPorConcepto]
 
 
 class MovimientoUnificadoRead(BaseModel):
