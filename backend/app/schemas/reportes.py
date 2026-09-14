@@ -13,6 +13,25 @@ class SaldoPasivos(BaseModel):
     pendiente_usd: Decimal
 
 
+class PlataEnLaCalle(BaseModel):
+    """Lo que el negocio tiene AFUERA al momento del arqueo (no filtrado por período).
+
+    El espejo de `SaldoPasivos`: aquello es lo que el negocio debe, esto es lo que
+    le deben. Van **separados por origen** porque se cobran en pantallas distintas
+    (§2.c): `creditos` son los préstamos, que se cobran en Créditos, y `deudores`
+    los fiados y las deudas libres, que se cobran en Deudores.
+
+    En los dos casos el número es **lo que falta cobrar**, no lo que se entregó: un
+    préstamo cobrado a medias ya no está entero en la calle. Y las monedas nunca se
+    suman entre sí.
+    """
+
+    creditos_ars: Decimal
+    creditos_usd: Decimal
+    deudores_ars: Decimal
+    deudores_usd: Decimal
+
+
 class CajaPorMedio(BaseModel):
     """Una de las dos cajas paralelas de una moneda (§Caja paralela).
 
@@ -60,6 +79,9 @@ class ReporteCajaRead(BaseModel):
     # Ganancia FIFO realizada por venta de divisas en el período (dato, no movimiento).
     ganancia_divisas: Decimal
     saldo_pasivos: SaldoPasivos
+    # Lo que está afuera, el espejo del anterior. Snapshot al día de hoy, sin
+    # filtro de período: no es plata que se movió, es plata que falta volver.
+    plata_en_calle: PlataEnLaCalle
 
 
 class MovimientoUnificadoRead(BaseModel):

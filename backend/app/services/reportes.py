@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import case, func, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.fechas import fecha_local
 from app.db.models import (
@@ -15,21 +15,30 @@ from app.db.models import (
     ConfiguracionApertura,
     Cuota,
     CuotaEstado,
+    DeudaSimple,
+    DeudaSimpleEstado,
+    Fiado,
+    FiadoEstado,
     MedioPago,
     Moneda,
     MovimientoCaja,
     Pasivo,
     PasivoEstado,
     Prestamo,
+    PrestamoEstado,
+    PrestamoTipo,
 )
 from app.schemas.reportes import (
     CajaMoneda,
     CajaPorMedio,
     CuotaCobradaHistorialItem,
     MovimientoUnificadoRead,
+    PlataEnLaCalle,
     ReporteCajaRead,
     SaldoPasivos,
 )
+from app.services import deudores as svc_deudores
+from app.services import prestamos as svc_prestamos
 from app.services.cheques import describir
 from app.services.exceptions import ValidationError
 
@@ -189,6 +198,7 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
         usd=_caja(Moneda.USD),
         ganancia_divisas=ganancia_divisas,
         saldo_pasivos=_get_saldo_pasivos(db),
+        plata_en_calle=_get_plata_en_calle(db),
     )
 
 
@@ -397,4 +407,81 @@ def _get_saldo_pasivos(db: Session) -> SaldoPasivos:
     return SaldoPasivos(
         pendiente_ars=_sum(Moneda.ARS),
         pendiente_usd=_sum(Moneda.USD),
+    )
+
+
+def _falta_cobrar(prestamo: Prestamo) -> Decimal:
+    """Lo que falta cobrar de un préstamo: **lo que está en la calle**.
+
+    Reusa `svc_deudores.saldo_prestamo` para la parte de las cuotas —si divergieran,
+    Reportes y la cuenta del cliente mostrarían dos números para la misma deuda— y
+    le **suma el capital pendiente** del interés fijo, que es la diferencia entre
+    las dos preguntas:
+
+    - `saldo_prestamo` contesta *contra qué imputa un pago a cuenta*, y ahí el
+      capital no entra: se devuelve con un acto explícito del operador (§Interés fijo).
+    - Acá la pregunta es *cuánta plata está afuera*, y el capital de un interés fijo
+      es exactamente eso — es el grueso, además. Dejarlo afuera mostraría $120.000
+      en la calle por un préstamo de un millón que sigue entero prestado.
+    """
+    saldo = svc_deudores.saldo_prestamo(prestamo)
+    if prestamo.tipo_prestamo == PrestamoTipo.INTERES_FIJO:
+        saldo += prestamo.capital_pendiente or Decimal("0.00")
+    return _money(saldo)
+
+
+def _get_plata_en_calle(db: Session) -> PlataEnLaCalle:
+    """Snapshot de lo que el negocio tiene afuera, hoy. El espejo de los pasivos.
+
+    No se filtra por período **a propósito**, igual que `saldo_pasivos`: no es plata
+    que se movió en estos días, es plata que todavía no volvió. Un préstamo otorgado
+    hace tres meses sigue en la calle aunque el reporte sea de hoy.
+    """
+    prestamos = list(
+        db.scalars(
+            select(Prestamo)
+            .where(
+                Prestamo.estado != PrestamoEstado.CANCELADO,
+                Prestamo.anulado_at.is_(None),
+            )
+            .options(selectinload(Prestamo.cuotas_detalle))
+        )
+    )
+    # Pone al día los períodos de interés fijo **sin commitear**, igual que toda
+    # otra lectura (§Interés fijo): la sesión del request no commitea, así que las
+    # cuotas nuevas se descartan y se rehacen igual la próxima vez. Sin esto, el
+    # día que arranca un ciclo el reporte mostraría un interés menos que Créditos.
+    for p in prestamos:
+        svc_prestamos.devengar_periodos(db, p)
+
+    creditos: dict[Moneda, Decimal] = {Moneda.ARS: Decimal("0.00"), Moneda.USD: Decimal("0.00")}
+    for p in prestamos:
+        creditos[p.moneda] += _falta_cobrar(p)
+
+    # Los fiados son SIEMPRE en pesos (§2): un cheque es un instrumento en pesos.
+    fiados_ars = _money(
+        db.scalar(
+            select(func.coalesce(func.sum(Fiado.saldo_pendiente), 0)).where(
+                Fiado.estado == FiadoEstado.ABIERTO,
+                Fiado.anulado_at.is_(None),
+            )
+        )
+    )
+
+    def _deudas(moneda: Moneda) -> Decimal:
+        return _money(
+            db.scalar(
+                select(func.coalesce(func.sum(DeudaSimple.saldo_pendiente), 0)).where(
+                    DeudaSimple.estado == DeudaSimpleEstado.ABIERTA,
+                    DeudaSimple.moneda == moneda,
+                    DeudaSimple.anulado_at.is_(None),
+                )
+            )
+        )
+
+    return PlataEnLaCalle(
+        creditos_ars=_money(creditos[Moneda.ARS]),
+        creditos_usd=_money(creditos[Moneda.USD]),
+        deudores_ars=_money(fiados_ars + _deudas(Moneda.ARS)),
+        deudores_usd=_deudas(Moneda.USD),
     )

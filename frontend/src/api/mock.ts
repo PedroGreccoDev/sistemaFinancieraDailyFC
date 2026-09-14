@@ -210,6 +210,10 @@ const reporte: ReporteCaja = {
   },
   ganancia_divisas: '65000',
   saldo_pasivos: { pendiente_ars: '320000', pendiente_usd: '1500' },
+  plata_en_calle: {
+    creditos_ars: '1850000', creditos_usd: '2400',
+    deudores_ars: '980000',  deudores_usd: '600',
+  },
 }
 
 // ── Router ────────────────────────────────────────────────────────────

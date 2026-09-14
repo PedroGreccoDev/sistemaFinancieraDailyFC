@@ -110,6 +110,21 @@ export interface SaldoPasivos {
 }
 
 /**
+ * Lo que el negocio tiene AFUERA: el espejo de `SaldoPasivos`.
+ *
+ * Separado por origen porque se cobra en pantallas distintas: `creditos` son los
+ * préstamos (sección Créditos) y `deudores` los fiados y las deudas libres
+ * (sección Deudores). En los dos casos es **lo que falta cobrar**, no lo que se
+ * entregó, y las monedas nunca se suman entre sí.
+ */
+export interface PlataEnLaCalle {
+  creditos_ars: string
+  creditos_usd: string
+  deudores_ars: string
+  deudores_usd: string
+}
+
+/**
  * Una de las dos cajas paralelas de una moneda.
  *
  * El efectivo se cuadra contando billetes y la transferencia mirando el banco:
@@ -147,6 +162,7 @@ export interface ReporteCaja {
   usd: CajaMoneda
   ganancia_divisas: string
   saldo_pasivos: SaldoPasivos
+  plata_en_calle: PlataEnLaCalle
 }
 
 // Feed unificado de Movimientos: TODA operación (libro de caja + ingresos de

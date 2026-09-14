@@ -46,6 +46,32 @@ function MetricCard({ label, value, color = 'default', accentColor, prefix }: {
   )
 }
 
+/** Tarjeta de un snapshot: un saldo de hoy, no plata que se movió en el período.
+ *
+ *  La usan los dos bloques del pie —lo que está afuera y lo que se debe— con el
+ *  color como única diferencia: verde lo que tiene que volver, rojo lo que hay
+ *  que pagar. Cuando eran dos bloques de markup calcado, el segundo se escribía
+ *  copiando el primero. */
+function SnapshotCard({ label, value, sub, tono }: {
+  label: string
+  value: string
+  sub: string
+  tono: 'entra' | 'sale'
+}) {
+  return (
+    <div className="lift" style={{ ...CARD, padding: '0.8rem 1rem', minWidth: 0 }}>
+      <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
+      <p style={{
+        fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)',
+        color: tono === 'entra' ? 'var(--success)' : 'var(--danger)',
+        letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem',
+        overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums',
+      }}>{value}</p>
+      <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
+    </div>
+  )
+}
+
 function CajaBloque({ caja, simbolo }: { caja: CajaMoneda; simbolo: 'ARS' | 'USD' }) {
   const fmt = (v: string | number) => fmtMonto(v, simbolo as Moneda)
   const neto = parseFloat(caja.neto)
@@ -227,18 +253,31 @@ export default function Reportes() {
             <CajaBloque caja={data.usd} simbolo="USD" />
           </div>
 
+          {/* Lo que está afuera. Snapshot de hoy, no del período: un préstamo
+              otorgado hace tres meses sigue en la calle aunque el reporte sea de
+              hoy. Va ANTES de los pasivos —primero lo que tiene que volver,
+              después lo que hay que pagar— y separado por dónde se cobra cada
+              uno: los créditos en Créditos, el resto en Deudores. */}
+          <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Plata en la calle (snapshot actual)</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" style={{ marginBottom: '1.5rem' }}>
+            {[
+              { label: 'Créditos ARS', value: fmtARS(data.plata_en_calle.creditos_ars), sub: 'préstamos por cobrar' },
+              { label: 'Créditos USD', value: fmtUSD(data.plata_en_calle.creditos_usd), sub: 'préstamos por cobrar' },
+              { label: 'Deudores ARS', value: fmtARS(data.plata_en_calle.deudores_ars), sub: 'fiados + otras deudas' },
+              { label: 'Deudores USD', value: fmtUSD(data.plata_en_calle.deudores_usd), sub: 'otras deudas' },
+            ].map(({ label, value, sub }) => (
+              <SnapshotCard key={label} label={label} value={value} sub={sub} tono="entra" />
+            ))}
+          </div>
+
           {/* Pasivos snapshot */}
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Pasivos pendientes (snapshot actual)</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:max-w-xl">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: 'Deudas pendientes ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars), sub: 'cuentas a pagar' },
-              { label: 'Deudas pendientes USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd), sub: 'cuentas a pagar' },
+              { label: 'Deudas ARS', value: fmtARS(data.saldo_pasivos.pendiente_ars), sub: 'cuentas a pagar' },
+              { label: 'Deudas USD', value: fmtUSD(data.saldo_pasivos.pendiente_usd), sub: 'cuentas a pagar' },
             ].map(({ label, value, sub }) => (
-              <div key={label} className="lift" style={{ ...CARD, padding: '0.8rem 1rem', minWidth: 0 }}>
-                <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
-                <p style={{ fontFamily: FN, fontSize: 'clamp(1.15rem, 6vw, 1.75rem)', color: 'var(--danger)', letterSpacing: '0.02em', lineHeight: 1.05, marginBottom: '0.2rem', overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{value}</p>
-                <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.5)' }}>{sub}</p>
-              </div>
+              <SnapshotCard key={label} label={label} value={value} sub={sub} tono="sale" />
             ))}
           </div>
         </>

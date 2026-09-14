@@ -1330,6 +1330,28 @@ el panel; sí la sesión de carga): es la vista por cuota, con su vencimiento.
   deudas simples (§2.b).
 - **Cobros parciales cuentan:** si de un fiado de $100.000 entran $100, esos $100 son ingreso
   del día con su detalle (fiado, cliente, fecha).
+- **Los dos snapshots del pie: lo que está afuera y lo que se debe** _(el primero agregado
+  2026-09-14, a pedido del dueño)_. `plata_en_calle` es el espejo de `saldo_pasivos`, y va
+  primero: **primero lo que tiene que volver, después lo que hay que pagar**. Ninguno de los
+  dos se filtra por período —no son plata que se movió, son saldos de hoy— y las monedas
+  nunca se suman entre sí.
+  - **Separado por dónde se cobra cada uno** (§2.c): `creditos_*` son los préstamos, que se
+    cobran en Créditos, y `deudores_*` los fiados y las deudas libres, que se cobran en
+    Deudores. Es la misma línea que parte las dos bolsas del cobro; juntarlos acá mostraría
+    un total que no se puede imputar de una sola vez.
+  - **El número es LO QUE FALTA COBRAR, no lo otorgado** (decisión del dueño): un préstamo
+    cobrado a medias ya no está entero en la calle. Los fiados son siempre ARS, así que
+    `deudores_usd` son solo deudas libres.
+  - **La trampa está en el interés fijo.** `_falta_cobrar` reusa
+    `svc_deudores.saldo_prestamo` —si divergieran, Reportes y la cuenta del cliente
+    mostrarían dos números para la misma deuda— pero le **suma `capital_pendiente`**, que
+    aquella deja afuera a propósito (§3.b: un pago a cuenta imputa interés, no capital). Son
+    dos preguntas distintas: allá *contra qué imputa un pago*, acá *cuánta plata está
+    afuera*. Sin sumarlo, un préstamo de un millón entero prestado mostraría los $100.000
+    del interés y el reporte diría que casi no hay nada en la calle.
+  - **Devenga antes de sumar**, como toda lectura (§3.b): sin eso, el día que arranca un
+    ciclo el reporte mostraría un interés menos que Créditos. La sesión del request no
+    commitea, así que las cuotas nuevas se descartan y se rehacen a la próxima.
 - **Neto ≠ saldo.** El `neto` es el **flujo** del período; el **saldo** es la plata que hay.
   Cada moneda expone `saldo_apertura` (todo lo anterior al período, vía `_saldo_hasta`, más el
   `SALDO_INICIAL` que caiga dentro) y `saldo_cierre = apertura + ingresos − egresos`. Un día de
