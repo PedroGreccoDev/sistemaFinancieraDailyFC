@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { CuotaCobradaHistorialItem, MovimientoUnificado, ReporteCaja } from '../types'
+import type { MovimientoUnificado, ReporteCaja } from '../types'
 
 export const getMovimientosUnificados = (
   desde: string,
@@ -9,6 +9,3 @@ export const getMovimientosUnificados = (
 
 export const getReporteCaja = (desde: string, hasta: string): Promise<ReporteCaja> =>
   apiFetch<ReporteCaja>(`/reportes/caja?desde=${desde}&hasta=${hasta}`)
-
-export const getCobrosHistorial = (desde: string, hasta: string): Promise<CuotaCobradaHistorialItem[]> =>
-  apiFetch<CuotaCobradaHistorialItem[]>(`/reportes/cobros-cuotas?desde=${desde}&hasta=${hasta}`)

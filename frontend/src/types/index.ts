@@ -149,18 +149,6 @@ export interface ReporteCaja {
   saldo_pasivos: SaldoPasivos
 }
 
-export interface CuotaCobradaHistorialItem {
-  cuota_id: string
-  prestamo_id: string
-  cliente_id: string
-  cliente_nombre: string
-  numero_cuota: number
-  monto: string
-  moneda: string
-  fecha_cobro: string
-  fecha_vencimiento: string
-}
-
 // Feed unificado de Movimientos: TODA operación (libro de caja + ingresos de
 // cheques a cartera), venga del bot o del panel. Lo sirve GET /reportes/movimientos.
 export type MovimientoGrupo =

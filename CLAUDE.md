@@ -1315,6 +1315,11 @@ totales, el neto y los saldos por caja, contra los que se cuentan los billetes y
 banco — nada más. **El detalle movimiento por movimiento se sacó de acá**: ya vive entero en la
 pantalla de **Movimientos**, con sus filtros y sus botones, y tenerlo dos veces solo daba dos
 lugares donde buscar lo mismo. Si al cerrar no cuadra, el detalle se mira en Movimientos.
+Por lo mismo salió el **historial de cobros de cuotas**: cada cuota cobrada ya asienta su
+renglón en el libro, así que el feed la lista sola —grupo `COBROS`, "Cuota #3 - Juan Pérez"—
+y encima más completa, porque incluye los pagos parciales que ese historial escondía hasta
+que la cuota se completaba. `GET /reportes/cobros-cuotas` **sigue existiendo** (no lo consume
+el panel; sí la sesión de carga): es la vista por cuota, con su vencimiento.
 
 - **Ingresos (entra plata):** cuotas de préstamo cobradas (al cobrar, incluidos cobros parciales),
   cobros de fiado en efectivo (incluidos parciales), cobros de deudas simples (§2.b, incluidos
