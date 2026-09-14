@@ -199,13 +199,6 @@ const reporte: ReporteCaja = {
     neto: '267800',
     saldo_apertura: '1500000',
     saldo_cierre: '1767800',
-    lineas: [
-      { fecha: d(-2), categoria: 'VENTA_USD',    tipo: 'INGRESO', monto: '725000', detalle: 'Venta de 500 USD @ $1450', ganancia: '25000', medio_pago: null, cotizacion: null },
-      { fecha: d(-3), categoria: 'COBRO_CUOTA',  tipo: 'INGRESO', monto: '50000',  detalle: 'Cuota #1 - Juan Pérez',     ganancia: null, medio_pago: null, cotizacion: null },
-      { fecha: d(-4), categoria: 'COMPRA_USD',   tipo: 'EGRESO',  monto: '420000', detalle: 'Compra de 300 USD @ $1400', ganancia: null, medio_pago: null, cotizacion: null },
-      { fecha: d(-5), categoria: 'GASTO',        tipo: 'EGRESO',  monto: '50000',  detalle: 'Nafta',                     ganancia: null, medio_pago: null, cotizacion: null },
-      { fecha: d(-5), categoria: 'PAGO_PASIVO',  tipo: 'EGRESO',  monto: '120000', detalle: 'Pago deuda a Proveedor X (100.00 USD @ 1200)', ganancia: null, medio_pago: 'EFECTIVO', cotizacion: '1200.0000' },
-    ],
   },
   usd: {
     moneda: 'USD',
@@ -214,11 +207,6 @@ const reporte: ReporteCaja = {
     neto: '-1000',
     saldo_apertura: '2500',
     saldo_cierre: '1500',
-    lineas: [
-      { fecha: d(-2), categoria: 'VENTA_USD',  tipo: 'EGRESO',  monto: '500', detalle: 'Venta de 500 USD @ $1450', ganancia: null, medio_pago: null, cotizacion: null },
-      { fecha: d(-4), categoria: 'COMPRA_USD', tipo: 'INGRESO', monto: '300', detalle: 'Compra de 300 USD @ $1400', ganancia: null, medio_pago: null, cotizacion: null },
-      { fecha: d(-6), categoria: 'VENTA_USD',  tipo: 'EGRESO',  monto: '800', detalle: 'Venta de 800 USD @ $1460', ganancia: null, medio_pago: null, cotizacion: null },
-    ],
   },
   ganancia_divisas: '65000',
   saldo_pasivos: { pendiente_ars: '320000', pendiente_usd: '1500' },

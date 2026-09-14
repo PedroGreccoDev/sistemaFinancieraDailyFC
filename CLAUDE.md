@@ -1308,8 +1308,13 @@ pagando una de esas: está pagando lo que le debe**.
 
 **Modelo objetivo (caja diaria, definido 2026-06-25):** el reporte es una **caja de flujo real
 de ingresos y egresos efectivos, separada por moneda (ARS y USD)** — NO un P&L devengado. Para
-cada moneda: `neto = Σ ingresos − Σ egresos` del período. Cada línea va detallada (origen,
-cliente, operación, fecha).
+cada moneda: `neto = Σ ingresos − Σ egresos` del período.
+
+**La pantalla sirve para UNA cosa: cerrar el día** _(decisión del dueño, 2026-09-14)_. Son los
+totales, el neto y los saldos por caja, contra los que se cuentan los billetes y se mira el
+banco — nada más. **El detalle movimiento por movimiento se sacó de acá**: ya vive entero en la
+pantalla de **Movimientos**, con sus filtros y sus botones, y tenerlo dos veces solo daba dos
+lugares donde buscar lo mismo. Si al cerrar no cuadra, el detalle se mira en Movimientos.
 
 - **Ingresos (entra plata):** cuotas de préstamo cobradas (al cobrar, incluidos cobros parciales),
   cobros de fiado en efectivo (incluidos parciales), cobros de deudas simples (§2.b, incluidos
@@ -1350,8 +1355,9 @@ cliente, operación, fecha).
 
 > ✅ **Estado de implementación:** el modelo de caja diaria es el **vigente**. El endpoint es
 > `GET /api/v1/reportes/caja?desde=&hasta=` (`svc_reportes.get_reporte_caja`), que lee el libro
-> `movimientos_caja` filtrando por `fecha` y arma **una caja por moneda** (ARS y USD) con sus
-> líneas detalladas, `ingresos_total`, `egresos_total` y `neto`. Expone además `ganancia_divisas`
+> `movimientos_caja` filtrando por `fecha` y arma **una caja por moneda** (ARS y USD) con
+> `ingresos_total`, `egresos_total`, `neto` y sus saldos (el detalle línea por línea salió del
+> reporte el 2026-09-14: está en `/reportes/movimientos`). Expone además `ganancia_divisas`
 > (suma de la ganancia FIFO de las ventas de USD — ver §4) y `saldo_pasivos` (snapshot de
 > `PENDIENTE` por moneda, sin filtro de período). Ya **no existe** el endpoint devengado
 > `…/ganancias`. El frontend consume `/reportes/caja` (`frontend/src/api/reportes.ts`).

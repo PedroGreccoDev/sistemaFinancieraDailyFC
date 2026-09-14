@@ -23,7 +23,6 @@ from app.db.models import (
     Prestamo,
 )
 from app.schemas.reportes import (
-    CajaLinea,
     CajaMoneda,
     CajaPorMedio,
     CuotaCobradaHistorialItem,
@@ -91,7 +90,9 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
 
     Lee el libro `movimientos_caja` filtrando por `fecha` (día local ART, ya
     almacenado como Date — sin conversión de zona horaria) y arma una caja por
-    cada moneda con sus líneas detalladas, totales y neto.
+    cada moneda con sus totales, su neto y sus saldos. **El detalle movimiento
+    por movimiento NO va acá**: vive en la pantalla de Movimientos
+    (`get_movimientos_unificados`), y duplicarlo era mostrar dos veces lo mismo.
     """
     if desde > hasta:
         raise ValidationError(
@@ -159,19 +160,6 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
             ),
             Decimal("0.00"),
         ) + sum((m.monto for m in inicial), Decimal("0.00"))
-        lineas = [
-            CajaLinea(
-                fecha=m.fecha,
-                categoria=m.categoria.value,
-                tipo=m.tipo.value,
-                monto=_money(m.monto),
-                detalle=m.detalle,
-                ganancia=None if m.ganancia is None else _money(m.ganancia),
-                medio_pago=m.medio_pago.value,
-                cotizacion=None if m.cotizacion is None else m.cotizacion,
-            )
-            for m in propios
-        ]
         return CajaMoneda(
             moneda=moneda.value,
             ingresos_total=_money(ingresos),
@@ -181,7 +169,6 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
             saldo_cierre=_money(apertura + ingresos - egresos),
             efectivo=_por_medio(moneda, MedioPago.EFECTIVO, propios, inicial),
             transferencia=_por_medio(moneda, MedioPago.TRANSFERENCIA, propios, inicial),
-            lineas=lineas,
         )
 
     ganancia_divisas = _money(

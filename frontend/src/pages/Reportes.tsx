@@ -10,26 +10,7 @@ type Preset = 'hoy' | 'semana' | 'mes' | 'custom'
 
 const FN = "'Bebas Neue', sans-serif"
 const FM = "'Manrope', sans-serif"
-const FJ_OR_MONO = "'JetBrains Mono', monospace"
 const CARD = { background: 'var(--surface-grad)', border: '1px solid var(--bd-006)', boxShadow: 'var(--shadow-card)', borderRadius: 'var(--r-lg)' }
-
-// Etiquetas legibles de cada categoría de movimiento de caja.
-const CATEGORIA_LABEL: Record<string, string> = {
-  COBRO_CUOTA: 'Cobro de cuota',
-  COBRO_FIADO: 'Cobro de fiado',
-  VENTA_CHEQUE: 'Venta de cheque',
-  COBRO_CHEQUE: 'Cobro de cheque',
-  COMPRA_CHEQUE: 'Compra de cheque',
-  COMPRA_USD: 'Compra de USD',
-  VENTA_USD: 'Venta de USD',
-  OTORGAMIENTO_PRESTAMO: 'Préstamo otorgado',
-  GASTO: 'Gasto',
-  INGRESO_PASIVO: 'Préstamo recibido',
-  PAGO_PASIVO: 'Pago de deuda',
-  VUELTO_PASIVO: 'Vuelto a cliente',
-  OTORGAMIENTO_DEUDA: 'Deuda otorgada',
-  COBRO_DEUDA: 'Cobro de deuda',
-}
 
 function getRangeForPreset(preset: Preset, customDesde: string | null, customHasta: string | null) {
   const hoy = todayISO()
@@ -126,7 +107,6 @@ function CajaBloque({ caja, simbolo }: { caja: CajaMoneda; simbolo: 'ARS' | 'USD
       {(caja.efectivo || caja.transferencia) && (
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(11rem, 1fr))',
-          borderBottom: '1px solid var(--bd-006)',
         }}>
           {([
             ['💵', 'En billetes', caja.efectivo],
@@ -150,56 +130,6 @@ function CajaBloque({ caja, simbolo }: { caja: CajaMoneda; simbolo: 'ARS' | 'USD
               </div>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* Detalle de líneas */}
-      {caja.lineas.length === 0 ? (
-        <p style={{ fontFamily: FM, fontSize: '0.78rem', color: 'rgba(100,116,139,0.55)', padding: '1.2rem 1.1rem' }}>
-          Sin movimientos en el período.
-        </p>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '320px' }}>
-            <tbody>
-              {caja.lineas.map((l, i) => {
-                const ingreso = l.tipo === 'INGRESO'
-                return (
-                  <tr key={i}
-                    onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
-                    onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
-                    <td style={{ fontFamily: FJ_OR_MONO, fontSize: '0.7rem', padding: '0.55rem 1.1rem', borderBottom: '1px solid var(--ov-004)', color: 'rgba(100,116,139,0.7)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                      {fmtDate(l.fecha)}
-                    </td>
-                    <td style={{ fontFamily: FM, fontSize: '0.8rem', padding: '0.55rem 1.1rem', borderBottom: '1px solid var(--ov-004)', color: 'var(--text-1)' }}>
-                      <span style={{ fontWeight: 600 }}>{CATEGORIA_LABEL[l.categoria] ?? l.categoria}</span>
-                      {l.medio_pago && (
-                        <span style={{ marginLeft: '0.4rem', fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.65)' }}>
-                          {l.medio_pago === 'TRANSFERENCIA' ? 'transferencia' : 'efectivo'}
-                          {l.cotizacion != null && ` · @ ${l.cotizacion}`}
-                        </span>
-                      )}
-                      {l.detalle && (
-                        <span style={{ display: 'block', fontSize: '0.68rem', color: 'rgba(100,116,139,0.55)' }}>{l.detalle}</span>
-                      )}
-                    </td>
-                    <td style={{
-                      fontFamily: FM, fontSize: '0.82rem', padding: '0.55rem 1.1rem', borderBottom: '1px solid var(--ov-004)',
-                      textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                      color: ingreso ? 'var(--success)' : 'var(--danger)',
-                    }}>
-                      {ingreso ? '+ ' : '− '}{fmt(l.monto)}
-                      {l.ganancia != null && (
-                        <span style={{ display: 'block', fontSize: '0.62rem', color: 'rgba(100,116,139,0.5)' }}>
-                          ganancia {fmtARS(l.ganancia)}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
         </div>
       )}
     </div>
@@ -297,7 +227,7 @@ export default function Reportes() {
           </div>
 
           {/* Cajas por moneda */}
-          <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Movimientos de caja</p>
+          <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Cierre por caja</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginBottom: '1.5rem' }}>
             <CajaBloque caja={data.ars} simbolo="ARS" />
             <CajaBloque caja={data.usd} simbolo="USD" />

@@ -109,17 +109,6 @@ export interface SaldoPasivos {
   pendiente_usd: string
 }
 
-export interface CajaLinea {
-  fecha: string
-  categoria: string
-  tipo: 'INGRESO' | 'EGRESO'
-  monto: string
-  detalle: string | null
-  ganancia: string | null
-  medio_pago: MedioPago | null
-  cotizacion: string | null
-}
-
 /**
  * Una de las dos cajas paralelas de una moneda.
  *
@@ -149,7 +138,6 @@ export interface CajaMoneda {
   /** Las dos cajas por separado. El cierre del día se hace contra estas. */
   efectivo?: CajaPorMedio | null
   transferencia?: CajaPorMedio | null
-  lineas: CajaLinea[]
 }
 
 export interface ReporteCaja {

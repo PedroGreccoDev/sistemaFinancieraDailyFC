@@ -13,18 +13,6 @@ class SaldoPasivos(BaseModel):
     pendiente_usd: Decimal
 
 
-class CajaLinea(BaseModel):
-    """Una línea de movimiento de caja (ingreso o egreso) dentro del período."""
-    fecha: date
-    categoria: str
-    tipo: str  # INGRESO | EGRESO
-    monto: Decimal
-    detalle: str | None
-    ganancia: Decimal | None  # solo VENTA_USD
-    medio_pago: str  # por cuál de las dos cajas pasó: EFECTIVO | TRANSFERENCIA
-    cotizacion: Decimal | None  # $/USD si el pago cruzó monedas
-
-
 class CajaPorMedio(BaseModel):
     """Una de las dos cajas paralelas de una moneda (§Caja paralela).
 
@@ -43,7 +31,7 @@ class CajaPorMedio(BaseModel):
 
 
 class CajaMoneda(BaseModel):
-    """Caja de una moneda: totales de ingresos/egresos, neto y detalle de líneas.
+    """Caja de una moneda: totales de ingresos/egresos, neto y saldos.
 
     `saldo_apertura` es la plata que había al abrir el período (todo lo anterior,
     incluido el efectivo de arranque del sistema) y `saldo_cierre` lo que queda al
@@ -61,7 +49,6 @@ class CajaMoneda(BaseModel):
     # —contando billetes de un lado y mirando el banco del otro—.
     efectivo: CajaPorMedio | None = None
     transferencia: CajaPorMedio | None = None
-    lineas: list[CajaLinea]
 
 
 class ReporteCajaRead(BaseModel):
