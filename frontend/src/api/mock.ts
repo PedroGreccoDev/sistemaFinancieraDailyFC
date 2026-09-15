@@ -22,7 +22,9 @@ const clientes: Cliente[] = [
   { id: 'cli-1', nombre: 'Carlos Méndez',             cuit: '20-30111222-3', telefono: '11-5555-0001', created_at: ts(-200), updated_at: ts(-200) },
   { id: 'cli-2', nombre: 'Lucía Fernández',           cuit: '27-28999888-4', telefono: '11-5555-0002', created_at: ts(-180), updated_at: ts(-180) },
   { id: 'cli-3', nombre: 'Distribuidora del Sur SRL', cuit: '30-71222333-9', telefono: '11-5555-0003', created_at: ts(-160), updated_at: ts(-160) },
-  { id: 'cli-4', nombre: 'Martín Gómez',              cuit: null,            telefono: '11-5555-0004', created_at: ts(-90),  updated_at: ts(-90) },
+  // Con ñ a propósito: es la letra que hay que poder buscar tipeada de las dos
+  // formas ("muñoz" y "munoz"), y sin un nombre así en la demo no se prueba nunca.
+  { id: 'cli-4', nombre: 'Martín Muñoz',              cuit: null,            telefono: '11-5555-0004', created_at: ts(-90),  updated_at: ts(-90) },
   { id: 'cli-5', nombre: 'Ana Torres',                cuit: '27-33444555-1', telefono: null,           created_at: ts(-60),  updated_at: ts(-60) },
 ]
 
