@@ -294,6 +294,11 @@ const CATEGORIA_LABEL: Record<string, string> = {
   PAGO_PASIVO:           'Pago de pasivo',
   VUELTO_PASIVO:         'Vuelto de pasivo',
   INGRESO_CHEQUE:        'Ingreso a cartera',
+  // Las tres salidas de cartera que no mueven plata: el papel cambia de manos y
+  // la caja no se entera (§Historial unificado).
+  FIADO_CHEQUE:          'Fiado a un cliente',
+  ENTREGA_CHEQUE:        'Entregado a un acreedor',
+  RECHAZO_CHEQUE:        'Cheque rechazado',
   COMPENSACION:          'Compensación',
   SALDO_INICIAL:         'Saldo inicial de caja',
   AJUSTE_CAJA:           'Ajuste de caja',

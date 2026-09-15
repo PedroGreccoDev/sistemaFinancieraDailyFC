@@ -14,6 +14,8 @@ from app.db.models import (
     ChequeTipo,
     Cliente,
     Compensacion,
+    Fiado,
+    FiadoEstado,
     MedioPago,
     Moneda,
     MovimientoCaja,
@@ -25,8 +27,10 @@ from app.services.exceptions import ValidationError
 class FakeDB:
     """Stand-in mínimo de Session: `scalars` devuelve los result-sets encolados.
 
-    El servicio consulta `movimientos_caja`, después `cheques` y después
-    `compensaciones`; este stub ignora el statement y va entregando las listas
+    El servicio consulta, en orden: `movimientos_caja`, `cheques` (los que
+    entraron a cartera), las `compensaciones`, los `fiados`, los cheques que
+    salieron de cartera sin plata y las líneas de venta que distinguen una venta
+    de una entrega. Este stub ignora el statement y va entregando las listas
     en ese orden. Una consulta para la que no se encoló nada devuelve vacío: el
     día que el feed sume otra fuente, los tests que no la miran no tienen por
     qué romperse.
@@ -298,3 +302,142 @@ def test_las_compensaciones_se_ordenan_con_el_resto_del_dia():
     comp = [_compensacion(fecha=date(2026, 7, 25))]
     items = service.get_movimientos_unificados(FakeDB(caja, [], comp), DESDE, HASTA)
     assert [i.fecha for i in items] == [date(2026, 7, 25), date(2026, 7, 20)]
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Las tres salidas de cartera que no mueven plata
+# ══════════════════════════════════════════════════════════════════════
+#
+# Un cheque sale de cartera de cinco maneras y solo la venta y el cobro dejan
+# plata: esas dos ya vienen del libro de caja. Las otras tres —fiarlo,
+# entregárselo a un acreedor y el rechazo— entraban a cartera a la vista de
+# todos y se iban en silencio.
+
+def _fiado(
+    *,
+    fecha: date = date(2026, 7, 14),
+    cliente: str = "Ana",
+    nro: str = "555",
+    monto: str = "100000",
+    saldo: str = "90000",
+) -> Fiado:
+    f = Fiado(
+        id=uuid.uuid4(),
+        cheque_id=uuid.uuid4(),
+        cliente_id=uuid.uuid4(),
+        monto_original=Decimal(monto),
+        porcentaje_venta=Decimal("10"),
+        saldo_pendiente=Decimal(saldo),
+        estado=FiadoEstado.ABIERTO,
+        fecha_fiado=fecha,
+    )
+    f.cheque = _cheque(created_at=datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc),
+                       estado=ChequeEstado.FIADO, nro=nro, monto=monto)
+    f.cliente = Cliente(id=f.cliente_id, nombre=cliente)
+    return f
+
+
+def _salido(
+    *,
+    estado: ChequeEstado,
+    evento: datetime = datetime(2026, 7, 16, 15, 0, tzinfo=timezone.utc),
+    nro: str = "888",
+    monto: str = "200000",
+    acreedor_destino: str | None = None,
+    porcentaje_venta: str | None = None,
+    origen: Cliente | None = None,
+) -> Cheque:
+    c = _cheque(created_at=datetime(2026, 7, 2, 12, 0, tzinfo=timezone.utc),
+                estado=estado, nro=nro, monto=monto, cliente=origen)
+    c.ultimo_evento_manual_at = evento
+    c.acreedor_destino = acreedor_destino
+    c.porcentaje_venta = None if porcentaje_venta is None else Decimal(porcentaje_venta)
+    return c
+
+
+def test_el_cheque_fiado_se_ve_con_el_cliente_y_lo_que_queda_debiendo():
+    items = service.get_movimientos_unificados(
+        FakeDB([], [], [], [_fiado()]), DESDE, HASTA
+    )
+    assert len(items) == 1
+    it = items[0]
+    assert it.categoria == "FIADO_CHEQUE"
+    assert it.grupo == "CHEQUES"
+    assert it.flujo == "NEUTRO"
+    # El monto es el nominal del papel, como en el ingreso a cartera; lo que el
+    # cliente debe es otro número y va en el texto.
+    assert it.monto == Decimal("100000.00")
+    assert it.descripcion == "Fiado cheque Nº 555 a Ana · queda debiendo $90,000.00"
+    assert it.referencia_tipo == "fiado"
+
+
+def test_el_cheque_entregado_a_un_acreedor_dice_a_quien_y_cuanta_deuda_cubre():
+    entregado = _salido(estado=ChequeEstado.VENDIDO, acreedor_destino="Pedro",
+                        porcentaje_venta="10", monto="200000")
+    items = service.get_movimientos_unificados(
+        FakeDB([], [], [], [], [entregado], []), DESDE, HASTA
+    )
+    assert len(items) == 1
+    it = items[0]
+    assert it.categoria == "ENTREGA_CHEQUE"
+    assert it.flujo == "NEUTRO"
+    assert it.medio_pago is None
+    assert it.descripcion == (
+        "Entregado cheque Nº 888 a Pedro a cuenta de una deuda · "
+        "cubre $180,000.00 de deuda"
+    )
+
+
+def test_una_venta_de_verdad_no_se_duplica_como_entrega():
+    """Las dos salidas dejan el cheque en VENDIDO: lo que las separa es la plata.
+
+    La venta ya viene por el libro de caja; si además saliera por acá, el mismo
+    cheque aparecería dos veces el mismo día.
+    """
+    vendido = _salido(estado=ChequeEstado.VENDIDO, porcentaje_venta="10")
+    caja = [
+        _caja(fecha=date(2026, 7, 16), categoria=CajaCategoria.VENTA_CHEQUE,
+              tipo=CajaTipo.INGRESO, monto="180000.00", detalle="Venta cheque Nº 888"),
+    ]
+    # La última cola son los ids con ingreso de venta: el del cheque vendido.
+    items = service.get_movimientos_unificados(
+        FakeDB(caja, [], [], [], [vendido], [vendido.id]), DESDE, HASTA
+    )
+    assert len(items) == 1
+    assert items[0].categoria == "VENTA_CHEQUE"
+
+
+def test_la_entrega_vieja_sin_nombre_se_muestra_igual():
+    # Antes de la columna `acreedor_destino` (0032) no se guardaba a quién se le
+    # entregó. Reconocerlas por la falta de ingreso en el libro —y no por la
+    # columna— es lo que hace que esas sigan apareciendo.
+    vieja = _salido(estado=ChequeEstado.VENDIDO, acreedor_destino=None,
+                    porcentaje_venta="10")
+    items = service.get_movimientos_unificados(
+        FakeDB([], [], [], [], [vieja], []), DESDE, HASTA
+    )
+    assert items[0].categoria == "ENTREGA_CHEQUE"
+    assert "a cuenta de una deuda" in items[0].descripcion
+    assert "None" not in items[0].descripcion
+
+
+def test_el_rechazo_se_ve_con_quien_trajo_el_cheque():
+    origen = Cliente(id=uuid.uuid4(), nombre="Juan")
+    rebotado = _salido(estado=ChequeEstado.RECHAZADO, nro="999", origen=origen)
+    items = service.get_movimientos_unificados(
+        FakeDB([], [], [], [], [rebotado], []), DESDE, HASTA
+    )
+    it = items[0]
+    assert it.categoria == "RECHAZO_CHEQUE"
+    assert it.flujo == "NEUTRO"
+    assert it.descripcion == "Rechazado cheque Nº 999 (venía de Juan)"
+
+
+def test_una_salida_fuera_del_rango_local_se_excluye():
+    # 2026-08-01 04:00 UTC = 2026-08-01 01:00 ART: cayó en agosto.
+    fuera = _salido(estado=ChequeEstado.RECHAZADO, nro="OUT",
+                    evento=datetime(2026, 8, 1, 4, 0, tzinfo=timezone.utc))
+    items = service.get_movimientos_unificados(
+        FakeDB([], [], [], [], [fuera], []), DESDE, HASTA
+    )
+    assert items == []

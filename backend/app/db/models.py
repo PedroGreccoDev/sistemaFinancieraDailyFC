@@ -392,6 +392,13 @@ class Cheque(AnulableMixin, Base):
         sa.ForeignKey("clientes.id", ondelete="SET NULL"),
         nullable=True, index=True,
     )
+    # A qué acreedor se le entregó el cheque para pagarle una deuda del negocio
+    # (§5). Texto y no FK por lo mismo que `pasivos.acreedor`: se le puede deber
+    # a alguien que no es cliente del sistema. Esa salida deja el cheque en
+    # VENDIDO igual que una venta, y sin esta columna no quedaba registro de
+    # quién se llevó el papel — que es todo lo que esa operación deja, porque no
+    # mueve un peso (migración 0032).
+    acreedor_destino: Mapped[str | None] = mapped_column(sa.String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()

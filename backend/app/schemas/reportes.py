@@ -108,6 +108,9 @@ class MovimientoUnificadoRead(BaseModel):
       totales), ventas/compras/cobros de cheque, compra/venta de USD,
       otorgamientos, gastos, pagos de pasivo y vueltos.
     - Los ingresos de cheques a cartera (evento sin movimiento de efectivo).
+    - Las salidas de cartera que tampoco mueven efectivo: el cheque fiado a un
+      cliente, el entregado a un acreedor para pagarle y el rechazado. (La
+      venta y el cobro sí mueven plata y vienen del libro de caja.)
     - Las compensaciones: el cliente le transfirió derecho a un acreedor del
       negocio y bajaron las dos deudas sin que la caja se moviera
       (§Compensación). La descripción dice quién le transfirió a quién.
@@ -120,13 +123,14 @@ class MovimientoUnificadoRead(BaseModel):
     fecha: date
     moneda: str  # ARS | USD
     grupo: str  # COBROS | CHEQUES | DIVISAS | GASTOS | OTORGAMIENTOS | PASIVOS | COMPENSACIONES
-    categoria: str  # CajaCategoria original, INGRESO_CHEQUE o COMPENSACION
+    categoria: str  # CajaCategoria original, o uno de los eventos sin efectivo:
+    # INGRESO_CHEQUE | FIADO_CHEQUE | ENTREGA_CHEQUE | RECHAZO_CHEQUE | COMPENSACION
     flujo: str  # INGRESO | EGRESO | NEUTRO
     descripcion: str
     monto: Decimal
     ganancia: Decimal | None  # solo VENTA_USD
-    # Null solo en los eventos sin efectivo (un cheque que entra a cartera, una
-    # compensación): no pasaron por ninguna de las dos cajas.
+    # Null solo en los eventos sin efectivo (un cheque que entra o sale de
+    # cartera sin plata, una compensación): no pasaron por ninguna de las dos cajas.
     medio_pago: str | None
     cotizacion: Decimal | None  # $/USD si el pago cruzó monedas
     referencia_tipo: str | None

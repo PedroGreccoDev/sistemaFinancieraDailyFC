@@ -302,6 +302,143 @@ def describir_compensacion(comp: Compensacion) -> str:
     return " · ".join(partes)
 
 
+def _salidas_de_cartera(
+    db: Session, desde: date, hasta: date
+) -> list[MovimientoUnificadoRead]:
+    """Las tres salidas de cartera que no mueven plata, como eventos NEUTROS.
+
+    - **Fiado:** el papel se le da a un cliente que queda debiendo (§2). Se lee
+      de `fiados` y no del cheque porque ahí vive la **fecha operativa** de la
+      entrega (`fecha_fiado`) y el cliente al que se le fio.
+    - **Entregado a un acreedor** para pagarle una deuda del negocio (§5). Deja
+      el cheque en `VENDIDO`, igual que una venta, y se reconoce por **no tener
+      ingreso de venta en el libro**: ese criterio también alcanza a las
+      entregas anteriores a la columna `acreedor_destino` (migración 0032), que
+      salen sin nombre pero salen. El borde conocido: un cheque *vendido* al
+      100% tampoco deja ingreso y se leería como entrega — sería regalar el
+      papel, y no pasa.
+    - **Rechazado:** el papel rebotó y no vale nada. No mueve caja —la plata
+      salió cuando se compró—, pero es de las cosas más importantes que pueden
+      pasar en el día.
+
+    El monto es siempre el **nominal** del cheque, como en el ingreso a cartera:
+    es el papel que se movió. Lo que la operación valió —el neto entregado, lo
+    que el cliente queda debiendo— va en la descripción, que es donde se lee sin
+    confundirlo con plata que entró o salió.
+    """
+    items: list[MovimientoUnificadoRead] = []
+
+    # ── Fiados ────────────────────────────────────────────────────────────
+    fiados = list(
+        db.scalars(
+            select(Fiado)
+            .options(joinedload(Fiado.cheque), joinedload(Fiado.cliente))
+            .where(
+                Fiado.fecha_fiado >= desde,
+                Fiado.fecha_fiado <= hasta,
+                Fiado.anulado_at.is_(None),
+            )
+            .order_by(Fiado.created_at.asc())
+        )
+    )
+    for f in fiados:
+        cheque = f.cheque
+        nombre = describir(cheque, con_monto=False) if cheque is not None else "cheque"
+        cliente = f.cliente.nombre if f.cliente is not None else "un cliente"
+        items.append(
+            MovimientoUnificadoRead(
+                id=f"fiado:{f.id}",
+                fecha=f.fecha_fiado,
+                moneda=Moneda.ARS.value,
+                grupo="CHEQUES",
+                categoria="FIADO_CHEQUE",
+                flujo="NEUTRO",
+                descripcion=(
+                    f"Fiado {nombre} a {cliente} · queda debiendo "
+                    f"{_plata(f.saldo_pendiente, Moneda.ARS)}"
+                ),
+                monto=_money(f.monto_original),
+                ganancia=None,
+                medio_pago=None,
+                cotizacion=None,
+                referencia_tipo="fiado",
+                referencia_id=f.id,
+            )
+        )
+
+    # ── Entregas a un acreedor y rechazos ─────────────────────────────────
+    # `ultimo_evento_manual_at` es un timestamp UTC: se pide con la ventana
+    # ensanchada un día por lado y se filtra exacto por fecha local, igual que
+    # el ingreso a cartera, para no traspapelar lo que se cargó de noche.
+    salidos = list(
+        db.scalars(
+            select(Cheque)
+            .options(joinedload(Cheque.cliente_origen))
+            .where(
+                Cheque.estado.in_((ChequeEstado.VENDIDO, ChequeEstado.RECHAZADO)),
+                Cheque.anulado_at.is_(None),
+                Cheque.ultimo_evento_manual_at.is_not(None),
+                func.date(Cheque.ultimo_evento_manual_at) >= desde - timedelta(days=1),
+                func.date(Cheque.ultimo_evento_manual_at) <= hasta + timedelta(days=1),
+            )
+            .order_by(Cheque.ultimo_evento_manual_at.asc())
+        )
+    )
+    # Cuáles de esos VENDIDO son ventas de verdad: las que dejaron un ingreso en
+    # el libro. Se pregunta por id y no por fecha porque la línea puede haber
+    # quedado asentada otro día que el evento del cheque.
+    vendidos = [c.id for c in salidos if c.estado == ChequeEstado.VENDIDO]
+    con_ingreso = set(
+        db.scalars(
+            select(MovimientoCaja.referencia_id).where(
+                MovimientoCaja.referencia_tipo == "cheque",
+                MovimientoCaja.categoria == CajaCategoria.VENTA_CHEQUE,
+                MovimientoCaja.referencia_id.in_(vendidos),
+            )
+        )
+    )
+
+    for c in salidos:
+        fecha = fecha_local(c.ultimo_evento_manual_at)
+        if fecha < desde or fecha > hasta:
+            continue
+        nombre = describir(c, con_monto=False)
+        if c.estado == ChequeEstado.RECHAZADO:
+            de_quien = f" (venía de {c.cliente_origen.nombre})" if c.cliente_origen else ""
+            categoria, descripcion = "RECHAZO_CHEQUE", f"Rechazado {nombre}{de_quien}"
+        else:
+            if c.id in con_ingreso:
+                continue  # venta con plata: ya vino por el libro de caja
+            quien = f" a {c.acreedor_destino}" if c.acreedor_destino else ""
+            neto = ""
+            if c.porcentaje_venta is not None:
+                valor = (
+                    c.monto * (Decimal("100") - c.porcentaje_venta) / Decimal("100")
+                ).quantize(Decimal("0.01"))
+                neto = f" · cubre {_plata(valor, Moneda.ARS)} de deuda"
+            categoria = "ENTREGA_CHEQUE"
+            descripcion = f"Entregado {nombre}{quien} a cuenta de una deuda{neto}"
+        items.append(
+            MovimientoUnificadoRead(
+                id=f"cheque-salida:{c.id}",
+                fecha=fecha,
+                moneda=Moneda.ARS.value,
+                grupo="CHEQUES",
+                categoria=categoria,
+                flujo="NEUTRO",
+                descripcion=descripcion,
+                monto=_money(c.monto),
+                ganancia=None,
+                medio_pago=None,
+                cotizacion=None,
+                referencia_tipo="cheque",
+                referencia_id=c.id,
+            )
+        )
+
+    return items
+
+
 def get_movimientos_unificados(
     db: Session,
     desde: date,
@@ -312,9 +449,10 @@ def get_movimientos_unificados(
     Fuente principal: el libro de caja `movimientos_caja` (toda entrada/salida
     de plata, venga del bot o del panel). Se le suman los **eventos sin
     movimiento de efectivo** (flujo NEUTRO), que por eso no viven en el libro de
-    caja: el ingreso de cheques a cartera y las compensaciones —el cliente le
-    transfirió derecho a un acreedor del negocio (§Compensación)—. Ordenado por
-    fecha descendente.
+    caja: el ingreso de cheques a cartera, las tres salidas de cartera que no
+    mueven plata —fiado, entrega a un acreedor y rechazo— y las compensaciones
+    —el cliente le transfirió derecho a un acreedor del negocio (§Compensación)—.
+    Ordenado por fecha descendente.
     """
     if desde > hasta:
         raise ValidationError(
@@ -439,6 +577,16 @@ def get_movimientos_unificados(
                 referencia_id=comp.id,
             )
         )
+
+    # ── Salidas de cartera sin efectivo ──────────────────────────────────
+    # Un cheque sale de cartera de cinco maneras y solo dos dejan plata: la
+    # venta y el cobro, que ya vienen del libro de caja. Las otras tres —fiarlo,
+    # entregárselo a un acreedor y el rechazo— mueven el papel y no un peso, así
+    # que no tienen línea que las traiga: entraban a cartera a la vista de todos
+    # y se iban en silencio. Van acá por lo mismo que la compensación: el día
+    # tiene que poder leerse entero de una sola pantalla.
+    for it in _salidas_de_cartera(db, desde, hasta):
+        items.append(it)
 
     # Fecha descendente; a igual fecha, primero las líneas de caja (id UUID) y
     # los cheques quedan intercalados de forma estable por su string id.

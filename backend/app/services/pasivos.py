@@ -528,6 +528,10 @@ def cancelar_con_cheque(
             motivo=payload.motivo,
             porcentaje_venta=payload.porcentaje_venta,
         )
+        # Quién se llevó el papel. El estado queda igual que en una venta, así
+        # que sin esto la operación no deja rastro de su destinatario y en
+        # Movimientos sale sin nombre (§Historial unificado).
+        cheque.acreedor_destino = pasivo.acreedor
         if diferencia >= Decimal("0.00"):
             pasivo.saldo_pendiente = Decimal("0.00")
             pasivo.estado = PasivoEstado.CANCELADA
@@ -907,6 +911,9 @@ def cancelar_a_acreedor_con_cheque(
             motivo=motivo,
             porcentaje_venta=porcentaje_venta,
         )
+        # Quién se llevó el papel (§Historial unificado): el estado no distingue
+        # esta entrega de una venta, y el nombre no vive en ninguna otra columna.
+        cheque.acreedor_destino = acreedor
 
         imputaciones: list[PasivoImputado] = []
         cancelados = 0

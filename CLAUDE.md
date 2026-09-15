@@ -1295,6 +1295,13 @@ pagando una de esas: está pagando lo que le debe**.
   no cambió. **El umbral de "cubre de más" es uno solo para rechazar y para aplicar**: con
   el de aplicar en cero, el centavo de redondeo que la entrega tolera desde siempre se
   convertía en un pasivo de $0,01 a favor del cliente.
+- **A quién se le entregó el cheque queda guardado** (`cheques.acreedor_destino`, migración
+  `0032`). La entrega deja el cheque en `VENDIDO` igual que una venta, así que sin esa columna
+  el nombre del que se llevó el papel no vivía en ningún lado — y es todo lo que deja una
+  operación que no mueve un peso. Es **texto**, como `pasivos.acreedor` y por lo mismo: se le
+  puede deber a alguien que no es cliente del sistema. Lo escriben las dos vías (deuda puntual
+  y acreedor completo), lo **limpia** `revertir_cheque` cuando el papel vuelve a cartera, y lo
+  lee Movimientos (§Historial unificado).
 - Los pagos **por deuda puntual** (`POST /pasivos/{id}/pagar` y `/cancelar-con-cheque`)
   siguen existiendo intactos: son la única forma de imputar contra una deuda que no es la
   más vieja, y los usa quien llame a la API.
@@ -1396,8 +1403,9 @@ el panel; sí la sesión de carga): es la vista por cuota, con su vencimiento.
   del bot o del panel. Fuente principal: el libro `movimientos_caja` completo (cobros parciales
   y totales, ventas/compras/cobros de cheque, compra/venta USD, otorgamientos, gastos, pagos de
   pasivo y vueltos). Se le suman los **eventos sin efectivo** (`flujo=NEUTRO`), que por eso no
-  viven en el libro de caja: el **ingreso de cheques a cartera** (tabla `cheques`) y las
-  **compensaciones** (tabla `compensaciones`, §Compensación). Cada ítem trae
+  viven en el libro de caja: el **ingreso de cheques a cartera** (tabla `cheques`), las
+  **tres salidas de cartera que no mueven plata** y las **compensaciones** (tabla
+  `compensaciones`, §Compensación). Cada ítem trae
   `grupo` (COBROS/CHEQUES/DIVISAS/GASTOS/OTORGAMIENTOS/PASIVOS/APERTURA/AJUSTES/COMPENSACIONES), `flujo`
   (INGRESO/EGRESO/NEUTRO) y `referencia_tipo/id`. El front (`pages/Movimientos.tsx`) lo consume
   vía `getMovimientosUnificados` con filtro combinado grupo × flujo; el botón "Editar" sigue solo
@@ -1412,6 +1420,21 @@ el panel; sí la sesión de carga): es la vista por cuota, con su vencimiento.
     que la fila se vea con su color y entre en el filtro. `SALDO_INICIAL` (grupo `APERTURA`) se
     lista pero **no suma a los chips de ingresos/egresos del día**: es apertura, no plata que
     entró ese día (§Apertura del sistema).
+  - **Las salidas de cartera sin efectivo** _(pedido del dueño, 2026-09-14)_, en
+    `_salidas_de_cartera`. Un cheque sale de cartera de cinco maneras y **solo la venta y el
+    cobro dejan plata**: esas dos ya vienen del libro. Las otras tres entraban a la vista de
+    todos y se iban en silencio, y ahora van como eventos NEUTROS del grupo `CHEQUES`:
+    `FIADO_CHEQUE` (se lee de `fiados`, que es donde vive la **fecha operativa** del fiado y
+    el cliente al que se le fio), `ENTREGA_CHEQUE` (entregado a un acreedor, §5) y
+    `RECHAZO_CHEQUE`. El **monto es el nominal** en las tres, como en el ingreso a cartera:
+    es el papel que se movió; lo que la operación valió —el neto entregado, lo que el cliente
+    queda debiendo— va en la descripción, donde no se confunde con plata que entró o salió.
+  - **Cómo se distingue una entrega de una venta.** Las dos dejan el cheque en `VENDIDO`: lo
+    que las separa es que la venta **dejó un ingreso `VENTA_CHEQUE` en el libro**. Ese es el
+    criterio, y no la columna `acreedor_destino` (migración `0032`), justamente para que las
+    entregas anteriores a esa columna se sigan viendo —sin nombre, pero se ven—. El borde
+    conocido: un cheque *vendido* al 100% no deja ingreso y se leería como entrega; sería
+    regalar el papel, y no pasa.
 
 > ✅ **Estado de implementación:** el modelo de caja diaria es el **vigente**. El endpoint es
 > `GET /api/v1/reportes/caja?desde=&hasta=` (`svc_reportes.get_reporte_caja`), que lee el libro
@@ -2419,7 +2442,8 @@ que hoy existe es indirecta: el porcentaje de compra sale del mensaje del operad
   numeral — ver §Registro de bugs), `0028` (recompra: un cheque puede volver a entrar),
   `0029`/`0030` (e-cheq: tipo de cheque, y el número opcional) y `0031` (préstamo a
   interés fijo: `tipo_prestamo`, `monto_interes_fijo`, `dia_cobro` y `capital_pendiente` —
-  ver §3.b). **Head actual: `0031`.**
+  ver §3.b) y `0032` (`acreedor_destino` en cheques: a qué acreedor se le entregó el papel —
+  ver §5 y §Historial unificado). **Head actual: `0032`.**
 - **Agregar un valor a un enum que ya existe** va con
   `ALTER TYPE … ADD VALUE IF NOT EXISTS` (así lo hacen `0016`, `0020`, `0023`, `0026` y
   `0031`), y **no se puede usar en la misma transacción** que lo agrega. En el `downgrade`

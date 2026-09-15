@@ -51,6 +51,10 @@ _CH = [
     "monto_abonado",
     "ultimo_evento_manual_at", "ultimo_operador_id", "ultimo_motivo_manual",
     "foto", "foto_mime", "cliente_origen_id", "cliente_destino_id",
+    # A qué acreedor se le entregó el cheque (§5). Sin él, un backup restaurado
+    # devuelve esas entregas sin destinatario y Movimientos ya no puede decir
+    # quién se llevó el papel: el dato no se deduce de ninguna otra columna.
+    "acreedor_destino",
     # Marca de cartera preexistente (§Apertura). Sin ella el import devuelve esos
     # cheques como compras normales y al editarlos se les asienta el egreso
     # COMPRA_CHEQUE que el régimen de apertura quita: la plata se descuenta dos veces.

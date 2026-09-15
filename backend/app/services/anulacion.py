@@ -750,6 +750,9 @@ def revertir_cheque(
         cheque.porcentaje_venta = None
         cheque.ganancia = Decimal("0.00")
         cheque.cliente_destino_id = None
+        # Vuelve a cartera: ya no está en manos de nadie. Dejar el acreedor
+        # pegado haría que Movimientos siguiera contando una entrega deshecha.
+        cheque.acreedor_destino = None
         cheque.ultimo_operador_id = operador_id.strip()
         cheque.ultimo_motivo_manual = f"Reversión: {motivo.strip()}"
         cheque.ultimo_evento_manual_at = datetime.now(tz=UTC)
