@@ -35,6 +35,7 @@ from app.schemas.deudas_simples import (
 )
 from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
+from app.services import eventos as svc_eventos
 from app.services import cheques as svc_cheques
 from app.services import pasivos as svc_pasivos
 from app.services import stock_usd as svc_stock
@@ -339,6 +340,16 @@ def create_deuda_simple(db: Session, payload: DeudaSimpleCreate) -> DeudaSimple:
         raise DatabaseWriteError("No se pudo crear la deuda.") from exc
 
 
+# Lo que se puede corregir de una deuda libre, como lo nombra el operador.
+_CAMPOS_EDITABLES = {
+    "concepto": "concepto",
+    "monto": "monto",
+    "moneda": "moneda",
+    "fecha": "fecha",
+    "observaciones": "observaciones",
+}
+
+
 def editar_deuda_simple(
     db: Session, deuda_id: uuid.UUID, payload: DeudaSimpleUpdate
 ) -> DeudaSimple:
@@ -353,6 +364,9 @@ def editar_deuda_simple(
     )
     if deuda is None:
         raise NotFoundError("Deuda no encontrada.")
+
+    # La foto va antes de aplicar: después el valor viejo ya no existe.
+    antes = svc_eventos.foto(deuda, _CAMPOS_EDITABLES)
 
     data = payload.model_dump(exclude_unset=True)
     cambia_dinero = "monto" in data or "moneda" in data
@@ -386,6 +400,13 @@ def editar_deuda_simple(
         cliente_nombre = deuda.cliente.nombre if deuda.cliente else "—"
         _registrar_egreso_origen(db, deuda, cliente_nombre, medio)
         _resync_stock_origen(db, deuda, cliente_nombre)
+        svc_eventos.correccion(
+            db,
+            que=f"deuda de {cliente_nombre} ({deuda.concepto})",
+            cambios=svc_eventos.cambios(antes, deuda, _CAMPOS_EDITABLES),
+            referencia_tipo="deuda_simple",
+            referencia_id=deuda.id,
+        )
         db.commit()
         db.refresh(deuda)
         return deuda
@@ -650,6 +671,20 @@ def cobrar_deudas_cliente_con_cheque(
             db, cheque_nuevo, payload.vuelto_modo, diferencia, fecha
         )
 
+    # El cobro en sí no deja fila en ninguna tabla —bajan saldos y el papel entra
+    # a cartera—, así que se anota en el diario (§Historial unificado).
+    svc_eventos.cobro_con_cheque(
+        db,
+        cliente=cliente.nombre,
+        concepto="sus deudas",
+        cheques=cheques_nuevos,
+        imputado=reduccion,
+        moneda=payload.moneda_deuda,
+        fecha=fecha,
+        referencia_tipo="cliente",
+        referencia_id=cliente.id,
+    )
+
     try:
         db.commit()
     except IntegrityError as exc:
@@ -766,6 +801,17 @@ def cobrar_con_cheque(
             svc_pasivos.aplicar_vuelto_cheque(
                 db, cheque_nuevo, payload.vuelto_modo, vuelto_ars, fecha
             )
+        svc_eventos.cobro_con_cheque(
+            db,
+            cliente=deuda.cliente.nombre if deuda.cliente else "El cliente",
+            concepto=f"su deuda ({deuda.concepto})",
+            cheques=cheques_nuevos,
+            imputado=reduccion,
+            moneda=deuda.moneda,
+            fecha=fecha,
+            referencia_tipo="deuda_simple",
+            referencia_id=deuda.id,
+        )
         db.commit()
         db.refresh(deuda)
         db.refresh(cheque_nuevo)

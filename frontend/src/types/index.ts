@@ -184,7 +184,8 @@ export interface ReporteCaja {
 // panel. Lo sirve GET /reportes/movimientos.
 export type MovimientoGrupo =
   | 'COBROS' | 'CHEQUES' | 'DIVISAS' | 'GASTOS' | 'OTORGAMIENTOS' | 'PASIVOS'
-  | 'APERTURA' | 'AJUSTES' | 'TRASPASOS' | 'COMPENSACIONES' | 'OTROS'
+  | 'APERTURA' | 'AJUSTES' | 'TRASPASOS' | 'COMPENSACIONES'
+  | 'ANULACIONES' | 'CORRECCIONES' | 'OTROS'
 export type MovimientoFlujo = 'INGRESO' | 'EGRESO' | 'NEUTRO'
 
 export interface MovimientoUnificado {

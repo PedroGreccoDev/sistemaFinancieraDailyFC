@@ -26,6 +26,7 @@ from app.db.models import (
 from app.core.fechas import fecha_local, hoy_local
 from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
+from app.services import eventos as svc_eventos
 from app.services.conversion import calcular_reduccion_saldo
 from app.services.prestamos import repartir_pago_en_cuotas
 from app.schemas.pasivos import (
@@ -341,6 +342,19 @@ def list_pasivos(db: Session, estado: PasivoEstado | None = None) -> list[Pasivo
     return list(db.scalars(stmt).all())
 
 
+# Lo que se puede corregir de una deuda del negocio.
+_CAMPOS_EDITABLES = {
+    "acreedor": "acreedor",
+    "concepto": "concepto",
+    "monto": "monto",
+    "moneda": "moneda",
+    "fecha_vencimiento": "vencimiento",
+    "ingreso_caja": "entró plata al cajón",
+    "fecha_ingreso": "fecha del ingreso",
+    "observaciones": "observaciones",
+}
+
+
 def editar_pasivo(
     db: Session, pasivo_id: uuid.UUID, payload: PasivoUpdate
 ) -> Pasivo:
@@ -357,6 +371,9 @@ def editar_pasivo(
     pasivo = db.scalar(select(Pasivo).where(Pasivo.id == pasivo_id).with_for_update())
     if pasivo is None:
         raise NotFoundError(f"Pasivo {pasivo_id} no encontrado.")
+
+    # Antes de aplicar nada: el valor viejo es lo que va al diario.
+    antes = svc_eventos.foto(pasivo, _CAMPOS_EDITABLES)
 
     data = payload.model_dump(exclude_unset=True)
     cambia_dinero = "monto" in data or "moneda" in data
@@ -403,6 +420,13 @@ def editar_pasivo(
     if not _CAMPOS_INGRESO.isdisjoint(data):
         _resync_caja_ingreso(db, pasivo)
 
+    svc_eventos.correccion(
+        db,
+        que=f"deuda con {pasivo.acreedor} ({pasivo.concepto})",
+        cambios=svc_eventos.cambios(antes, pasivo, _CAMPOS_EDITABLES),
+        referencia_tipo="pasivo",
+        referencia_id=pasivo.id,
+    )
     db.commit()
     db.refresh(pasivo)
     return pasivo
@@ -604,6 +628,11 @@ def aplicar_vuelto_cheque(
                 saldo_pendiente=diferencia,
                 moneda=Moneda.ARS,
                 estado=PasivoEstado.PENDIENTE,
+                # De dónde salió esta deuda a favor. No es una deuda comercial
+                # más: Movimientos la nombra distinto —"queda a favor de Juan" y
+                # no "le debés a Juan"— y sin el origen no hay cómo saberlo.
+                origen_tipo="vuelto_cheque",
+                origen_id=cheque.id,
             )
         )
 

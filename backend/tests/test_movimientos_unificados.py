@@ -16,6 +16,9 @@ from app.db.models import (
     Compensacion,
     Fiado,
     FiadoEstado,
+    Evento,
+    Pasivo,
+    PasivoEstado,
     MedioPago,
     Moneda,
     MovimientoCaja,
@@ -29,8 +32,8 @@ class FakeDB:
 
     El servicio consulta, en orden: `movimientos_caja`, `cheques` (los que
     entraron a cartera), las `compensaciones`, los `fiados`, los cheques que
-    salieron de cartera sin plata y las líneas de venta que distinguen una venta
-    de una entrega. Este stub ignora el statement y va entregando las listas
+    salieron de cartera sin plata, las líneas de venta que distinguen una venta
+    de una entrega, los `pasivos` y los `eventos`. Este stub ignora el statement y va entregando las listas
     en ese orden. Una consulta para la que no se encoló nada devuelve vacío: el
     día que el feed sume otra fuente, los tests que no la miran no tienen por
     qué romperse.
@@ -441,3 +444,150 @@ def test_una_salida_fuera_del_rango_local_se_excluye():
         FakeDB([], [], [], [], [fuera], []), DESDE, HASTA
     )
     assert items == []
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  Deudas contraídas y plata a favor: lo que se debe sin que salga plata
+# ══════════════════════════════════════════════════════════════════════
+
+def _pasivo(
+    *,
+    acreedor: str = "Ferretería Pedro",
+    concepto: str = "mercadería",
+    monto: str = "200000",
+    creado: datetime = datetime(2026, 7, 9, 15, 0, tzinfo=timezone.utc),
+    origen_tipo: str | None = None,
+    ingreso_caja: bool = False,
+    moneda: Moneda = Moneda.ARS,
+) -> Pasivo:
+    p = Pasivo(
+        id=uuid.uuid4(),
+        acreedor=acreedor,
+        concepto=concepto,
+        monto=Decimal(monto),
+        saldo_pendiente=Decimal(monto),
+        moneda=moneda,
+        estado=PasivoEstado.PENDIENTE,
+        ingreso_caja=ingreso_caja,
+        origen_tipo=origen_tipo,
+    )
+    p.created_at = creado
+    return p
+
+
+def _feed_pasivos(*pasivos: Pasivo):
+    return service.get_movimientos_unificados(
+        FakeDB([], [], [], [], [], [], list(pasivos)), DESDE, HASTA
+    )
+
+
+def test_la_deuda_con_un_proveedor_figura_el_dia_que_se_contrae():
+    items = _feed_pasivos(_pasivo())
+    assert len(items) == 1
+    it = items[0]
+    assert it.categoria == "DEUDA_CONTRAIDA"
+    assert it.grupo == "PASIVOS"
+    assert it.flujo == "NEUTRO"
+    assert it.monto == Decimal("200000.00")
+    assert it.descripcion == "Deuda con Ferretería Pedro · mercadería"
+
+
+def test_lo_que_quedo_debiendo_de_una_compra_tambien_figura():
+    """La compra a deber asienta el egreso de lo que se pagó y nada más.
+
+    Lo que quedó debiendo no salía de la caja —correcto— pero tampoco aparecía
+    en ningún lado: el día mostraba una compra y no la deuda que dejó.
+    """
+    items = _feed_pasivos(_pasivo(origen_tipo="cheque", concepto="Compra cheque Nº 12"))
+    assert items[0].descripcion == (
+        "Quedaste debiendo a Ferretería Pedro · Compra cheque Nº 12"
+    )
+
+
+def test_el_vuelto_que_queda_debiendo_se_nombra_al_reves():
+    # No es lo mismo deberle al proveedor que tener plata de un cliente.
+    items = _feed_pasivos(
+        _pasivo(acreedor="Juan", concepto="Vuelto cheque Nº 77", monto="5000",
+                origen_tipo="vuelto_cheque")
+    )
+    it = items[0]
+    assert it.categoria == "SALDO_A_FAVOR"
+    assert it.descripcion == "Queda a favor de Juan · Vuelto cheque Nº 77"
+
+
+def test_el_prestamo_recibido_no_se_muestra_dos_veces():
+    # Con `ingreso_caja` entró plata: ya viene del libro como INGRESO_PASIVO.
+    assert _feed_pasivos(_pasivo(ingreso_caja=True)) == []
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  El registro de operaciones: lo que no deja rastro en ninguna tabla
+# ══════════════════════════════════════════════════════════════════════
+
+def _evento(
+    *,
+    categoria: str = "ANULACION",
+    grupo: str = "ANULACIONES",
+    descripcion: str = "Anulado: Gasto nafta · motivo: se cargó dos veces",
+    fecha: date = date(2026, 7, 21),
+    monto: str | None = "10000",
+    moneda: Moneda | None = Moneda.ARS,
+) -> Evento:
+    e = Evento(
+        id=uuid.uuid4(),
+        fecha=fecha,
+        categoria=categoria,
+        grupo=grupo,
+        descripcion=descripcion,
+        monto=None if monto is None else Decimal(monto),
+        moneda=moneda,
+        referencia_tipo="gasto",
+        referencia_id=uuid.uuid4(),
+        operador="op",
+    )
+    e.created_at = datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc)
+    return e
+
+
+def _feed_eventos(*eventos: Evento):
+    return service.get_movimientos_unificados(
+        FakeDB([], [], [], [], [], [], [], list(eventos)), DESDE, HASTA
+    )
+
+
+def test_la_anulacion_deja_constancia_en_el_dia():
+    """Deshacer borra las líneas de caja: el renglón original desaparece.
+
+    Sin el registro, un día que tenía un gasto y se anuló queda idéntico a un
+    día en el que ese gasto nunca se cargó.
+    """
+    items = _feed_eventos(_evento())
+    assert len(items) == 1
+    it = items[0]
+    assert it.grupo == "ANULACIONES"
+    assert it.categoria == "ANULACION"
+    assert it.flujo == "NEUTRO"  # el reverso de la plata ya lo hizo la anulación
+    assert "se cargó dos veces" in it.descripcion
+
+
+def test_la_correccion_cuenta_que_habia_antes():
+    items = _feed_eventos(
+        _evento(categoria="CORRECCION", grupo="CORRECCIONES", monto=None, moneda=None,
+                descripcion="Corregido: gasto nafta · monto: 10.000,00 → 12.000,00")
+    )
+    it = items[0]
+    assert it.categoria == "CORRECCION"
+    # Sin monto propio: lo que cambió se lee en el texto.
+    assert it.monto == Decimal("0.00")
+    assert it.moneda == "ARS"
+
+
+def test_el_cobro_con_cheque_figura_como_cobro():
+    items = _feed_eventos(
+        _evento(categoria="COBRO_CHEQUE_DEUDA", grupo="COBROS", monto="90000",
+                descripcion="Juan pagó su cuenta con cheque Nº 123 — Nación")
+    )
+    it = items[0]
+    assert it.grupo == "COBROS"
+    assert it.monto == Decimal("90000.00")
+    assert it.flujo == "NEUTRO"

@@ -269,6 +269,10 @@ const GRUPO_CONFIG: Record<MovimientoGrupo, { label: string; color: string; bg: 
   // deudas y la caja no se movió, por eso la fila va en gris de NEUTRO y no
   // suma a los chips del día (§Compensación).
   COMPENSACIONES:{ label: 'Compensaciones', color: '#22d3ee', bg: 'rgba(34,211,238,0.13)', initial: '↹' },
+  // Deshacer y corregir también son operaciones del día: el renglón original
+  // desaparece o cambia, y estos dos cuentan qué pasó (§Historial unificado).
+  ANULACIONES:   { label: 'Anulaciones',   color: '#f43f5e', bg: 'rgba(244,63,94,0.13)',   initial: '⊘' },
+  CORRECCIONES:  { label: 'Correcciones',  color: '#a3e635', bg: 'rgba(163,230,53,0.13)',  initial: '✎' },
   OTROS:         { label: 'Otros',         color: '#94a3b8', bg: 'rgba(148,163,184,0.13)', initial: '•' },
 }
 
@@ -299,6 +303,13 @@ const CATEGORIA_LABEL: Record<string, string> = {
   FIADO_CHEQUE:          'Fiado a un cliente',
   ENTREGA_CHEQUE:        'Entregado a un acreedor',
   RECHAZO_CHEQUE:        'Cheque rechazado',
+  // Deudas que se contraen sin que salga plata, y su espejo: la plata que le
+  // queda a favor a un cliente (§Historial unificado).
+  DEUDA_CONTRAIDA:       'Quedaste debiendo',
+  SALDO_A_FAVOR:         'Queda a favor del cliente',
+  ANULACION:             'Se deshizo una operación',
+  CORRECCION:            'Se corrigió una carga',
+  COBRO_CHEQUE_DEUDA:    'Cobro con cheque',
   COMPENSACION:          'Compensación',
   SALDO_INICIAL:         'Saldo inicial de caja',
   AJUSTE_CAJA:           'Ajuste de caja',
@@ -457,7 +468,7 @@ export default function Movimientos() {
     setShowPicker(p === 'PERSONALIZADO')
   }
 
-  const gruposFiltro: GrupoFiltro[] = ['TODOS', 'COBROS', 'CHEQUES', 'DIVISAS', 'GASTOS', 'OTORGAMIENTOS', 'PASIVOS', 'COMPENSACIONES', 'AJUSTES', 'APERTURA']
+  const gruposFiltro: GrupoFiltro[] = ['TODOS', 'COBROS', 'CHEQUES', 'DIVISAS', 'GASTOS', 'OTORGAMIENTOS', 'PASIVOS', 'COMPENSACIONES', 'AJUSTES', 'APERTURA', 'ANULACIONES', 'CORRECCIONES']
 
   return (
     <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
@@ -620,7 +631,12 @@ export default function Movimientos() {
                 const initial = m.grupo === 'GASTOS'
                   ? m.descripcion.charAt(0).toUpperCase()
                   : cfg.initial
-                const montoFmt = fmtMonto(m.monto, m.moneda)
+                // Una corrección no tiene monto propio —lo que cambió se lee en
+                // el texto—, y un "$0,00" en la columna se lee como si algo
+                // hubiera valido cero (§Historial unificado).
+                const montoFmt = parseFloat(m.monto) === 0 && m.categoria === 'CORRECCION'
+                  ? '—'
+                  : fmtMonto(m.monto, m.moneda)
                 // El libro de caja guarda las divisas con referencia_tipo
                 // 'movimiento_efectivo' (svc_movimientos._REF). Comparar contra
                 // 'movimiento' hacía que los botones nunca aparecieran.

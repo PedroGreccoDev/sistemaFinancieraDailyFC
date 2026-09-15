@@ -1429,6 +1429,21 @@ el panel; sí la sesión de carga): es la vista por cuota, con su vencimiento.
     `RECHAZO_CHEQUE`. El **monto es el nominal** en las tres, como en el ingreso a cartera:
     es el papel que se movió; lo que la operación valió —el neto entregado, lo que el cliente
     queda debiendo— va en la descripción, donde no se confunde con plata que entró o salió.
+  - **El principio: toda operación deja renglón, mueva plata o no** _(decisión del
+    dueño, 2026-09-14)_. Movimientos es **el diario del negocio**, no el resumen de la
+    caja. Casi todo se **deriva** —libro de caja, cheques, fiados, compensaciones,
+    pasivos— y no hace falta guardar nada nuevo; para lo que no deja fila en ninguna
+    tabla está el registro de operaciones (`eventos`, migración `0033`, servicio
+    `svc_eventos`, §Registro de operaciones). **Al agregar una operación nueva, la
+    pregunta es una sola: ¿se ve en Movimientos? Si no deja línea de caja ni fila
+    propia, hay que anotarla.**
+  - **Deudas que se contraen y plata a favor** (`_deudas_del_negocio`): el alta de un
+    pasivo **no** mueve caja —comprar a deber, cargar la deuda con un proveedor— y no
+    figuraba en ningún lado; va como `DEUDA_CONTRAIDA` (grupo `PASIVOS`, NEUTRO). Su
+    espejo es `SALDO_A_FAVOR`: el vuelto de un cheque que el cliente dejó a cuenta
+    (`origen_tipo='vuelto_cheque'`) o el excedente de una compensación. **El pasivo con
+    `ingreso_caja` queda afuera**: ese sí movió la caja y ya viene del libro como
+    `INGRESO_PASIVO` — traerlo otra vez lo mostraría dos veces.
   - **Cómo se distingue una entrega de una venta.** Las dos dejan el cheque en `VENDIDO`: lo
     que las separa es que la venta **dejó un ingreso `VENTA_CHEQUE` en el libro**. Ese es el
     criterio, y no la columna `acreedor_destino` (migración `0032`), justamente para que las
@@ -2421,6 +2436,42 @@ que hoy existe es indirecta: el porcentaje de compra sale del mensaje del operad
 
 ---
 
+## Registro de operaciones (`eventos`) — lo que no deja rastro en ningún lado
+
+Tabla `eventos` (migración `0033`), servicio `svc_eventos`. Existe porque el feed de
+Movimientos se arma **derivando** y hay tres operaciones que no dejan fila en ninguna
+tabla: el **cobro con cheque**, la **anulación** y la **corrección**.
+
+- **La regla de oro es no duplicar.** Si el hecho ya se ve por el libro de caja o por
+  su propia tabla, **no** se anota un evento: Movimientos lo mostraría dos veces y el
+  operador tendría que adivinar cuál de los dos renglones es el real.
+- **`anotar` y no `registrar`.** El nombre es a propósito: `registrar` es la caja, y el
+  guardián de §Las dos cajas (`test_caja_paralela`) exige `medio_pago` en toda llamada
+  a `caja.registrar` mirando el nombre. Un evento no tiene medio de pago — no pasó por
+  ninguna caja.
+- **No commitea**, como `svc_caja.registrar`: el evento es parte de la transacción de
+  la operación que lo genera. Uno commiteado aparte contaría algo que después pudo no
+  pasar.
+- **Las filas no se anulan ni se borran.** Son el diario. Si la operación que generó un
+  evento se deshace, lo que corresponde es **otro** evento contando la anulación.
+- **Cobro con cheque** (`COBRO_CHEQUE_DEUDA`, grupo `COBROS`): lo anotan los siete
+  caminos que cobran con papeles (cuenta corriente, créditos, deudas libres por cliente
+  y puntual, fiado, cuota, lote de cuotas y pago de préstamo). **El monto del renglón
+  es lo que bajó la deuda, no el nominal del cheque**: son dos números distintos y el
+  que cuenta como cobro es el primero (el nominal ya se ve en la línea del cheque que
+  entra a cartera).
+- **Anulación** (`ANULACION`, grupo `ANULACIONES`): la anota `anular` —la puerta única,
+  compensación incluida— y `revertir_cheque`. El motivo va en el texto porque es la
+  mitad de la información y es lo primero que se pregunta después.
+- **Corrección** (`CORRECCION`, grupo `CORRECCIONES`): cada `editar_*` saca una **foto**
+  de sus campos editables **antes** de aplicar el payload (`svc_eventos.foto`) y después
+  compara (`svc_eventos.cambios`), que devuelve `"monto: 10.000,00 → 12.000,00"`. **Si
+  no cambió nada no se anota**: el panel reenvía el formulario entero cada vez que se
+  guarda, y un "se editó" sin diferencia es ruido. No tiene monto propio —lo que cambió
+  se lee en el texto—, y el panel muestra una raya en vez de `$0,00`.
+- **Viaja en el backup** (`_EV`): es historia pura, no la reconstruye ningún cálculo —
+  guarda justamente lo que no dejó rastro en otra tabla.
+
 ## Migraciones (Alembic)
 
 - Las migraciones viven en `backend/alembic/versions/`, numeradas **secuencialmente**
@@ -2443,7 +2494,12 @@ que hoy existe es indirecta: el porcentaje de compra sale del mensaje del operad
   `0029`/`0030` (e-cheq: tipo de cheque, y el número opcional) y `0031` (préstamo a
   interés fijo: `tipo_prestamo`, `monto_interes_fijo`, `dia_cobro` y `capital_pendiente` —
   ver §3.b) y `0032` (`acreedor_destino` en cheques: a qué acreedor se le entregó el papel —
-  ver §5 y §Historial unificado). **Head actual: `0032`.**
+  ver §5 y §Historial unificado) y `0033` (tabla `eventos`: el registro de operaciones —
+  ver §Registro de operaciones). **Head actual: `0033`.**
+- **Una columna con un ENUM que ya existe va con `postgresql.ENUM(..., create_type=False)`**,
+  no con `sa.Enum(...)`: el genérico intenta crear el tipo igual y la migración muere a
+  mitad de camino con "ya existe un tipo moneda". Le pasó a la `0033` y se vio al probarla
+  contra una base de verdad, no en los tests.
 - **Agregar un valor a un enum que ya existe** va con
   `ALTER TYPE … ADD VALUE IF NOT EXISTS` (así lo hacen `0016`, `0020`, `0023`, `0026` y
   `0031`), y **no se puede usar en la misma transacción** que lo agrega. En el `downgrade`

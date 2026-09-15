@@ -32,6 +32,7 @@ from app.schemas.cheques import (
 )
 from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
+from app.services import eventos as svc_eventos
 from app.services import pasivos as svc_pasivos
 from app.services.exceptions import (
     ConflictError,
@@ -614,6 +615,19 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
         )
 
 
+# Lo que se puede corregir de un cheque, con el nombre que usa el operador.
+_CAMPOS_EDITABLES = {
+    "nro_cheque": "número",
+    "banco": "banco",
+    "monto": "monto",
+    "porcentaje_compra": "% compra",
+    "porcentaje_venta": "% venta",
+    "fecha_emision": "fecha de emisión",
+    "fecha_pago": "fecha de pago",
+    "tipo": "tipo",
+}
+
+
 def editar_cheque(db: Session, cheque_id: uuid.UUID, payload: ChequeUpdate) -> Cheque:
     """Corrige la carga de un cheque (panel). Aplica reglas de bloqueo por estado.
 
@@ -628,6 +642,10 @@ def editar_cheque(db: Session, cheque_id: uuid.UUID, payload: ChequeUpdate) -> C
         raise ConflictError(
             f"El cheque está {cheque.estado.value} (terminal) y no se puede editar."
         )
+
+    # Antes de tocar nada: el valor viejo es lo que el diario necesita para
+    # contar qué se corrigió, y después de aplicar ya no está (§Historial unificado).
+    antes = svc_eventos.foto(cheque, _CAMPOS_EDITABLES)
 
     data = payload.model_dump(exclude_unset=True)
     tiene_venta = cheque.estado in (ChequeEstado.VENDIDO, ChequeEstado.FIADO)
@@ -701,6 +719,13 @@ def editar_cheque(db: Session, cheque_id: uuid.UUID, payload: ChequeUpdate) -> C
 
     try:
         resync_caja_cheque(db, cheque)
+        svc_eventos.correccion(
+            db,
+            que=describir(cheque, con_monto=False),
+            cambios=svc_eventos.cambios(antes, cheque, _CAMPOS_EDITABLES),
+            referencia_tipo="cheque",
+            referencia_id=cheque.id,
+        )
         db.commit()
         db.refresh(cheque)
         return cheque

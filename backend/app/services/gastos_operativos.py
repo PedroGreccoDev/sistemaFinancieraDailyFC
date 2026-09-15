@@ -9,6 +9,7 @@ from app.core.fechas import hoy_local
 from app.db.models import CajaCategoria, CajaTipo, GastoOperativo, MedioPago, Moneda
 from app.schemas.gastos_operativos import GastoOperativoCreate, GastoOperativoUpdate
 from app.services import caja as svc_caja
+from app.services import eventos as svc_eventos
 from app.services import stock_usd as svc_stock
 from app.services.exceptions import NotFoundError
 
@@ -109,6 +110,18 @@ def _resync_caja_gasto(
     )
 
 
+# Lo que se puede corregir de un gasto, con el nombre que el operador le da.
+# Editar reescribe la línea de caja del día: sin el diario, el número cambia y
+# no queda nada del anterior (§Historial unificado).
+_CAMPOS = {
+    "concepto": "concepto",
+    "monto": "monto",
+    "moneda": "moneda",
+    "fecha_operacion": "fecha",
+    "observaciones": "observaciones",
+}
+
+
 def editar_gasto(
     db: Session, gasto_id: uuid.UUID, payload: GastoOperativoUpdate
 ) -> GastoOperativo:
@@ -118,6 +131,10 @@ def editar_gasto(
     )
     if gasto is None:
         raise NotFoundError("Gasto no encontrado.")
+
+    # La foto va antes de aplicar nada: después el valor viejo no está en ningún
+    # lado, y es lo que el diario necesita para contar qué se corrigió.
+    antes = svc_eventos.foto(gasto, _CAMPOS)
 
     data = payload.model_dump(exclude_unset=True)
     if data.get("concepto") is not None:
@@ -135,6 +152,13 @@ def editar_gasto(
 
     _resync_caja_gasto(db, gasto, data.get("medio_pago"))
     _resync_stock_gasto(db, gasto)
+    svc_eventos.correccion(
+        db,
+        que=f"gasto {gasto.concepto}",
+        cambios=svc_eventos.cambios(antes, gasto, _CAMPOS),
+        referencia_tipo="gasto",
+        referencia_id=gasto.id,
+    )
     db.commit()
     db.refresh(gasto)
     return gasto

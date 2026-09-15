@@ -72,6 +72,7 @@ from app.schemas.deudores import (
 from app.services import cheques as svc_cheques
 from app.services import deudas_simples as svc_deudas_simples
 from app.services import fiados as svc_fiados
+from app.services import eventos as svc_eventos
 from app.services import pasivos as svc_pasivos
 from app.services import prestamos as svc_prestamos
 from app.services.conversion import calcular_reduccion_saldo
@@ -659,6 +660,20 @@ def cobrar_cliente_con_cheque(
         svc_pasivos.aplicar_vuelto_cheque(
             db, cheque_nuevo, payload.vuelto_modo, diferencia, fecha
         )
+
+    # De este cobro no quedaba nada: bajan saldos, el papel entra a cartera y la
+    # operación no dejaba fila propia en ninguna tabla (§Historial unificado).
+    svc_eventos.cobro_con_cheque(
+        db,
+        cliente=cliente_nombre,
+        concepto="sus préstamos" if fuentes is CREDITOS else "su cuenta",
+        cheques=cheques_nuevos,
+        imputado=reduccion,
+        moneda=payload.moneda_deuda,
+        fecha=fecha,
+        referencia_tipo="cliente",
+        referencia_id=cliente_id,
+    )
 
     try:
         db.commit()

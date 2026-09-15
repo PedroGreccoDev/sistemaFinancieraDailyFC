@@ -20,6 +20,7 @@ from app.db.models import (
 )
 from app.schemas.movimientos import MovimientoEfectivoCreate, MovimientoEfectivoUpdate
 from app.services import caja as svc_caja
+from app.services import eventos as svc_eventos
 from app.services import pasivos as svc_pasivos
 from app.services.exceptions import (
     ConflictError,
@@ -424,6 +425,14 @@ def _resync_caja_movimiento(db: Session, mov: MovimientoEfectivo) -> None:
         )
 
 
+# Lo que se puede corregir de una operación de divisas.
+_CAMPOS_EDITABLES = {
+    "monto": "dólares",
+    "cotizacion_aplicada": "cotización",
+    "observaciones": "observaciones",
+}
+
+
 def editar_movimiento(
     db: Session, movimiento_id: uuid.UUID, payload: MovimientoEfectivoUpdate
 ) -> MovimientoEfectivo:
@@ -440,6 +449,7 @@ def editar_movimiento(
     if mov is None:
         raise NotFoundError("Movimiento de efectivo no encontrado.")
 
+    antes = svc_eventos.foto(mov, _CAMPOS_EDITABLES)
     data = payload.model_dump(exclude_unset=True)
     cambia_dinero = "monto" in data or "cotizacion_aplicada" in data
 
@@ -494,6 +504,13 @@ def editar_movimiento(
         # Recalcular la cadena (recompone ganancia de la venta editada y stock de lotes).
         _reimputar_fifo(db)
         _resync_caja_movimiento(db, mov)
+        svc_eventos.correccion(
+            db,
+            que=f"{mov.tipo.value.lower()} de USD",
+            cambios=svc_eventos.cambios(antes, mov, _CAMPOS_EDITABLES),
+            referencia_tipo="movimiento_efectivo",
+            referencia_id=mov.id,
+        )
         db.commit()
         db.refresh(mov)
         return mov

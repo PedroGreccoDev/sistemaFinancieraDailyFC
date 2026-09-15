@@ -1260,6 +1260,50 @@ class CompensacionImputacion(Base):
 #  MODELO: Bug — registro de errores con numeral
 # ══════════════════════════════════════════════════════════════════════
 
+class Evento(Base):
+    """Una operación que hay que contar en Movimientos y no deja rastro en ningún lado.
+
+    El feed de Movimientos se arma **derivando**: el libro de caja, los cheques,
+    los fiados, las compensaciones, los pasivos. Mientras la operación deje una
+    fila en alguna tabla, se puede mostrar sin guardar nada nuevo. Esta tabla es
+    para las tres que no dejan ninguna (§Historial unificado):
+
+    - **el cobro con cheque** —bajan saldos, el papel entra a cartera y de la
+      operación no queda nada—,
+    - **la anulación** —borra las líneas y hace desaparecer el renglón del día—,
+    - **la corrección** —reescribe la línea y no hay historial de ediciones—.
+
+    **Un hecho que ya se ve por otro lado no escribe acá**, o Movimientos lo
+    mostraría dos veces. Y las filas **no se anulan ni se borran**: son el
+    diario. Si la operación que generó un evento se deshace, lo que corresponde
+    es otro evento contando la anulación.
+
+    `descripcion` viene armada desde el servicio que registra el evento: es el
+    único que sabe qué pasó, y dejarla escrita evita que la pantalla tenga que
+    reconstruir el sentido de una operación que ya no existe.
+    """
+
+    __tablename__ = "eventos"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Fecha operativa (local ART): a qué día pertenece el renglón.
+    fecha:       Mapped[date] = mapped_column(sa.Date(), index=True)
+    categoria:   Mapped[str]  = mapped_column(sa.String(40))
+    grupo:       Mapped[str]  = mapped_column(sa.String(30))
+    descripcion: Mapped[str]  = mapped_column(sa.Text())
+    # Opcionales: corregir una cotización no tiene monto propio.
+    monto:  Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+    moneda: Mapped[Moneda | None]  = mapped_column(
+        sa.Enum(Moneda, name="moneda", create_type=False), nullable=True
+    )
+    referencia_tipo: Mapped[str | None]       = mapped_column(sa.String(40), nullable=True)
+    referencia_id:   Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    operador:        Mapped[str | None]       = mapped_column(sa.String(80), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+
+
 class Bug(Base):
     """Un error del sistema, con un número que lo identifica para siempre.
 

@@ -47,6 +47,7 @@ from app.db.models import (
     Prestamo,
 )
 from app.services import caja as svc_caja
+from app.services import eventos as svc_eventos
 from app.services import stock_usd as svc_stock
 from app.services.exceptions import (
     ConflictError,
@@ -534,6 +535,21 @@ def anular(
         restituido = svc_compensaciones.revertir(
             db, entidad_id, operador_id=operador_id, motivo=motivo
         )
+        # El renglón de la compensación desaparece del día al revertirse; este
+        # cuenta que se deshizo, y por qué (§Historial unificado). Va después de
+        # revertir —que commitea— y con su propio commit, porque acá ya no queda
+        # transacción abierta a la que sumarse.
+        svc_eventos.anulacion(
+            db,
+            descripcion=descripcion,
+            motivo=motivo,
+            operador=operador_id,
+            referencia_tipo="compensacion",
+            referencia_id=entidad_id,
+            monto=comp.monto,
+            moneda=comp.moneda,
+        )
+        db.commit()
         return Impacto(
             entidad=entidad,
             entidad_id=entidad_id,
@@ -553,6 +569,8 @@ def anular(
         raise ConflictError(bloqueo)
 
     # Se captura el impacto ANTES de borrar: después las líneas ya no existen.
+    # Lo mismo con la descripción, que es lo que va a quedar en el diario.
+    descripcion = _describir(obj, spec)
     lineas = _lineas_de_caja(db, spec.refs, entidad_id)
     if entidad == "prestamo":
         lineas.extend(_lineas_cuotas(db, obj))
@@ -652,6 +670,20 @@ def anular(
             db.flush()
             _reimputar_fifo(db)
 
+        # Lo que se deshizo, en el diario del día: la anulación borra las líneas
+        # de caja y marca la fila, así que el renglón original desaparece y sin
+        # esto nadie se entera de que existió (§Historial unificado). Se describe
+        # con el mismo texto que ve el operador al confirmar.
+        svc_eventos.anulacion(
+            db,
+            descripcion=descripcion,
+            motivo=motivo,
+            operador=operador_id,
+            referencia_tipo=entidad,
+            referencia_id=entidad_id,
+            monto=getattr(obj, "monto", None),
+            moneda=getattr(obj, "moneda", None),
+        )
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
@@ -660,7 +692,7 @@ def anular(
     return Impacto(
         entidad=entidad,
         entidad_id=entidad_id,
-        descripcion=_describir(obj, spec),
+        descripcion=descripcion,
         lineas=lineas,
         arrastra=arrastra,
     )
@@ -742,6 +774,15 @@ def revertir_cheque(
                 f"No se puede revertir el fiado de este cheque. {bloqueo}"
             )
 
+    # Qué se está deshaciendo, antes de pisarlo: después el cheque vuelve a
+    # EN_CARTERA y ya no se puede saber de qué salió.
+    estado_previo = {
+        ChequeEstado.VENDIDO: "Venta",
+        ChequeEstado.FIADO: "Fiado",
+        ChequeEstado.COBRADO: "Cobro",
+        ChequeEstado.RECHAZADO: "Rechazo",
+    }.get(cheque.estado, "Operación")
+
     try:
         # El egreso de compra se conserva; se rehace solo el tramo de venta/cobro.
         from app.services.cheques import resync_caja_cheque
@@ -764,6 +805,18 @@ def revertir_cheque(
             _marcar(fiado, operador_id, f"Revertido junto con el cheque Nº {cheque.nro_cheque}")
 
         resync_caja_cheque(db, cheque)
+        # Deshacer la venta, el cobro o el fiado también es una operación del
+        # día: el renglón que se cae —la venta, el fiado— no deja nada atrás.
+        svc_eventos.anulacion(
+            db,
+            descripcion=f"{estado_previo} del {_describir(cheque, _spec('cheque'))}",
+            motivo=motivo,
+            operador=operador_id,
+            referencia_tipo="cheque",
+            referencia_id=cheque.id,
+            monto=cheque.monto,
+            moneda=Moneda.ARS,
+        )
         db.commit()
         db.refresh(cheque)
         return cheque

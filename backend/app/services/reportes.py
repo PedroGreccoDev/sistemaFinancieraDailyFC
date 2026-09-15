@@ -18,6 +18,7 @@ from app.db.models import (
     CuotaEstado,
     DeudaSimple,
     DeudaSimpleEstado,
+    Evento,
     Fiado,
     FiadoEstado,
     MedioPago,
@@ -439,6 +440,80 @@ def _salidas_de_cartera(
     return items
 
 
+def _deudas_del_negocio(
+    db: Session, desde: date, hasta: date
+) -> list[MovimientoUnificadoRead]:
+    """Las deudas que el negocio contrae, y la plata que queda a favor de otro.
+
+    Ninguna de las dos mueve la caja y las dos son operaciones del día:
+
+    - **Quedar debiendo.** Comprás un cheque o dólares y no pagás todo
+      (§Comprar sin abonar), o se carga una deuda con un proveedor. El libro
+      asienta el egreso de lo que **sí** se pagó; de lo que quedó debiendo no
+      quedaba renglón en ninguna pantalla del día.
+    - **Plata a favor de un cliente.** El cheque cubrió de más y en vez de
+      darle el vuelto se lo quedaste debiendo (§5), o transfirió de más en una
+      compensación. Es una deuda del negocio igual que la otra, pero al revés:
+      Movimientos la nombra distinto porque no es lo mismo deberle al proveedor
+      que tener plata de un cliente.
+
+    Queda afuera el pasivo que **sí** movió la caja (`ingreso_caja`: alguien le
+    prestó plata al negocio): ese ya viene del libro como `INGRESO_PASIVO` y
+    traerlo de nuevo sería mostrarlo dos veces.
+
+    La fecha es la del alta (`created_at` local), como el ingreso de un cheque a
+    cartera: es cuando el negocio quedó debiendo.
+    """
+    # Ventana ensanchada un día por lado y filtro exacto por fecha local, para no
+    # traspapelar lo que se cargó de noche (mismo criterio que los cheques).
+    pasivos = list(
+        db.scalars(
+            select(Pasivo)
+            .where(
+                Pasivo.anulado_at.is_(None),
+                func.date(Pasivo.created_at) >= desde - timedelta(days=1),
+                func.date(Pasivo.created_at) <= hasta + timedelta(days=1),
+            )
+            .order_by(Pasivo.created_at.asc())
+        )
+    )
+
+    items: list[MovimientoUnificadoRead] = []
+    for p in pasivos:
+        fecha = fecha_local(p.created_at)
+        if fecha < desde or fecha > hasta:
+            continue
+        if p.ingreso_caja:
+            continue  # entró plata: ya vino del libro como INGRESO_PASIVO
+        if p.origen_tipo in ("vuelto_cheque", "compensacion"):
+            categoria = "SALDO_A_FAVOR"
+            descripcion = f"Queda a favor de {p.acreedor} · {p.concepto}"
+        elif p.origen_tipo in ("cheque", "movimiento_efectivo"):
+            categoria = "DEUDA_CONTRAIDA"
+            descripcion = f"Quedaste debiendo a {p.acreedor} · {p.concepto}"
+        else:
+            categoria = "DEUDA_CONTRAIDA"
+            descripcion = f"Deuda con {p.acreedor} · {p.concepto}"
+        items.append(
+            MovimientoUnificadoRead(
+                id=f"pasivo:{p.id}",
+                fecha=fecha,
+                moneda=p.moneda.value,
+                grupo="PASIVOS",
+                categoria=categoria,
+                flujo="NEUTRO",
+                descripcion=descripcion,
+                monto=_money(p.monto),
+                ganancia=None,
+                medio_pago=None,
+                cotizacion=None,
+                referencia_tipo="pasivo",
+                referencia_id=p.id,
+            )
+        )
+    return items
+
+
 def get_movimientos_unificados(
     db: Session,
     desde: date,
@@ -450,9 +525,11 @@ def get_movimientos_unificados(
     de plata, venga del bot o del panel). Se le suman los **eventos sin
     movimiento de efectivo** (flujo NEUTRO), que por eso no viven en el libro de
     caja: el ingreso de cheques a cartera, las tres salidas de cartera que no
-    mueven plata —fiado, entrega a un acreedor y rechazo— y las compensaciones
-    —el cliente le transfirió derecho a un acreedor del negocio (§Compensación)—.
-    Ordenado por fecha descendente.
+    mueven plata —fiado, entrega a un acreedor y rechazo—, las compensaciones
+    —el cliente le transfirió derecho a un acreedor del negocio (§Compensación)—
+    y las deudas que el negocio contrae sin que salga plata. Y el registro de
+    operaciones (`eventos`): lo que no deja rastro en ninguna tabla —el cobro
+    con cheque, la anulación y la corrección—. Ordenado por fecha descendente.
     """
     if desde > hasta:
         raise ValidationError(
@@ -587,6 +664,42 @@ def get_movimientos_unificados(
     # tiene que poder leerse entero de una sola pantalla.
     for it in _salidas_de_cartera(db, desde, hasta):
         items.append(it)
+
+    # ── Deudas contraídas y plata a favor (sin efectivo) ─────────────────
+    items.extend(_deudas_del_negocio(db, desde, hasta))
+
+    # ── Registro de operaciones (lo que no deja rastro en ningún lado) ───
+    # El cobro con cheque, la anulación y la corrección no dejan fila en
+    # ninguna tabla propia: se anotan en `eventos` cuando ocurren y se leen de
+    # ahí (§Historial unificado). Nada que ya se vea por otro lado escribe ahí,
+    # así que esto no duplica renglones.
+    eventos = list(
+        db.scalars(
+            select(Evento)
+            .where(Evento.fecha >= desde, Evento.fecha <= hasta)
+            .order_by(Evento.created_at.asc())
+        )
+    )
+    for e in eventos:
+        items.append(
+            MovimientoUnificadoRead(
+                id=f"evento:{e.id}",
+                fecha=e.fecha,
+                moneda=(e.moneda or Moneda.ARS).value,
+                grupo=e.grupo,
+                categoria=e.categoria,
+                flujo="NEUTRO",
+                descripcion=e.descripcion,
+                # Una corrección de cotización no tiene monto propio: la columna
+                # muestra cero y el texto cuenta qué cambió.
+                monto=_money(e.monto),
+                ganancia=None,
+                medio_pago=None,
+                cotizacion=None,
+                referencia_tipo=e.referencia_tipo,
+                referencia_id=e.referencia_id,
+            )
+        )
 
     # Fecha descendente; a igual fecha, primero las líneas de caja (id UUID) y
     # los cheques quedan intercalados de forma estable por su string id.

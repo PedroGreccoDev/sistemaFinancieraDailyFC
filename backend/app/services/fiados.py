@@ -20,6 +20,7 @@ from app.db.models import (
 )
 from app.core.fechas import hoy_local
 from app.services import caja as svc_caja
+from app.services import eventos as svc_eventos
 from app.services import cheques as svc_cheques
 from app.services import stock_usd as svc_stock
 from app.services.conversion import calcular_reduccion_saldo
@@ -201,6 +202,7 @@ def cobrar_con_cheque(
     if created_at is not None:
         cheque_nuevo.created_at = created_at
 
+    imputado = min(valor_neto, fiado.saldo_pendiente).quantize(Decimal("0.01"))
     if diferencia >= Decimal("0.00"):
         fiado.saldo_pendiente = Decimal("0.00")
         fiado.estado = FiadoEstado.CANCELADO
@@ -209,6 +211,23 @@ def cobrar_con_cheque(
 
     try:
         db.add(cheque_nuevo)
+        # El cobro no deja fila propia: bajan saldos y el papel entra a cartera
+        # (§Historial unificado). El `flush` es para que el evento pueda apuntar
+        # al cheque recién agregado.
+        db.flush()
+        svc_eventos.cobro_con_cheque(
+            db,
+            cliente=fiado.cliente.nombre if fiado.cliente else "El cliente",
+            concepto="su fiado",
+            cheques=[cheque_nuevo],
+            imputado=imputado,
+            moneda=Moneda.ARS,
+            # El cobro de un fiado con cheque no lleva fecha en el pedido: es
+            # del día en que se carga.
+            fecha=hoy_local(),
+            referencia_tipo="fiado",
+            referencia_id=fiado.id,
+        )
         db.commit()
         db.refresh(fiado)
         db.refresh(cheque_nuevo)

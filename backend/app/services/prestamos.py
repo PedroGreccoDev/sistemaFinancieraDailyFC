@@ -43,6 +43,7 @@ from app.schemas.prestamos import (
 from app.schemas.cheques import ChequeRead
 from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
+from app.services import eventos as svc_eventos
 from app.services import stock_usd as svc_stock
 from app.services.conversion import calcular_reduccion_saldo
 from app.services.exceptions import (
@@ -618,6 +619,7 @@ def editar_interes_fijo(
     if prestamo.estado == PrestamoEstado.CANCELADO:
         raise ConflictError("El préstamo ya está cancelado.")
 
+    antes = svc_eventos.foto(prestamo, _CAMPOS_INTERES_FIJO)
     data = payload.model_dump(exclude_unset=True)
 
     if "dia_cobro" in data and data["dia_cobro"] != prestamo.dia_cobro:
@@ -646,6 +648,14 @@ def editar_interes_fijo(
             prestamo.total_a_cobrar = (prestamo.total_a_cobrar + delta).quantize(Decimal("0.01"))
             prestamo.ganancia = (prestamo.ganancia + delta).quantize(Decimal("0.01"))
         prestamo.monto_interes_fijo = nuevo
+
+    svc_eventos.correccion(
+        db,
+        que=f"interés del préstamo a {prestamo.cliente.nombre if prestamo.cliente else '—'}",
+        cambios=svc_eventos.cambios(antes, prestamo, _CAMPOS_INTERES_FIJO),
+        referencia_tipo="prestamo",
+        referencia_id=prestamo.id,
+    )
 
     try:
         db.commit()
@@ -823,6 +833,23 @@ def list_prestamos(db: Session, estado: PrestamoEstado | None = None) -> list[Pr
     return prestamos
 
 
+# Lo que se puede corregir de un préstamo, como lo nombra el operador.
+_CAMPOS_EDITABLES = {
+    "credito": "capital",
+    "total_a_cobrar": "total a cobrar",
+    "cuotas": "cantidad de cuotas",
+    "frecuencia": "frecuencia",
+    "moneda": "moneda",
+    "fecha_inicio": "fecha de inicio",
+}
+# El interés fijo no tiene cuadro que regenerar: se corrige por otra puerta y
+# lo que cambia es otra cosa (§3.b).
+_CAMPOS_INTERES_FIJO = {
+    "monto_interes_fijo": "interés por período",
+    "dia_cobro": "fecha de cobro",
+}
+
+
 def editar_prestamo(
     db: Session, prestamo_id: uuid.UUID, payload: PrestamoUpdate
 ) -> Prestamo:
@@ -856,6 +883,9 @@ def editar_prestamo(
             "Anulá los cobros o creá un préstamo nuevo."
         )
 
+    # La foto va antes de aplicar: después el valor viejo no está en ningún lado.
+    antes = svc_eventos.foto(prestamo, _CAMPOS_EDITABLES)
+
     data = payload.model_dump(exclude_unset=True)
     credito = data.get("credito", prestamo.credito)
     total = data.get("total_a_cobrar", prestamo.total_a_cobrar)
@@ -883,6 +913,16 @@ def editar_prestamo(
         cantidad=cantidad,
         frecuencia=frecuencia,
         total_a_cobrar=total,
+    )
+
+    # El evento se suma a la sesión, así que lo commitea cualquiera de las dos
+    # salidas de abajo (la normal y la del préstamo anterior al corte).
+    svc_eventos.correccion(
+        db,
+        que=f"préstamo a {prestamo.cliente.nombre if prestamo.cliente else '—'}",
+        cambios=svc_eventos.cambios(antes, prestamo, _CAMPOS_EDITABLES),
+        referencia_tipo="prestamo",
+        referencia_id=prestamo.id,
     )
 
     try:
@@ -970,6 +1010,13 @@ def cobrar_cuota(
         raise DatabaseWriteError("No se pudo registrar el cobro de la cuota.") from exc
 
 
+def _nombre_cliente(prestamo: Prestamo | None) -> str:
+    """Quién pagó, para el renglón del diario. Sin cliente no hay a quién nombrar."""
+    if prestamo is None or prestamo.cliente is None:
+        return "El cliente"
+    return prestamo.cliente.nombre
+
+
 def cobrar_cuota_con_cheque(
     db: Session,
     prestamo_id: uuid.UUID,
@@ -1010,6 +1057,19 @@ def cobrar_cuota_con_cheque(
         if prestamo is not None:
             recalcular_estado(prestamo)
 
+        # El cobro no deja fila propia —la cuota baja y el papel entra a
+        # cartera—, así que se anota en el diario (§Historial unificado).
+        svc_eventos.cobro_con_cheque(
+            db,
+            cliente=_nombre_cliente(prestamo),
+            concepto=f"la cuota {cuota.numero_cuota}",
+            cheques=[cheque],
+            imputado=cuota.monto,
+            moneda=prestamo.moneda if prestamo is not None else Moneda.ARS,
+            fecha=cuota.fecha_cobro,
+            referencia_tipo="prestamo",
+            referencia_id=prestamo_id,
+        )
         db.commit()
         db.refresh(cuota)
         db.refresh(cheque)
@@ -1112,6 +1172,21 @@ def cobrar_cuotas_con_cheque_lote(
         prestamo = db.get(Prestamo, prestamo_id)
         if prestamo is not None:
             recalcular_estado(prestamo)
+        cuantas = len(cuotas)
+        svc_eventos.cobro_con_cheque(
+            db,
+            cliente=_nombre_cliente(prestamo),
+            concepto=(
+                f"la cuota {cuotas[0].numero_cuota}" if cuantas == 1
+                else f"{cuantas} cuotas"
+            ),
+            cheques=[cheque],
+            imputado=sum((c.monto for c in cuotas), Decimal("0.00")),
+            moneda=prestamo.moneda if prestamo is not None else Moneda.ARS,
+            fecha=cuotas[0].fecha_cobro,
+            referencia_tipo="prestamo",
+            referencia_id=prestamo_id,
+        )
         db.commit()
         for cuota in cuotas:
             db.refresh(cuota)
@@ -1357,6 +1432,19 @@ def pagar_con_cheque(
 
     try:
         recalcular_estado(prestamo)
+        # Lo que bajó de verdad: las cuotas más el capital que se devolvió con el
+        # sobrante. Del pago en sí no queda fila propia (§Historial unificado).
+        svc_eventos.cobro_con_cheque(
+            db,
+            cliente=_nombre_cliente(prestamo),
+            concepto="su préstamo",
+            cheques=cheques,
+            imputado=(imputado + a_capital),
+            moneda=prestamo.moneda,
+            fecha=fecha,
+            referencia_tipo="prestamo",
+            referencia_id=prestamo_id,
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()

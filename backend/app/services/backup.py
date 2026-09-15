@@ -16,6 +16,7 @@ from app.db.models import (
     Cheque,
     Cliente,
     Compensacion,
+    Evento,
     CompensacionImputacion,
     Cuota,
     DeudaSimple,
@@ -146,6 +147,14 @@ _CI = [
     "id", "compensacion_id", "entidad_tipo", "entidad_id", "monto", "cancelo",
     "created_at",
 ]
+# El diario de Movimientos (§Historial unificado). Es historia pura: no lo
+# reconstruye ningún cálculo, porque justamente guarda lo que no dejó rastro en
+# ninguna otra tabla —el cobro con cheque, la anulación, la corrección—. Sin él,
+# un backup restaurado pierde días enteros de operaciones.
+_EV = [
+    "id", "fecha", "categoria", "grupo", "descripcion", "monto", "moneda",
+    "referencia_tipo", "referencia_id", "operador", "created_at",
+]
 
 # ── Validación de schema ────────────────────────────────────────────────────
 
@@ -246,6 +255,7 @@ def exportar_json(db: Session) -> dict:
             "compensacion_imputaciones": [
                 _serialize(r, _CI) for r in db.query(CompensacionImputacion).all()
             ],
+            "eventos":              [_serialize(r, _EV) for r in db.query(Evento).all()],
         },
     }
 
@@ -291,6 +301,7 @@ _DATE_MC = frozenset({"fecha"})
 _DATE_DS = frozenset({"fecha", "fecha_cancelacion"})
 _DATE_AJ = frozenset({"fecha"})
 _DATE_CO = frozenset({"fecha"})
+_DATE_EV = frozenset({"fecha"})
 
 
 def importar_json(db: Session, data: dict) -> dict[str, int]:
@@ -315,6 +326,7 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         # referencian un lote suyo (el del ajuste en USD y el del préstamo recibido
         # en dólares).
         for tbl in (
+            "eventos",
             "compensacion_imputaciones", "compensaciones",
             "ajustes_caja", "movimientos_caja", "cuotas", "fiados", "deudas_simples",
             "pasivos", "movimientos_efectivo", "prestamos", "cheques",
@@ -341,6 +353,10 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         # Después de clientes y pasivos: la compensación apunta a los dos.
         bulk(Compensacion,       [_cv(r, date_cols=_DATE_CO) for r in tablas.get("compensaciones", [])])
         bulk(CompensacionImputacion, [_cv(r) for r in tablas.get("compensacion_imputaciones", [])])
+        # El diario no apunta a nadie por FK (`referencia_id` es suelto a
+        # propósito: lo que cuenta pudo haberse anulado), así que va al final sin
+        # depender de ningún orden.
+        bulk(Evento,             [_cv(r, date_cols=_DATE_EV) for r in tablas.get("eventos", [])])
 
         db.commit()
     except Exception:
@@ -351,7 +367,7 @@ def importar_json(db: Session, data: dict) -> dict[str, int]:
         "clientes", "cheques", "prestamos", "cuotas",
         "movimientos_efectivo", "fiados", "pasivos", "gastos_operativos",
         "deudas_simples", "movimientos_caja", "ajustes_caja",
-        "compensaciones", "compensacion_imputaciones",
+        "compensaciones", "compensacion_imputaciones", "eventos",
     )
     return {t: len(tablas.get(t, [])) for t in tabla_names}
 
