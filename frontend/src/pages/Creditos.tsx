@@ -5,7 +5,7 @@ import {
   cobrarInteres, abonarCapital, cancelarInteresFijo, editarInteresFijo,
 } from '../api/prestamos'
 import { getClientes, createCliente } from '../api/clientes'
-import { fmtMonto, fmtDate, daysUntil } from '../lib/fmt'
+import { fmtMonto, fmtDate, daysUntil, fmtFechaConHora } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { Skeleton } from '../components/Skeleton'
@@ -1346,6 +1346,12 @@ export default function Creditos() {
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.875rem' }}>
                 <div style={{ minWidth: 0 }}>
                   <h3 style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word' }}>{nombre}</h3>
+                  {/* Cuándo se otorgó. La tarjeta mostraba vencimientos —lo que
+                      viene— y nada de cuándo salió la plata. Va acá arriba para
+                      las dos modalidades, que abajo se dibujan distinto. */}
+                  <p style={{ fontFamily: FM, fontSize: '0.65rem', color: 'rgba(100,116,139,0.55)', marginTop: '2px' }}>
+                    Otorgado {fmtFechaConHora(p.fecha_inicio, p.created_at)}
+                  </p>
                   {esInteresFijo(p) && (
                     <span style={{ display: 'inline-block', fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--primary)', background: 'color-mix(in srgb, var(--primary) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 30%, transparent)', padding: '1px 6px', marginTop: '3px' }}>
                       Interés fijo

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import case, func, select
@@ -303,6 +303,11 @@ def describir_compensacion(comp: Compensacion) -> str:
     return " · ".join(partes)
 
 
+# Piso para ordenar una fila cuyo timestamp todavía no escribió la BD: la manda
+# al fondo del día en vez de romper la comparación contra None.
+_SIN_MOMENTO = datetime.min.replace(tzinfo=UTC)
+
+
 def _salidas_de_cartera(
     db: Session, desde: date, hasta: date
 ) -> list[MovimientoUnificadoRead]:
@@ -350,6 +355,7 @@ def _salidas_de_cartera(
             MovimientoUnificadoRead(
                 id=f"fiado:{f.id}",
                 fecha=f.fecha_fiado,
+                momento=f.created_at,
                 moneda=Moneda.ARS.value,
                 grupo="CHEQUES",
                 categoria="FIADO_CHEQUE",
@@ -423,6 +429,7 @@ def _salidas_de_cartera(
             MovimientoUnificadoRead(
                 id=f"cheque-salida:{c.id}",
                 fecha=fecha,
+                momento=c.ultimo_evento_manual_at,
                 moneda=Moneda.ARS.value,
                 grupo="CHEQUES",
                 categoria=categoria,
@@ -498,6 +505,7 @@ def _deudas_del_negocio(
             MovimientoUnificadoRead(
                 id=f"pasivo:{p.id}",
                 fecha=fecha,
+                momento=p.created_at,
                 moneda=p.moneda.value,
                 grupo="PASIVOS",
                 categoria=categoria,
@@ -552,6 +560,7 @@ def get_movimientos_unificados(
             MovimientoUnificadoRead(
                 id=str(m.id),
                 fecha=m.fecha,
+                momento=m.created_at,
                 moneda=m.moneda.value,
                 grupo=_GRUPO_POR_CATEGORIA.get(m.categoria, "OTROS"),
                 categoria=m.categoria.value,
@@ -593,6 +602,7 @@ def get_movimientos_unificados(
             MovimientoUnificadoRead(
                 id=f"cheque:{c.id}",
                 fecha=fecha,
+                momento=c.created_at,
                 moneda=Moneda.ARS.value,
                 grupo="CHEQUES",
                 categoria="INGRESO_CHEQUE",
@@ -636,6 +646,7 @@ def get_movimientos_unificados(
             MovimientoUnificadoRead(
                 id=f"compensacion:{comp.id}",
                 fecha=comp.fecha,
+                momento=comp.created_at,
                 # La moneda del ítem es la de lo que se transfirió: es el hecho
                 # real. Las dos deudas pueden estar en otra, y eso lo cuenta la
                 # descripción.
@@ -685,6 +696,7 @@ def get_movimientos_unificados(
             MovimientoUnificadoRead(
                 id=f"evento:{e.id}",
                 fecha=e.fecha,
+                momento=e.created_at,
                 moneda=(e.moneda or Moneda.ARS).value,
                 grupo=e.grupo,
                 categoria=e.categoria,
@@ -701,9 +713,16 @@ def get_movimientos_unificados(
             )
         )
 
-    # Fecha descendente; a igual fecha, primero las líneas de caja (id UUID) y
-    # los cheques quedan intercalados de forma estable por su string id.
-    items.sort(key=lambda it: (it.fecha, it.id), reverse=True)
+    # Día operativo descendente y, dentro del día, por el momento en que cada
+    # operación se registró: el orden en que pasaron las cosas. Antes el desempate
+    # dentro del día era el `id` —un UUID v4—, así que las operaciones de una
+    # misma jornada salían en orden aleatorio y un vuelto podía figurar arriba
+    # del cobro que lo generó.
+    #
+    # El `id` queda de último desempate para que el orden sea estable cuando dos
+    # filas comparten timestamp. `_SIN_MOMENTO` cubre la fila sin timestamp
+    # todavía: comparar un datetime contra None rompe el sort.
+    items.sort(key=lambda it: (it.fecha, it.momento or _SIN_MOMENTO, it.id), reverse=True)
     return items
 
 

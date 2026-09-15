@@ -591,3 +591,55 @@ def test_el_cobro_con_cheque_figura_como_cobro():
     assert it.grupo == "COBROS"
     assert it.monto == Decimal("90000.00")
     assert it.flujo == "NEUTRO"
+
+
+# ── La hora de cada operación ─────────────────────────────────────────────
+
+
+def test_cada_linea_de_caja_trae_su_momento():
+    """El feed expone cuándo se registró la operación, no solo a qué día pertenece."""
+    momento = datetime(2026, 7, 10, 21, 17, tzinfo=timezone.utc)
+    linea = _caja(fecha=date(2026, 7, 10), categoria=CajaCategoria.GASTO,
+                  tipo=CajaTipo.EGRESO, monto="200.00", detalle="Nafta")
+    linea.created_at = momento
+
+    items = service.get_movimientos_unificados(FakeDB([linea], []), DESDE, HASTA)
+    assert items[0].momento == momento
+
+
+def test_dentro_del_dia_ordena_por_hora_y_no_por_id():
+    """A igual día, primero lo último que pasó.
+
+    El desempate era el `id` —un UUID v4—, así que las operaciones de una misma
+    jornada salían en orden aleatorio: un vuelto podía figurar arriba del cobro
+    que lo generó. Se arma el caso con el UUID mayor en la línea más vieja, que
+    es el que el orden anterior habría puesto primero.
+    """
+    dia = date(2026, 7, 10)
+    temprano = _caja(fecha=dia, categoria=CajaCategoria.COBRO_CUOTA,
+                     tipo=CajaTipo.INGRESO, monto="500.00", detalle="Cobro")
+    tarde = _caja(fecha=dia, categoria=CajaCategoria.VUELTO_PASIVO,
+                  tipo=CajaTipo.EGRESO, monto="100.00", detalle="Vuelto")
+    temprano.created_at = datetime(2026, 7, 10, 9, 0, tzinfo=timezone.utc)
+    tarde.created_at = datetime(2026, 7, 10, 18, 30, tzinfo=timezone.utc)
+    # El id no puede ser el que decide: se le da al viejo el que ordenaría primero.
+    temprano.id = uuid.UUID("ffffffff-ffff-4fff-8fff-ffffffffffff")
+    tarde.id = uuid.UUID("00000000-0000-4000-8000-000000000000")
+
+    items = service.get_movimientos_unificados(FakeDB([temprano, tarde], []), DESDE, HASTA)
+    assert [i.descripcion for i in items] == ["Vuelto", "Cobro"]
+
+
+def test_una_fila_sin_timestamp_no_rompe_el_orden():
+    """`created_at` lo pone la base: una fila que todavía no lo tiene no puede tumbar el feed."""
+    dia = date(2026, 7, 10)
+    con_hora = _caja(fecha=dia, categoria=CajaCategoria.GASTO,
+                     tipo=CajaTipo.EGRESO, monto="200.00", detalle="Con hora")
+    con_hora.created_at = datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)
+    sin_hora = _caja(fecha=dia, categoria=CajaCategoria.GASTO,
+                     tipo=CajaTipo.EGRESO, monto="300.00", detalle="Sin hora")
+
+    items = service.get_movimientos_unificados(FakeDB([con_hora, sin_hora], []), DESDE, HASTA)
+    assert len(items) == 2
+    assert items[0].descripcion == "Con hora"   # la que tiene hora va primero
+    assert items[1].momento is None

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -121,6 +121,14 @@ class MovimientoUnificadoRead(BaseModel):
     """
     id: str
     fecha: date
+    # Momento exacto en que la operación quedó registrada (el `created_at` de la
+    # fila de origen, con zona). Va **al lado** de `fecha`, no en su lugar:
+    # `fecha` es el día operativo local ART con el que cierra la caja, y
+    # convertirla a timestamp traspapelaría las operaciones nocturnas. Su día
+    # puede no coincidir con `fecha` —una operación de ayer cargada hoy—: esto
+    # es cuándo se cargó, `fecha` es a qué día pertenece. La pantalla lo muestra
+    # como hora ART, y de acá sale el orden dentro del día.
+    momento: datetime | None = None
     moneda: str  # ARS | USD
     grupo: str  # COBROS | CHEQUES | DIVISAS | GASTOS | OTORGAMIENTOS | PASIVOS | COMPENSACIONES
     categoria: str  # CajaCategoria original, o uno de los eventos sin efectivo:

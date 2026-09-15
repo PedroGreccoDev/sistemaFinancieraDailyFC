@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getDeudasSimples, editarDeudaSimple } from '../api/deudas_simples'
 import { getClientes } from '../api/clientes'
-import { fmtARS, fmtUSD, fmtDate } from '../lib/fmt'
+import { fmtARS, fmtUSD, fmtFechaConHora } from '../lib/fmt'
 import { chip, btnSolid, btnBordered, btnFlat } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconPlus, IconRefresh } from '../components/icons'
@@ -324,7 +324,7 @@ export default function DeudoresOtras() {
                             <EstadoBadge estado={d.estado} />
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', marginTop: '0.2rem' }}>
-                            <span style={{ fontFamily: FM, fontSize: '0.68rem', color: 'rgba(100,116,139,0.6)' }}>Original {fmtMoneda(d.monto, d.moneda)} · {fmtDate(d.fecha)}</span>
+                            <span style={{ fontFamily: FM, fontSize: '0.68rem', color: 'rgba(100,116,139,0.6)' }}>Original {fmtMoneda(d.monto, d.moneda)} · {fmtFechaConHora(d.fecha, d.created_at)}</span>
                             <span style={{ fontFamily: FM, fontSize: '0.8rem', fontWeight: 700, color: '#fbbf24', whiteSpace: 'nowrap' }}>{fmtMoneda(d.saldo_pendiente, d.moneda)}</span>
                           </div>
                           <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem' }}>
@@ -389,7 +389,7 @@ export default function DeudoresOtras() {
                                 {g.deudas.map((d) => (
                                   <tr key={d.id}>
                                     <td style={{ ...TD_SUB, color: 'rgba(148,163,184,0.85)', paddingLeft: '2.5rem', maxWidth: '260px', whiteSpace: 'normal', wordBreak: 'break-word' }}>{d.concepto}</td>
-                                    <td style={{ ...TD_SUB, color: 'rgba(100,116,139,0.6)', fontSize: '0.7rem', whiteSpace: 'nowrap' }}>{fmtDate(d.fecha)}</td>
+                                    <td style={{ ...TD_SUB, color: 'rgba(100,116,139,0.6)', fontSize: '0.7rem', whiteSpace: 'nowrap' }}>{fmtFechaConHora(d.fecha, d.created_at)}</td>
                                     <td style={{ ...TD_SUB, textAlign: 'right', color: 'rgba(100,116,139,0.6)' }}>{fmtMoneda(d.monto, d.moneda)}</td>
                                     <td style={{ ...TD_SUB, textAlign: 'right', fontWeight: 700, color: '#fbbf24' }}>{fmtMoneda(d.saldo_pendiente, d.moneda)}</td>
                                     <td style={{ ...TD_SUB, whiteSpace: 'nowrap' }}><EstadoBadge estado={d.estado} /></td>

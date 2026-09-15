@@ -1444,6 +1444,26 @@ el panel; sí la sesión de carga): es la vista por cuota, con su vencimiento.
     (`origen_tipo='vuelto_cheque'`) o el excedente de una compensación. **El pasivo con
     `ingreso_caja` queda afuera**: ese sí movió la caja y ya viene del libro como
     `INGRESO_PASIVO` — traerlo otra vez lo mostraría dos veces.
+  - **La hora de cada operación** _(pedido del dueño, 2026-09-15)_. Cada ítem trae `momento`:
+    el timestamp de cuándo se registró la operación (el `created_at` de la fila de origen, o
+    `ultimo_evento_manual_at` en las salidas de cartera). Va **al lado de `fecha`, no en su
+    lugar** — `fecha` es el día operativo local ART con el que cierra la caja, y volverla
+    timestamp traspapelaría las operaciones nocturnas (§7). Los dos pueden caer en días
+    distintos: una operación de ayer cargada hoy tiene la `fecha` de ayer y el `momento` de hoy.
+    - **De ahí sale el orden dentro del día.** El desempate era el `id` —un UUID v4—, así que
+      las operaciones de una misma jornada salían **en orden aleatorio** y un vuelto podía
+      figurar arriba del cobro que lo generó. Ahora es `(fecha, momento, id)` descendente, con
+      el `id` de último desempate para que sea estable. `_SIN_MOMENTO` cubre la fila cuyo
+      timestamp todavía no escribió la BD: comparar un datetime contra `None` rompe el sort.
+    - **La hora se formatea en el front, siempre en ART** (`lib/fmt.ts`): `fmtHora` (solo la
+      hora), `fmtFechaHora` (día y hora) y `diaLocalISO` (el día ART de un timestamp). Fijan la
+      zona a mano en vez de usar la del navegador. **No recortar un timestamp con
+      `.slice(0, 10)`**: eso da el día UTC y una operación de las 21:17 cae al día siguiente —
+      es el mismo pozo del que cuida `hoy_local()` en el backend.
+    - **`fmtFechaConHora(dia, iso)` para las fechas que elige el operador** (fiado, préstamo,
+      deuda suelta): muestra la hora de carga **solo si se cargó ese mismo día**. Pegarle la
+      hora de carga a una fecha operativa distinta arma un momento que nunca existió.
+      `horaDeCarga` es lo mismo devolviendo la hora sola, para las pantallas ya agrupadas por día.
   - **Cómo se distingue una entrega de una venta.** Las dos dejan el cheque en `VENDIDO`: lo
     que las separa es que la venta **dejó un ingreso `VENTA_CHEQUE` en el libro**. Ese es el
     criterio, y no la columna `acreedor_destino` (migración `0032`), justamente para que las

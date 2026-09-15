@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getMovimientos, editarMovimiento, crearMovimiento } from '../api/movimientos'
 import { getClientes } from '../api/clientes'
 import { getMovimientosUnificados } from '../api/reportes'
-import { fmtUSD, fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
+import { fmtUSD, fmtMonto, fmtDate, fmtHora, fmtFechaHora, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { SkeletonRows } from '../components/Skeleton'
@@ -669,6 +669,23 @@ export default function Movimientos() {
                       borderBottom: '1px solid var(--ov-004)',
                     }}
                   >
+                    {/* Hora de la operación. El día ya lo dice la franja de
+                        arriba, así que acá va sola. Ancho fijo y tabular para
+                        que la columna quede derecha y el ojo la recorra como
+                        una línea de tiempo. El tooltip muestra el día entero:
+                        una operación cargada atrasada aparece bajo su día
+                        operativo con la hora en que se cargó, y así se ve. */}
+                    <span
+                      title={`Registrado ${fmtFechaHora(m.momento)}`}
+                      style={{
+                        fontFamily: FJ, fontSize: '0.68rem', flexShrink: 0,
+                        width: '2.7rem', color: 'rgba(100,116,139,0.55)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {fmtHora(m.momento)}
+                    </span>
+
                     {/* Avatar con inicial de grupo */}
                     <div style={{
                       width: '34px', height: '34px', flexShrink: 0,

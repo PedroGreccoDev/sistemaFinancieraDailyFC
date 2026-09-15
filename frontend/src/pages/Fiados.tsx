@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getFiados, cobrarEfectivo, cobrarConCheque } from '../api/fiados'
 import { getChequeCartera, fiarCheque, getCheque } from '../api/cheques'
 import { getClientes, createCliente } from '../api/clientes'
-import { fmtARS, fmtDate, fmtNroCheque } from '../lib/fmt'
+import { fmtARS, fmtNroCheque, fmtFechaConHora } from '../lib/fmt'
 import { chip, btnSolid, btnBordered, btnFlat, btnGhost } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconPlus, IconRefresh } from '../components/icons'
@@ -461,7 +461,7 @@ export default function Fiados() {
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.4rem' }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontFamily: FM, fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-1)', wordBreak: 'break-word' }}>{nombreCliente(fiado.cliente_id)}</p>
-                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '1px' }}>{fmtNroCheque(fiado.cheque_nro)} · {fmtDate(fiado.fecha_fiado)}</p>
+                    <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.7rem', color: 'rgba(100,116,139,0.6)', marginTop: '1px' }}>{fmtNroCheque(fiado.cheque_nro)} · {fmtFechaConHora(fiado.fecha_fiado, fiado.created_at)}</p>
                   </div>
                   <EstadoBadge estado={fiado.estado} />
                 </div>
@@ -512,7 +512,7 @@ export default function Fiados() {
                     <td style={{ ...TD, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: fiado.estado === 'ABIERTO' ? '#fbbf24' : 'rgba(100,116,139,0.5)' }}>
                       {fmtARS(fiado.saldo_pendiente)}
                     </td>
-                    <td style={{ ...TD, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', whiteSpace: 'nowrap' }}>{fmtDate(fiado.fecha_fiado)}</td>
+                    <td style={{ ...TD, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)', whiteSpace: 'nowrap' }}>{fmtFechaConHora(fiado.fecha_fiado, fiado.created_at)}</td>
                     <td style={TD}><EstadoBadge estado={fiado.estado} /></td>
                     <td style={{ ...TD, textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', alignItems: 'center' }}>

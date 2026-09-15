@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getChequeCartera, getCheques, chequeFotoUrl, crearCheque } from '../api/cheques'
 import { getClientes } from '../api/clientes'
-import { fmtARS, fmtDate, fmtNroCheque, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
+import { fmtARS, fmtDate, fmtFechaHora, diaLocalISO, fmtNroCheque, daysUntil, todayISO, weekStartISO, monthStartISO, yearStartISO } from '../lib/fmt'
 import { btnBordered, btnFlat, btnSolid } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconRefresh, IconCamera } from '../components/icons'
@@ -186,8 +186,10 @@ function presetRange(preset: FilterPreset, desde: string | null, hasta: string |
 
 function filterByRange(cheques: Cheque[], start: string, end: string): Cheque[] {
   return cheques.filter(c => {
-    if (!c.ultimo_evento_manual_at) return false
-    const fecha = c.ultimo_evento_manual_at.slice(0, 10)
+    // Por el día local ART y no por `.slice(0, 10)`, que es el día UTC: una
+    // venta de las 21:17 caía en el día siguiente y no aparecía filtrando por hoy.
+    const fecha = diaLocalISO(c.ultimo_evento_manual_at)
+    if (!fecha) return false
     return fecha >= start && fecha <= end
   })
 }
@@ -492,7 +494,7 @@ export default function Cartera() {
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(valorNeto(cheque))}</td>
                       <td style={{ ...TD, textAlign: 'center', color: 'rgba(148,163,184,0.7)' }}>{fmtDate(cheque.fecha_pago)}</td>
                       <td style={{ ...TD, textAlign: 'center' }}>{diasBadge(dias)}</td>
-                      <td style={{ ...TD, color: 'rgba(100,116,139,0.6)', fontSize: '0.72rem' }} className="hidden sm:table-cell">{fmtDate(cheque.created_at.slice(0, 10))}</td>
+                      <td style={{ ...TD, color: 'rgba(100,116,139,0.6)', fontSize: '0.72rem' }} className="hidden sm:table-cell">{fmtFechaHora(cheque.created_at)}</td>
                       <td style={{ ...TD, textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                           <button onClick={() => setChequeOperar({ cheque, modo: 'VENDER' })} style={{ ...btnFlat('success'), fontSize: '0.68rem', padding: '2px 8px' }}>Vender</button>
@@ -570,7 +572,7 @@ export default function Cartera() {
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}><TipoBadge tipo={c.tipo} />{fmtNroCheque(c.nro_cheque)}<VueltaBadge vuelta={c.vuelta} /></p>
                     <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>
-                      {fmtARS(c.monto)} · {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
+                      {fmtARS(c.monto)} · {fmtFechaHora(c.ultimo_evento_manual_at)}
                     </p>
                     {clienteDestino(c) && <p style={{ fontFamily: FM, fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-2)', marginTop: '2px', wordBreak: 'break-word' }}>{clienteDestino(c)}</p>}
                   </div>
@@ -623,7 +625,7 @@ export default function Cartera() {
                       </td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600, color: '#4ade80' }}>{fmtARS(c.ganancia)}</td>
                       <td style={{ ...TD, textAlign: 'center', color: 'rgba(148,163,184,0.65)', fontSize: '0.72rem' }}>
-                        {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
+                        {fmtFechaHora(c.ultimo_evento_manual_at)}
                       </td>
                       <td style={{ ...TD, textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>

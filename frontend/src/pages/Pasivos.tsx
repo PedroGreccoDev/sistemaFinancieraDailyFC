@@ -5,7 +5,7 @@ import {
   pagarAcreedor, cancelarAcreedorConCheque,
 } from '../api/pasivos'
 import { getChequeCartera } from '../api/cheques'
-import { fmtARS, fmtUSD, fmtDate } from '../lib/fmt'
+import { fmtARS, fmtUSD, fmtDate, fmtFechaHora } from '../lib/fmt'
 import { chip, btnSolid, btnBordered, btnFlat } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconPlus, IconRefresh } from '../components/icons'
@@ -629,6 +629,9 @@ function DetalleDeuda({ pasivo }: { pasivo: Pasivo }) {
       {pasivo.concepto}
       {pasivo.ingreso_caja && <span title={`La plata entró a la caja el ${fmtDate(pasivo.fecha_ingreso ?? '')}`} style={{ color: 'rgba(52,211,153,0.85)', marginLeft: '0.35rem' }}>· entró a caja</span>}
       {pasivo.fecha_vencimiento && <span style={{ color: 'rgba(100,116,139,0.5)', marginLeft: '0.35rem' }}>· vence {fmtDate(pasivo.fecha_vencimiento)}</span>}
+      {/* Cuándo se contrajo. Un pasivo no tiene fecha operativa propia: su día es
+          el del alta (así lo cuenta Movimientos), así que va el timestamp entero. */}
+      <span title="Cuándo se registró la deuda" style={{ color: 'rgba(100,116,139,0.4)', marginLeft: '0.35rem' }}>· {fmtFechaHora(pasivo.created_at)}</span>
     </>
   )
 }

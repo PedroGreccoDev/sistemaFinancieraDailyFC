@@ -191,6 +191,10 @@ export type MovimientoFlujo = 'INGRESO' | 'EGRESO' | 'NEUTRO'
 export interface MovimientoUnificado {
   id: string
   fecha: string
+  // Momento en que se registró la operación (timestamp con zona). `fecha` es el
+  // día operativo con el que cierra la caja; esto es cuándo se cargó, y puede
+  // caer otro día si se cargó una operación atrasada. Se muestra con `fmtHora`.
+  momento: string | null
   moneda: Moneda
   grupo: MovimientoGrupo
   categoria: string

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getGastos, createGasto, editarGasto } from '../api/gastos_operativos'
-import { fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO } from '../lib/fmt'
+import { fmtMonto, fmtDate, todayISO, weekStartISO, monthStartISO, horaDeCarga } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconPlus } from '../components/icons'
@@ -525,7 +525,12 @@ export default function Gastos() {
                 </div>
 
                 {/* Ítems del día */}
-                {items.map((g) => (
+                {items.map((g) => {
+                  // La hora que cargó el operador manda: es cuándo pasó el gasto.
+                  // Si no la puso, vale la de carga —siempre que el gasto se haya
+                  // cargado ese mismo día, o sería la hora de otro día (§fmt).
+                  const hora = g.hora_operacion?.slice(0, 5) ?? horaDeCarga(g.fecha_operacion, g.created_at)
+                  return (
                   <div
                     key={g.id}
                     onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--ov-002)' }}
@@ -568,7 +573,7 @@ export default function Gastos() {
                       }}>
                         {g.concepto}
                       </p>
-                      {(g.hora_operacion || g.observaciones) && (
+                      {(hora || g.observaciones) && (
                         <p style={{
                           fontFamily: FM,
                           fontSize:   '0.68rem',
@@ -576,7 +581,7 @@ export default function Gastos() {
                           margin:     '2px 0 0',
                           wordBreak:  'break-word',
                         }}>
-                          {[g.hora_operacion?.slice(0, 5), g.observaciones]
+                          {[hora, g.observaciones]
                             .filter(Boolean)
                             .join(' · ')}
                         </p>
@@ -612,7 +617,8 @@ export default function Gastos() {
                       Eliminar
                     </button>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             ))}
           </div>
