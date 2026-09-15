@@ -72,3 +72,6 @@ export function IconLogout({ size = 18, style, strokeWidth = 2 }: P) {
 export function IconUserCog({ size = 18, style, strokeWidth = 2 }: P) {
   return (<svg {...base(size, strokeWidth)} style={style}><circle cx="9" cy="8" r="3" /><path d="M3 20c0-3.3 2.7-6 6-6c1 0 1.9.2 2.8.6" /><circle cx="18" cy="16" r="2.4" /><path d="M18 12.5v1M18 18.5v1M21 16h-1M16 16h-1M20.1 13.9l-.7.7M16.6 17.4l-.7.7M20.1 18.1l-.7-.7M16.6 14.6l-.7-.7" /></svg>)
 }
+export function IconSearch({ size = 16, style, strokeWidth = 2.2 }: P) {
+  return (<svg {...base(size, strokeWidth)} style={style}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></svg>)
+}

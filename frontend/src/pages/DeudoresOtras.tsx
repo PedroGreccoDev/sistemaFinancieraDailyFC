@@ -8,6 +8,8 @@ import { useToast } from '../lib/toast'
 import { IconPlus, IconRefresh } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
 import DropdownFilter from '../components/DropdownFilter'
+import BuscadorCliente from '../components/BuscadorCliente'
+import { coincide } from '../lib/buscar'
 import ModalNuevaDeudaSimple from '../components/ModalNuevaDeudaSimple'
 import ModalPagarDeuda, { type DeudaItem } from '../components/ModalPagarDeuda'
 import ModalEliminar from '../components/ModalEliminar'
@@ -144,6 +146,7 @@ function ModalEditarDeudaSimple({ deuda, onClose, onSuccess }: { deuda: DeudaSim
 
 export default function DeudoresOtras() {
   const [filtro, setFiltro] = useState<Filtro>('con-saldo')
+  const [busqueda, setBusqueda] = useState('')
   const [creando, setCreando] = useState(false)
   const [sumandoA, setSumandoA] = useState<{ id: string; nombre: string } | null>(null)
   const [cobrando, setCobrando] = useState<DeudaItem | null>(null)
@@ -166,7 +169,10 @@ export default function DeudoresOtras() {
     return agrupar(deudas ?? [], nombreDe)
   }, [deudas, clientes])
 
-  const visibles = filtro === 'con-saldo' ? grupos.filter((g) => g.abiertas > 0) : grupos
+  // El buscador se aplica sobre lo que ya dejó pasar el filtro de estado; los
+  // KPI de abajo siguen midiendo todo, que es el saldo real del negocio.
+  const porFiltro = filtro === 'con-saldo' ? grupos.filter((g) => g.abiertas > 0) : grupos
+  const visibles = porFiltro.filter((g) => coincide(g.nombre, busqueda))
   const conSaldo = grupos.filter((g) => g.abiertas > 0)
   const totalARS = conSaldo.reduce((acc, g) => acc + g.saldoARS, 0)
   const totalUSD = conSaldo.reduce((acc, g) => acc + g.saldoUSD, 0)
@@ -255,6 +261,7 @@ export default function DeudoresOtras() {
           ]}
           onChange={(v) => setFiltro(v as Filtro)}
         />
+        <BuscadorCliente value={busqueda} onChange={setBusqueda} />
       </div>
 
       {/* Lista */}
@@ -263,10 +270,17 @@ export default function DeudoresOtras() {
         {error && <div style={{ padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar las deudas.</div>}
         {deudas && visibles.length === 0 && (
           <div style={{ padding: '3rem', textAlign: 'center' }}>
-            <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✅</p>
+            <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{busqueda.trim() ? '🔍' : '✅'}</p>
             <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>
-              {filtro === 'con-saldo' ? 'Ningún cliente con saldo pendiente' : 'Sin deudas registradas'}
+              {busqueda.trim()
+                ? `Ningún cliente con ese nombre`
+                : filtro === 'con-saldo' ? 'Ningún cliente con saldo pendiente' : 'Sin deudas registradas'}
             </p>
+            {busqueda.trim() && (
+              <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.4)', marginTop: '0.25rem' }}>
+                Buscando "{busqueda}"{filtro === 'con-saldo' ? ' entre los que tienen saldo' : ''}
+              </p>
+            )}
           </div>
         )}
         {deudas && visibles.length > 0 && (

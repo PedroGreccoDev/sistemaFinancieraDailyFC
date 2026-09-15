@@ -2221,6 +2221,20 @@ que sería un loop infinito).
 - **Fechas/horas en hora local de Argentina (ART), no UTC.** Usar los helpers de `app/core/fechas.py` (`hoy_local`, etc.); los gastos guardan `hora_operacion` (migración `0008`).
 - **Naming Pasivos vs Deudas:** el módulo se llama **Pasivos** en backend/BD/API, pero en el navbar del frontend aparece rotulado como **"Deudas"**. Es la misma entidad. La pantalla agrupa **por acreedor** —una fila desplegable cada uno, con el total por moneda y sus botones— igual que Deudores/Otras deudas agrupa por cliente; ver §5.
 - **Sección "Deudores" (frontend):** agrupa lo que los **clientes** le deben al negocio (≠ "Deudas"/Pasivos, que es al revés). **Tres** pestañas desde 2026-09-12: **General** (índice, `/deudores` → `DeudoresGeneral`), **Cheques fiados** (`/deudores/cheques-fiados`) y **Otras deudas** (`/deudores/otras` → `DeudoresOtras`, las deudas simples **agrupadas por cliente** — ver §2.b). La pestaña **General** es una **vista consolidada por cliente** (total ARS y USD sumando fiados + deudas simples) armada **en el front** desde `/fiados` y `/deudas-simples` (no hay endpoint de agregación); tiene un botón **"Nuevo"** que abre `ModalNuevaDeudaSimple`. El **pago de importe libre** (parcial o total, cross-currency) vive en el componente compartido `components/ModalPagarDeuda.tsx` (llama a `pagar_prestamo`, `cobrar_con_efectivo`, `cobrar_deuda_simple` o `cobrar_deudas_cliente` según el `tipo` de deuda; con `deudas_cliente` el `id` que viaja es el del **cliente**, no el de una deuda) y se usa en General, Créditos y Otras deudas (botón "Pago libre"/"Cobrar", además del cobro por cuota entera). No reemplaza el cobro directo desde las otras pestañas.
+- **Buscador por nombre en todos los listados (frontend)** _(pedido del dueño, 2026-09-14)_:
+  `components/BuscadorCliente.tsx` + `lib/buscar.ts`. Va en la fila de filtros de cada
+  sección —Cartera (las dos tablas), Deudores General / Cheques fiados / Otras deudas,
+  Créditos, Deudas y Movimientos— y **filtra en el front** sobre lo que la página ya trajo:
+  ninguna lista es grande y así no parpadea entre tecla y tecla. Tres reglas:
+  **`normalizar` saca los acentos** (se tipea "peña" como "pena" y el cliente tiene que
+  aparecer igual: una tecla equivocada no puede esconder una deuda); **se busca palabra por
+  palabra**, así "juan perez" encuentra "Pérez, Juan Carlos"; y **los KPI nunca se filtran**
+  —son lo que el negocio tiene a cobrar o debe, y no pueden cambiar porque el operador esté
+  mirando a alguien—. En **Movimientos** se busca contra la `descripcion` del feed, que es
+  donde el backend mete el nombre (`svc_reportes`): el ítem no trae `cliente_id`. En
+  **Cartera** se agregó la columna **Cliente** en las dos tablas —origen arriba (de quién se
+  recibió), destino en el historial (a quién se le vendió)—: filtrar por un dato invisible
+  deja filas que parecen no tener nada que ver.
 - **Sección "Créditos" (frontend):** los **préstamos**, en su propia entrada del navbar (`/creditos` → `pages/Creditos.tsx`, ex `DeudoresPrestamos.tsx`). Era la pestaña "Préstamos" de Deudores hasta 2026-09-12; se mudó entera, con las mismas funciones (alta, cuadro de cuotas, cobro por cuota y en lote, cobro con cheque, pago libre, interés fijo, abonar capital, cancelar). `/deudores/prestamos` queda como `<Navigate>` a `/creditos`. Es la **única** pantalla desde donde se cobra un préstamo: el consolidado de Deudores ya no los toca (§2.c).
 
 ---

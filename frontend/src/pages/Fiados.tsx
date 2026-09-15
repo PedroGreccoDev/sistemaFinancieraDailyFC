@@ -8,6 +8,8 @@ import { chip, btnSolid, btnBordered, btnFlat, btnGhost } from '../lib/ui'
 import { useToast } from '../lib/toast'
 import { IconPlus, IconRefresh } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
+import BuscadorCliente from '../components/BuscadorCliente'
+import { coincide } from '../lib/buscar'
 import type { Fiado, FiadoEstado, CobrarConChequeResult, Cliente } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
 import ModalEliminar from '../components/ModalEliminar'
@@ -333,6 +335,7 @@ function ModalNuevoFiado({ onClose, onSuccess }: { onClose: () => void; onSucces
 
 export default function Fiados() {
   const [filtro, setFiltro] = useState<Filtro>('ABIERTO')
+  const [busqueda, setBusqueda] = useState('')
   const [creandoFiado, setCreandoFiado] = useState(false)
   const [cobrandoEfectivo, setCobrandoEfectivo] = useState<Fiado | null>(null)
   const [editandoCheque, setEditandoCheque] = useState<Fiado | null>(null)
@@ -383,6 +386,10 @@ export default function Fiados() {
 
   function nombreCliente(id: string) { return clienteMap.get(id) ?? '…' }
 
+  // Los KPI siguen contando todos los fiados abiertos: el buscador achica la
+  // tabla, no el saldo que el negocio tiene a cobrar.
+  const visibles = (fiados ?? []).filter((f) => coincide(nombreCliente(f.cliente_id), busqueda))
+
   return (
     <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
       {/* Header */}
@@ -425,6 +432,7 @@ export default function Fiados() {
           ]}
           onChange={setFiltro}
         />
+        <BuscadorCliente value={busqueda} onChange={setBusqueda} />
       </div>
 
       {/* Tabla */}
@@ -437,11 +445,18 @@ export default function Fiados() {
             <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Sin fiados registrados</p>
           </div>
         )}
-        {fiados && fiados.length > 0 && (
+        {fiados && fiados.length > 0 && visibles.length === 0 && (
+          <div style={{ padding: '3rem', textAlign: 'center' }}>
+            <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔍</p>
+            <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Ningún cliente con ese nombre</p>
+            <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.4)', marginTop: '0.25rem' }}>Buscando "{busqueda}"</p>
+          </div>
+        )}
+        {visibles.length > 0 && (
           <>
           {/* Mobile: tarjetas */}
           <div className="sm:hidden">
-            {fiados.map((fiado) => (
+            {visibles.map((fiado) => (
               <div key={`m-${fiado.id}`} style={{ padding: '0.85rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.4rem' }}>
                   <div style={{ minWidth: 0 }}>
@@ -484,7 +499,7 @@ export default function Fiados() {
                 </tr>
               </thead>
               <tbody>
-                {fiados.map((fiado) => (
+                {visibles.map((fiado) => (
                   <tr key={fiado.id}
                     onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                     onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>

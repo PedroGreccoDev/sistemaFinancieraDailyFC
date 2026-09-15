@@ -10,6 +10,8 @@ import { SkeletonRows } from '../components/Skeleton'
 import ModalPagarDeuda, { type DeudaItem } from '../components/ModalPagarDeuda'
 import ModalCompensar, { type CompensarCliente } from '../components/ModalCompensar'
 import ModalNuevaDeudaSimple from '../components/ModalNuevaDeudaSimple'
+import BuscadorCliente from '../components/BuscadorCliente'
+import { coincide } from '../lib/buscar'
 import type { Moneda, Fiado, DeudaSimple, Cliente } from '../types'
 
 const FM = "'Manrope', sans-serif"
@@ -184,6 +186,7 @@ export default function DeudoresGeneral() {
   const [pagando, setPagando] = useState<DeudaItem | null>(null)
   const [compensando, setCompensando] = useState<CompensarCliente | null>(null)
   const [creando, setCreando] = useState(false)
+  const [busqueda, setBusqueda] = useState('')
   const queryClient = useQueryClient()
 
   const { data: fiados, isLoading: loadingF, error: errF } = useQuery({
@@ -201,6 +204,9 @@ export default function DeudoresGeneral() {
   const isLoading = loadingF || loadingD
   const error = errF || errD
   const resumen = construirResumen(fiados ?? [], deudasSimples ?? [], clientes ?? [])
+  // El buscador achica la lista, no los totales: los KPI son lo que el negocio
+  // tiene a cobrar y no cambian porque el operador esté buscando a alguien.
+  const visibles = resumen.filter((r) => coincide(r.nombre, busqueda))
 
   const totalArs = resumen.reduce((acc, r) => acc + r.totalArs, 0)
   const totalUsd = resumen.reduce((acc, r) => acc + r.totalUsd, 0)
@@ -249,6 +255,11 @@ export default function DeudoresGeneral() {
         ))}
       </div>
 
+      {/* Buscador */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}>
+        <BuscadorCliente value={busqueda} onChange={setBusqueda} />
+      </div>
+
       {/* Lista */}
       {isLoading && <div style={{ ...CARD, overflow: 'hidden' }}><SkeletonRows rows={6} /></div>}
       {error && <div style={{ ...CARD, padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar los deudores.</div>}
@@ -258,9 +269,16 @@ export default function DeudoresGeneral() {
           <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Ningún cliente tiene deuda pendiente</p>
         </div>
       )}
-      {!isLoading && !error && resumen.length > 0 && (
+      {!isLoading && !error && resumen.length > 0 && visibles.length === 0 && (
+        <div style={{ ...CARD, padding: '3rem', textAlign: 'center' }}>
+          <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔍</p>
+          <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Ningún deudor con ese nombre</p>
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.4)', marginTop: '0.25rem' }}>Buscando "{busqueda}"</p>
+        </div>
+      )}
+      {!isLoading && !error && visibles.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {resumen.map((d) => <DeudorCard key={d.clienteId} deudor={d} onPagar={setPagando} onCompensar={setCompensando} />)}
+          {visibles.map((d) => <DeudorCard key={d.clienteId} deudor={d} onPagar={setPagando} onCompensar={setCompensando} />)}
         </div>
       )}
 

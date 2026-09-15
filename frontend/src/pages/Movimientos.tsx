@@ -14,6 +14,8 @@ import ModalEliminar from '../components/ModalEliminar'
 import ModalAjusteCaja from '../components/ModalAjusteCaja'
 import ModalTraspaso from '../components/ModalTraspaso'
 import ClienteSelect from '../components/ClienteSelect'
+import BuscadorCliente from '../components/BuscadorCliente'
+import { coincide } from '../lib/buscar'
 import SelectorMedioPago from '../components/SelectorMedioPago'
 
 type GrupoFiltro = 'TODOS' | MovimientoGrupo
@@ -348,6 +350,7 @@ interface ResumenDia {
 export default function Movimientos() {
   const [grupo, setGrupo]             = useState<GrupoFiltro>('TODOS')
   const [flujo, setFlujo]             = useState<FlujoFiltro>('TODOS')
+  const [busqueda, setBusqueda]       = useState('')
   const [preset, setPreset]           = useState<PresetFecha>('MES')
   const [customDesde, setCustomDesde] = useState<string | null>(null)
   const [customHasta, setCustomHasta] = useState<string | null>(null)
@@ -427,13 +430,18 @@ export default function Movimientos() {
 
   const movEditar = editarDivisaId ? divisas.find((m) => m.id === editarDivisaId) ?? null : null
 
+  // El feed no trae el id del cliente: su nombre viaja adentro de la descripción
+  // que arma el backend ("Cobro a Juan Pérez · …"), así que se busca contra ese
+  // texto. De yapa encuentra un número de cheque o un concepto de gasto, que es
+  // lo que el operador también tipea cuando busca una operación.
   const filtrados = useMemo(() =>
     movimientos.filter((m) => {
       if (grupo !== 'TODOS' && m.grupo !== grupo) return false
       if (flujo !== 'TODOS' && m.flujo !== flujo) return false
+      if (!coincide(m.descripcion, busqueda)) return false
       return true
     }),
-    [movimientos, grupo, flujo],
+    [movimientos, grupo, flujo, busqueda],
   )
 
   const porDia = useMemo(() => {
@@ -527,6 +535,7 @@ export default function Movimientos() {
           >
             ± Ajustar caja
           </button>
+          <BuscadorCliente value={busqueda} onChange={setBusqueda} placeholder="Cliente, cheque, concepto…" ancho={200} />
           <DropdownFilter
             label="Operación"
             value={grupo}
@@ -587,10 +596,12 @@ export default function Movimientos() {
         <div style={{ ...CARD, padding: '3rem', textAlign: 'center' }}>
           <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📭</p>
           <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>
-            Sin movimientos en el período
+            {busqueda.trim() ? `Sin movimientos de "${busqueda}" en el período` : 'Sin movimientos en el período'}
           </p>
           <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.4)', marginTop: '0.25rem' }}>
-            Probá cambiando el filtro de fecha, operación o flujo
+            {busqueda.trim()
+              ? 'Probá con otro nombre, o ampliá el período'
+              : 'Probá cambiando el filtro de fecha, operación o flujo'}
           </p>
         </div>
       )}

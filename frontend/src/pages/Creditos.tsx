@@ -13,6 +13,8 @@ import { IconPlus } from '../components/icons'
 import SelectorMedioPago from '../components/SelectorMedioPago'
 import ModalPagarDeuda, { type DeudaItem } from '../components/ModalPagarDeuda'
 import ModalEliminar from '../components/ModalEliminar'
+import BuscadorCliente from '../components/BuscadorCliente'
+import { coincide } from '../lib/buscar'
 import type { Prestamo, Cuota, MedioPago, Moneda, Frecuencia, PrestamoTipo, Cliente } from '../types'
 
 type Semaforo = 'mora' | 'proximo' | 'ok' | 'cancelado'
@@ -1192,6 +1194,7 @@ export default function Creditos() {
   const [cobroFijo, setCobroFijo] = useState<{ prestamo: Prestamo; modo: 'interes' | 'cancelar' } | null>(null)
   const [abonandoCapital, setAbonandoCapital] = useState<Prestamo | null>(null)
   const [editandoInteres, setEditandoInteres] = useState<Prestamo | null>(null)
+  const [busqueda, setBusqueda] = useState('')
   const queryClient = useQueryClient()
 
   const { data: prestamos, isLoading: loadingP, error: errP } = useQuery({
@@ -1218,6 +1221,13 @@ export default function Creditos() {
     })
 
   const cancelados = (prestamos ?? []).filter((p) => p.estado !== 'ACTIVO')
+
+  // El buscador alcanza las dos listas —los activos y los cancelados de abajo—:
+  // buscar a un cliente y que su préstamo saldado no aparezca sería peor que no
+  // tener buscador, porque parece que no existió.
+  const nombreDe = (p: Prestamo) => clienteMap.get(p.cliente_id) ?? ''
+  const activosVisibles = activos.filter((p) => coincide(nombreDe(p), busqueda))
+  const canceladosVisibles = cancelados.filter((p) => coincide(nombreDe(p), busqueda))
 
   function handleNuevoPrestamo() {
     setCreandoPrestamo(false)
@@ -1284,12 +1294,15 @@ export default function Creditos() {
             ))}
           </div>
         </div>
-        <button
-          onClick={() => setCreandoPrestamo(true)}
-          style={{ ...btnSolid('primary'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', padding: '0.45rem 0.875rem' }}
-        >
-          <IconPlus size={15} />Nuevo
-        </button>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <BuscadorCliente value={busqueda} onChange={setBusqueda} />
+          <button
+            onClick={() => setCreandoPrestamo(true)}
+            style={{ ...btnSolid('primary'), display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', padding: '0.45rem 0.875rem' }}
+          >
+            <IconPlus size={15} />Nuevo
+          </button>
+        </div>
       </div>
 
       {loadingP && (
@@ -1306,15 +1319,22 @@ export default function Creditos() {
       )}
       {errP && <div style={{ textAlign: 'center', color: '#f87171', padding: '3rem', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar préstamos.</div>}
 
-      {activos.length === 0 && !loadingP && (
+      {activosVisibles.length === 0 && !loadingP && (
         <div style={{ textAlign: 'center', color: 'rgba(100,116,139,0.6)', padding: '3rem' }}>
-          <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🎉</p>
-          <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600 }}>No hay préstamos activos</p>
+          <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{busqueda.trim() && activos.length > 0 ? '🔍' : '🎉'}</p>
+          <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600 }}>
+            {busqueda.trim() && activos.length > 0 ? 'Ningún préstamo activo de ese cliente' : 'No hay préstamos activos'}
+          </p>
+          {busqueda.trim() && activos.length > 0 && canceladosVisibles.length > 0 && (
+            <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.45)', marginTop: '0.25rem' }}>
+              Tiene {canceladosVisibles.length} cancelado(s), abajo
+            </p>
+          )}
         </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" style={{ marginBottom: '2rem' }}>
-        {activos.map((p) => {
+        {activosVisibles.map((p) => {
           const sem = getSemaforo(p)
           const cfg = semaforoConfig[sem]
           const proxima = proximaCuota(p)
@@ -1482,14 +1502,14 @@ export default function Creditos() {
         })}
       </div>
 
-      {cancelados.length > 0 && (
+      {canceladosVisibles.length > 0 && (
         <details style={{ marginTop: '0.5rem' }}>
           <summary style={{ cursor: 'pointer', fontFamily: FM, fontSize: '0.75rem', color: 'rgba(100,116,139,0.55)', listStyle: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem', userSelect: 'none' }}>
             <span>▶</span>
-            Ver {cancelados.length} préstamo(s) cancelado(s)
+            Ver {canceladosVisibles.length} préstamo(s) cancelado(s)
           </summary>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" style={{ marginTop: '0.875rem' }}>
-            {cancelados.map((p) => {
+            {canceladosVisibles.map((p) => {
               const nombre = clienteMap.get(p.cliente_id) ?? '…'
               return (
                 <div key={p.id} style={{ background: 'var(--ov-002)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.75rem 1rem', opacity: 0.55 }}>

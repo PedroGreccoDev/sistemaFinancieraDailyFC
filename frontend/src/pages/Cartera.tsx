@@ -14,6 +14,8 @@ import DateRangePicker from '../components/DateRangePicker'
 import ModalEliminar from '../components/ModalEliminar'
 import ModalRevertirCheque from '../components/ModalRevertirCheque'
 import ClienteSelect from '../components/ClienteSelect'
+import BuscadorCliente from '../components/BuscadorCliente'
+import { coincide } from '../lib/buscar'
 import ModalEditarCheque from '../components/ModalEditarCheque'
 import ModalOperarCheque, { type ModoOperar } from '../components/ModalOperarCheque'
 import SelectorMedioPago from '../components/SelectorMedioPago'
@@ -292,6 +294,10 @@ export default function Cartera() {
   // porque es el mismo modal y solo cambia a dónde va la plata.
   const [chequeOperar, setChequeOperar] = useState<{ cheque: Cheque; modo: ModoOperar } | null>(null)
   const [nuevoCheque, setNuevoCheque] = useState(false)
+  // Dos buscadores y no uno: son dos tablas con su propia pregunta —qué tengo de
+  // este cliente, y qué le vendí—. Uno solo filtraría la de abajo sin que se vea.
+  const [busqueda, setBusqueda] = useState('')
+  const [busquedaVendidos, setBusquedaVendidos] = useState('')
   const queryClient = useQueryClient()
 
   function handleEditSuccess() {
@@ -335,6 +341,14 @@ export default function Cartera() {
 
   const { data: cheques, isLoading, error, refetch } = useQuery({ queryKey: ['cartera'], queryFn: getChequeCartera, refetchInterval: 30_000 })
   const { data: vendidos } = useQuery({ queryKey: ['cheques-vendidos'], queryFn: () => getCheques('VENDIDO'), refetchInterval: 60_000 })
+  const { data: clientesCartera = [] } = useQuery({ queryKey: ['clientes'], queryFn: getClientes, staleTime: 60_000 })
+
+  // El cheque guarda ids, no nombres: de quién vino (origen) y a quién se le fue
+  // (destino). En cartera importa el primero —es lo único que ya pasó—; en el
+  // historial, el segundo, que es a quién se le vendió.
+  const nombreDe = new Map(clientesCartera.map((c) => [c.id, c.nombre]))
+  const clienteOrigen = (c: Cheque) => (c.cliente_origen_id ? nombreDe.get(c.cliente_origen_id) ?? '' : '')
+  const clienteDestino = (c: Cheque) => (c.cliente_destino_id ? nombreDe.get(c.cliente_destino_id) ?? '' : '')
 
   const sorted = cheques
     ? [...cheques].sort((a, b) => {
@@ -345,11 +359,16 @@ export default function Cartera() {
       })
     : []
 
+  const visibles = sorted.filter((c) => coincide(clienteOrigen(c), busqueda))
+
   const [rangeStart, rangeEnd] = presetRange(preset, customDesde, customHasta)
-  const filteredVendidos = vendidos
-    ? [...filterByRange(vendidos, rangeStart, rangeEnd)].sort((a, b) => (b.ultimo_evento_manual_at ?? '').localeCompare(a.ultimo_evento_manual_at ?? ''))
-    : []
-  const totalGanancia = filteredVendidos.reduce((acc, c) => acc + parseFloat(c.ganancia), 0)
+  const vendidosDelPeriodo = vendidos ? filterByRange(vendidos, rangeStart, rangeEnd) : []
+  const filteredVendidos = [...vendidosDelPeriodo]
+    .sort((a, b) => (b.ultimo_evento_manual_at ?? '').localeCompare(a.ultimo_evento_manual_at ?? ''))
+    .filter((c) => coincide(clienteDestino(c), busquedaVendidos))
+  // La ganancia del período es la de todas las ventas, se esté buscando o no: el
+  // KPI no puede cambiar porque el operador esté mirando a un cliente.
+  const totalGanancia = vendidosDelPeriodo.reduce((acc, c) => acc + parseFloat(c.ganancia), 0)
 
   return (
     <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
@@ -387,16 +406,28 @@ export default function Cartera() {
         </div>
       )}
 
+      {/* Buscador de la cartera */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}>
+        <BuscadorCliente value={busqueda} onChange={setBusqueda} placeholder="Cliente de origen…" />
+      </div>
+
       {/* Tabla cartera */}
       <div style={{ ...CARD, overflow: 'hidden', marginBottom: '2.5rem' }}>
         {isLoading && <SkeletonRows rows={6} />}
         {error && <div style={{ padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar la cartera.</div>}
         {cheques && cheques.length === 0 && <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>La cartera está vacía</div>}
-        {sorted.length > 0 && (
+        {sorted.length > 0 && visibles.length === 0 && (
+          <div style={{ padding: '3rem', textAlign: 'center' }}>
+            <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔍</p>
+            <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Ningún cheque de ese cliente en cartera</p>
+            <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.4)', marginTop: '0.25rem' }}>Buscando "{busqueda}"</p>
+          </div>
+        )}
+        {visibles.length > 0 && (
           <>
           {/* Mobile: tarjetas */}
           <div className="sm:hidden">
-            {sorted.map((cheque) => {
+            {visibles.map((cheque) => {
               const dias = cheque.fecha_pago ? daysUntil(cheque.fecha_pago) : null
               return (
                 <div key={cheque.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
@@ -405,6 +436,7 @@ export default function Cartera() {
                     <div style={{ minWidth: 0 }}>
                       <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.82rem', color: 'var(--text-1)', wordBreak: 'break-word' }}><TipoBadge tipo={cheque.tipo} />{fmtNroCheque(cheque.nro_cheque)}<VueltaBadge vuelta={cheque.vuelta} /></p>
                       <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>Pago {fmtDate(cheque.fecha_pago)}</p>
+                      {clienteOrigen(cheque) && <p style={{ fontFamily: FM, fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-2)', marginTop: '2px', wordBreak: 'break-word' }}>{clienteOrigen(cheque)}</p>}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -424,13 +456,14 @@ export default function Cartera() {
           </div>
           {/* Desktop: tabla */}
           <div className="hidden sm:block" style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '660px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '760px' }}>
               <thead>
                 <tr>
                   <th style={{ ...TH, width: '76px', textAlign: 'center' }} aria-label="Foto">
                     <span style={{ display: 'inline-flex', color: 'rgba(100,116,139,0.7)' }}><IconCamera size={14} /></span>
                   </th>
                   <th style={TH}>Nº Cheque</th>
+                  <th style={TH} title="De quién se recibió el cheque">Cliente</th>
                   <th style={{ ...TH, textAlign: 'right' }}>Monto</th>
                   <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">Compra %</th>
                   <th style={{ ...TH, textAlign: 'right' }}>Con descuento</th>
@@ -441,7 +474,7 @@ export default function Cartera() {
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((cheque) => {
+                {visibles.map((cheque) => {
                   const dias = cheque.fecha_pago ? daysUntil(cheque.fecha_pago) : null
                   return (
                     <tr key={cheque.id} style={{ transition: 'background 0.1s' }}
@@ -451,6 +484,9 @@ export default function Cartera() {
                         <div style={{ display: 'flex', justifyContent: 'center' }}><FotoThumb cheque={cheque} onOpen={setFotoCheque} /></div>
                       </td>
                       <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}><TipoBadge tipo={cheque.tipo} />{fmtNroCheque(cheque.nro_cheque)}<VueltaBadge vuelta={cheque.vuelta} /></td>
+                      <td style={{ ...TD, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {clienteOrigen(cheque) || <span style={{ color: 'rgba(100,116,139,0.45)' }}>—</span>}
+                      </td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(cheque.monto)}</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.7)' }} className="hidden sm:table-cell">{parseFloat(cheque.porcentaje_compra).toFixed(2)}%</td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(valorNeto(cheque))}</td>
@@ -496,6 +532,7 @@ export default function Cartera() {
           ]}
           onChange={handlePreset}
         />
+        <BuscadorCliente value={busquedaVendidos} onChange={setBusquedaVendidos} placeholder="Cliente que lo compró…" />
         {showPicker && (
           <DateRangePicker
             from={customDesde} to={customHasta}
@@ -520,7 +557,9 @@ export default function Cartera() {
 
       <div style={{ ...CARD, overflow: 'hidden' }}>
         {filteredVendidos.length === 0 ? (
-          <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>Sin ventas en el período</div>
+          <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>
+            {busquedaVendidos.trim() ? 'Sin ventas a ese cliente en el período' : 'Sin ventas en el período'}
+          </div>
         ) : (
           <>
           {/* Mobile: tarjetas */}
@@ -533,6 +572,7 @@ export default function Cartera() {
                     <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>
                       {fmtARS(c.monto)} · {fmtDate(c.ultimo_evento_manual_at?.slice(0, 10) ?? null)}
                     </p>
+                    {clienteDestino(c) && <p style={{ fontFamily: FM, fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-2)', marginTop: '2px', wordBreak: 'break-word' }}>{clienteDestino(c)}</p>}
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)' }}>Ganancia</p>
@@ -553,10 +593,11 @@ export default function Cartera() {
           </div>
           {/* Desktop: tabla */}
           <div className="hidden sm:block" style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '620px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '720px' }}>
               <thead>
                 <tr>
                   <th style={TH}>Nº Cheque</th>
+                  <th style={TH} title="A quién se le vendió">Cliente</th>
                   <th style={{ ...TH, textAlign: 'right' }}>Monto</th>
                   <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">% Compra</th>
                   <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">% Venta</th>
@@ -572,6 +613,9 @@ export default function Cartera() {
                       onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                       <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}><TipoBadge tipo={c.tipo} />{fmtNroCheque(c.nro_cheque)}<VueltaBadge vuelta={c.vuelta} /></td>
+                      <td style={{ ...TD, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {clienteDestino(c) || <span style={{ color: 'rgba(100,116,139,0.45)' }}>—</span>}
+                      </td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(c.monto)}</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">{parseFloat(c.porcentaje_compra).toFixed(2)}%</td>
                       <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">
@@ -594,8 +638,8 @@ export default function Cartera() {
               </tbody>
               <tfoot>
                 <tr style={{ borderTop: '1px solid var(--bd-010)', background: 'var(--ov-0025)' }}>
-                  <td colSpan={4} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="hidden sm:table-cell">Total</td>
-                  <td colSpan={4} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="sm:hidden">Total</td>
+                  <td colSpan={5} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="hidden sm:table-cell">Total</td>
+                  <td colSpan={5} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="sm:hidden">Total</td>
                   <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#4ade80', borderBottom: 'none' }}>{fmtARS(totalGanancia)}</td>
                   <td colSpan={2} style={{ ...TD, borderBottom: 'none' }} />
                 </tr>

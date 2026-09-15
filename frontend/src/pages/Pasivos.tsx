@@ -12,6 +12,8 @@ import { IconPlus, IconRefresh } from '../components/icons'
 import { SkeletonRows } from '../components/Skeleton'
 import type { Cheque, MedioPago, Moneda, Pasivo, PasivoEstado } from '../types'
 import DropdownFilter from '../components/DropdownFilter'
+import BuscadorCliente from '../components/BuscadorCliente'
+import { coincide } from '../lib/buscar'
 import ModalEliminar from '../components/ModalEliminar'
 import ModalCompensar from '../components/ModalCompensar'
 
@@ -635,6 +637,7 @@ function DetalleDeuda({ pasivo }: { pasivo: Pasivo }) {
 
 export default function Pasivos() {
   const [filtro, setFiltro] = useState<Filtro>('PENDIENTE')
+  const [busqueda, setBusqueda] = useState('')
   const [pagando, setPagando] = useState<DeudaAcreedor | null>(null)
   const [conCheque, setConCheque] = useState<DeudaAcreedor | null>(null)
   const [pasivoEditar, setPasivoEditar] = useState<Pasivo | null>(null)
@@ -670,6 +673,9 @@ export default function Pasivos() {
   })
 
   const grupos = useMemo(() => agrupar(pasivos ?? []), [pasivos])
+  // Acá el nombre es texto libre y no un cliente con id (§5), así que se busca
+  // contra lo que se escribió. Los KPI no se filtran: son lo que el negocio debe.
+  const visibles = useMemo(() => grupos.filter((g) => coincide(g.nombre, busqueda)), [grupos, busqueda])
 
   const pendientes = pasivos?.filter((p) => p.estado === 'PENDIENTE') ?? []
   const totalARS = pendientes.filter((p) => p.moneda === 'ARS').reduce((acc, p) => acc + parseFloat(p.saldo_pendiente), 0)
@@ -733,23 +739,29 @@ export default function Pasivos() {
           ]}
           onChange={(v) => setFiltro(v as Filtro)}
         />
+        <BuscadorCliente value={busqueda} onChange={setBusqueda} placeholder="Nombre del acreedor…" />
       </div>
 
       {/* Lista — una fila por acreedor; el detalle de sus deudas se despliega */}
       <div style={{ ...CARD, overflow: 'hidden' }}>
         {isLoading && <SkeletonRows rows={6} />}
         {error && <div style={{ padding: '3rem', textAlign: 'center', color: '#f87171', fontFamily: FM, fontSize: '0.82rem' }}>Error al cargar las deudas.</div>}
-        {!isLoading && !error && grupos.length === 0 && (
+        {!isLoading && !error && visibles.length === 0 && (
           <div style={{ padding: '3rem', textAlign: 'center' }}>
-            <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✅</p>
-            <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Sin deudas registradas</p>
+            <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{busqueda.trim() && grupos.length > 0 ? '🔍' : '✅'}</p>
+            <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>
+              {busqueda.trim() && grupos.length > 0 ? 'Ningún acreedor con ese nombre' : 'Sin deudas registradas'}
+            </p>
+            {busqueda.trim() && grupos.length > 0 && (
+              <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.4)', marginTop: '0.25rem' }}>Buscando "{busqueda}"</p>
+            )}
           </div>
         )}
-        {!isLoading && !error && grupos.length > 0 && (
+        {!isLoading && !error && visibles.length > 0 && (
           <>
             {/* Mobile: tarjetas por acreedor */}
             <div className="sm:hidden">
-              {grupos.map((g) => (
+              {visibles.map((g) => (
                 <div key={`m-${g.clave}`} style={{ borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ padding: '0.85rem 1rem' }}>
                     <button type="button" onClick={() => toggle(g.clave)}
@@ -832,7 +844,7 @@ export default function Pasivos() {
                   </tr>
                 </thead>
                 <tbody>
-                  {grupos.map((g) => {
+                  {visibles.map((g) => {
                     const abierto = expandidos.has(g.clave)
                     return [
                       <tr key={g.clave}
