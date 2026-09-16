@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -12,6 +13,7 @@ from app.db.models import (
     CajaTipo,
     Cheque,
     ChequeEstado,
+    Cliente,
     Compensacion,
     ConfiguracionApertura,
     Cuota,
@@ -204,6 +206,73 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
         plata_en_calle=_get_plata_en_calle(db),
         gastos_periodo=_get_gastos_periodo(db, desde, hasta),
     )
+
+
+# Los cobros que un mismo cobro por cliente puede partir en varias líneas: el
+# importe se imputa de la operación más vieja a la más nueva y cada una asienta
+# la suya (`deudores.cobrar_cliente`). Son las únicas que necesitan el origen.
+_CATEGORIAS_COBRO = {
+    CajaCategoria.COBRO_FIADO,
+    CajaCategoria.COBRO_DEUDA,
+    CajaCategoria.COBRO_CUOTA,
+}
+
+
+def _origenes_de_cobro(
+    db: Session, movimientos: list[MovimientoCaja]
+) -> dict[tuple[str, uuid.UUID], tuple[date | None, str | None]]:
+    """Fecha de origen y cliente de la operación que salda cada línea de cobro.
+
+    **La fecha** es la misma por la que ordena la imputación
+    (`deudores.armar_renglones`): `fecha_fiado` del fiado, `fecha` de la deuda
+    libre, `fecha_inicio` del préstamo.
+
+    **El cliente** viene de acá y no de parsear el `detalle`. Se intentó lo
+    segundo y se rompe con un nombre que lleva guion: "Cobro deuda - Kiosco 24 -
+    Sucursal Centro - Reposición" no se puede partir sin saber dónde termina el
+    nombre y empieza el concepto, y el cliente salía mutilado ("Kiosco 24").
+
+    Una consulta por tipo de referencia, no una por fila.
+    """
+    ids: dict[str, set[uuid.UUID]] = {}
+    for m in movimientos:
+        if m.categoria not in _CATEGORIAS_COBRO or m.referencia_id is None:
+            continue
+        if m.referencia_tipo is None:
+            continue
+        ids.setdefault(m.referencia_tipo, set()).add(m.referencia_id)
+
+    origenes: dict[tuple[str, uuid.UUID], tuple[date | None, str | None]] = {}
+
+    def _cargar(ref: str, modelo, consulta) -> None:
+        pendientes = ids.get(ref)
+        if not pendientes:
+            return
+        for oid, fecha, cliente in db.execute(
+            consulta.where(modelo.id.in_(pendientes))
+        ):
+            origenes[(ref, oid)] = (fecha, cliente)
+
+    def _directo(modelo, columna):
+        """El origen tiene su propio `cliente_id`: id, fecha y nombre de una."""
+        return select(modelo.id, columna, Cliente.nombre).join(
+            Cliente, Cliente.id == modelo.cliente_id
+        )
+
+    _cargar("fiado", Fiado, _directo(Fiado, Fiado.fecha_fiado))
+    _cargar("deuda_simple_cobro", DeudaSimple, _directo(DeudaSimple, DeudaSimple.fecha))
+    _cargar("prestamo", Prestamo, _directo(Prestamo, Prestamo.fecha_inicio))
+    # Una cuota puntual hereda la antigüedad —y el cliente— de su préstamo: lo
+    # que envejece es el crédito, no el renglón del cuadro.
+    _cargar(
+        "cuota",
+        Cuota,
+        select(Cuota.id, Prestamo.fecha_inicio, Cliente.nombre)
+        .join(Prestamo, Prestamo.id == Cuota.prestamo_id)
+        .join(Cliente, Cliente.id == Prestamo.cliente_id),
+    )
+
+    return origenes
 
 
 # Familia de operación de cada categoría de caja, para el filtro del panel.
@@ -554,8 +623,14 @@ def get_movimientos_unificados(
             .order_by(MovimientoCaja.fecha.asc(), MovimientoCaja.created_at.asc())
         )
     )
+    origenes_cobro = _origenes_de_cobro(db, movimientos)
     for m in movimientos:
         descripcion = m.detalle or _LABEL_CATEGORIA.get(m.categoria, m.categoria.value)
+        origen_fecha, origen_cliente = (
+            (None, None)
+            if m.referencia_tipo is None or m.referencia_id is None
+            else origenes_cobro.get((m.referencia_tipo, m.referencia_id), (None, None))
+        )
         items.append(
             MovimientoUnificadoRead(
                 id=str(m.id),
@@ -572,6 +647,8 @@ def get_movimientos_unificados(
                 cotizacion=None if m.cotizacion is None else m.cotizacion,
                 referencia_tipo=m.referencia_tipo,
                 referencia_id=m.referencia_id,
+                origen_fecha=origen_fecha,
+                origen_cliente=origen_cliente,
             )
         )
 

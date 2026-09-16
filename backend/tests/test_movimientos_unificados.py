@@ -14,9 +14,12 @@ from app.db.models import (
     ChequeTipo,
     Cliente,
     Compensacion,
+    Cuota,
+    DeudaSimple,
     Fiado,
     FiadoEstado,
     Evento,
+    Prestamo,
     Pasivo,
     PasivoEstado,
     MedioPago,
@@ -39,11 +42,55 @@ class FakeDB:
     qué romperse.
     """
 
-    def __init__(self, *result_sets: list) -> None:
+    def __init__(self, *result_sets: list, origenes: dict | None = None) -> None:
         self._queue = list(result_sets)
+        # Las entidades de origen de los cobros, por modelo: {Fiado: [fiado, ...]}.
+        # Se guardan **objetos del modelo**, no tuplas ya armadas, y `execute`
+        # lee de cada uno las columnas que el statement pide: así el test falla
+        # si el servicio busca la fecha en la tabla —o en la columna— equivocada.
+        self._origenes = origenes or {}
+        self.consultas_origen = 0
 
     def scalars(self, _stmt):  # noqa: ANN001
         return iter(self._queue.pop(0) if self._queue else [])
+
+    def execute(self, stmt):  # noqa: ANN001
+        self.consultas_origen += 1
+        columnas = stmt.column_descriptions
+        principal = columnas[0]["entity"]
+
+        def _relacionado(obj, clase, profundidad=2):  # noqa: ANN001
+            """El objeto de `clase` colgado de `obj`, hasta dos saltos.
+
+            Los dos saltos son para la cuota: el cliente no cuelga de ella sino
+            del préstamo (`cuota.prestamo.cliente`), igual que en el join real.
+            """
+            if profundidad == 0:
+                return None
+            valores = list(vars(obj).values())
+            directo = next((v for v in valores if isinstance(v, clase)), None)
+            if directo is not None:
+                return directo
+            for v in valores:
+                if hasattr(v, "__dict__"):
+                    hallado = _relacionado(v, clase, profundidad - 1)
+                    if hallado is not None:
+                        return hallado
+            return None
+
+        def _valor(obj, col):  # noqa: ANN001
+            # Una columna de otra entidad (el `fecha_inicio` del préstamo al que
+            # cuelga la cuota, el nombre del cliente) se lee del relacionado.
+            if col["entity"] is not principal:
+                obj = _relacionado(obj, col["entity"])
+                if obj is None:
+                    return None
+            return getattr(obj, col["name"], None)
+
+        return iter(
+            tuple(_valor(obj, col) for col in columnas)
+            for obj in self._origenes.get(principal, [])
+        )
 
 
 def _caja(
@@ -60,6 +107,7 @@ def _caja(
     medio_pago: MedioPago = MedioPago.EFECTIVO,
     cotizacion: str | None = None,
     referencia_tipo: str | None = None,
+    referencia_id: uuid.UUID | None = None,
 ) -> MovimientoCaja:
     return MovimientoCaja(
         id=uuid.uuid4(),
@@ -72,7 +120,11 @@ def _caja(
         medio_pago=medio_pago,
         cotizacion=None if cotizacion is None else Decimal(cotizacion),
         referencia_tipo=referencia_tipo,
-        referencia_id=uuid.uuid4() if referencia_tipo else None,
+        referencia_id=(
+            referencia_id
+            if referencia_id is not None
+            else (uuid.uuid4() if referencia_tipo else None)
+        ),
         detalle=detalle,
     )
 
@@ -643,3 +695,140 @@ def test_una_fila_sin_timestamp_no_rompe_el_orden():
     assert len(items) == 2
     assert items[0].descripcion == "Con hora"   # la que tiene hora va primero
     assert items[1].momento is None
+
+
+# ── Fecha de origen de los cobros ─────────────────────────────────────
+#
+# Un cobro por cliente imputa de la deuda más vieja a la más nueva y cada
+# renglón asienta su propia línea, todas en la misma transacción: comparten
+# `created_at` al microsegundo y su `id` es un UUID v4. `origen_fecha` es lo
+# único con lo que el panel puede volver a armar ese orden.
+
+
+def test_origen_fecha_sale_de_la_tabla_de_cada_referencia():
+    """Cada tipo de cobro busca su fecha donde corresponde, no en cualquier tabla."""
+    fiado_id, deuda_id, prestamo_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    caja = [
+        _caja(fecha=date(2026, 7, 20), categoria=CajaCategoria.COBRO_FIADO,
+              tipo=CajaTipo.INGRESO, monto="100.00", detalle="Cobro fiado - Ana",
+              referencia_tipo="fiado", referencia_id=fiado_id),
+        _caja(fecha=date(2026, 7, 20), categoria=CajaCategoria.COBRO_DEUDA,
+              tipo=CajaTipo.INGRESO, monto="200.00", detalle="Cobro deuda - Ana - Envases",
+              referencia_tipo="deuda_simple_cobro", referencia_id=deuda_id),
+        _caja(fecha=date(2026, 7, 20), categoria=CajaCategoria.COBRO_CUOTA,
+              tipo=CajaTipo.INGRESO, monto="300.00", detalle="Pago préstamo - Ana",
+              referencia_tipo="prestamo", referencia_id=prestamo_id),
+    ]
+    ana = Cliente(id=uuid.uuid4(), nombre="Ana Torres")
+    fiado = Fiado(id=fiado_id, fecha_fiado=date(2026, 3, 1))
+    fiado.cliente = ana
+    # Con `fecha_cancelacion` cargada a propósito: es la otra fecha de la tabla,
+    # y sacar la de ahí daría el día en que se terminó de pagar.
+    deuda = DeudaSimple(id=deuda_id, fecha=date(2026, 4, 2),
+                        fecha_cancelacion=date(2026, 7, 20))
+    deuda.cliente = ana
+    prestamo = Prestamo(id=prestamo_id, fecha_inicio=date(2026, 5, 3))
+    prestamo.cliente = ana
+    db = FakeDB(caja, [], origenes={
+        Fiado: [fiado], DeudaSimple: [deuda], Prestamo: [prestamo],
+    })
+    items = service.get_movimientos_unificados(db, DESDE, HASTA)
+    por_cat = {i.categoria: i.origen_fecha for i in items}
+    assert por_cat["COBRO_FIADO"]  == date(2026, 3, 1)
+    assert por_cat["COBRO_DEUDA"]  == date(2026, 4, 2)
+    assert por_cat["COBRO_CUOTA"]  == date(2026, 5, 3)
+
+
+def test_una_cuota_hereda_la_antiguedad_de_su_prestamo():
+    """Lo que envejece es el crédito, no el renglón del cuadro de cuotas."""
+    cuota_id = uuid.uuid4()
+    caja = [_caja(fecha=date(2026, 7, 20), categoria=CajaCategoria.COBRO_CUOTA,
+                  tipo=CajaTipo.INGRESO, monto="500.00", detalle="Cuota #3 - Ana",
+                  referencia_tipo="cuota", referencia_id=cuota_id)]
+    cuota = Cuota(id=cuota_id, fecha_vencimiento=date(2026, 6, 1))
+    cuota.prestamo = Prestamo(id=uuid.uuid4(), fecha_inicio=date(2026, 1, 15))
+    cuota.prestamo.cliente = Cliente(id=uuid.uuid4(), nombre="Ana Torres")
+    db = FakeDB(caja, [], origenes={Cuota: [cuota]})
+    items = service.get_movimientos_unificados(db, DESDE, HASTA)
+    assert items[0].origen_fecha == date(2026, 1, 15)
+    # El cliente también sale del préstamo, no de la cuota.
+    assert items[0].origen_cliente == "Ana Torres"
+
+
+def test_lo_que_no_es_cobro_no_trae_origen_fecha():
+    """Solo los cobros se parten en varios renglones: el resto no paga la consulta."""
+    caja = [
+        _caja(fecha=date(2026, 7, 20), categoria=CajaCategoria.GASTO,
+              tipo=CajaTipo.EGRESO, monto="200.00", detalle="Nafta"),
+        _caja(fecha=date(2026, 7, 20), categoria=CajaCategoria.VENTA_CHEQUE,
+              tipo=CajaTipo.INGRESO, monto="900.00", detalle="Venta cheque",
+              referencia_tipo="cheque"),
+    ]
+    db = FakeDB(caja, [])
+    items = service.get_movimientos_unificados(db, DESDE, HASTA)
+    assert all(i.origen_fecha is None for i in items)
+    assert all(i.origen_cliente is None for i in items)
+    # Sin cobros no se consulta ninguna tabla de origen.
+    assert db.consultas_origen == 0
+
+
+def test_una_referencia_que_ya_no_existe_no_rompe_el_feed():
+    """Un cobro cuya operación de origen se anuló sigue listándose, sin fecha."""
+    caja = [_caja(fecha=date(2026, 7, 20), categoria=CajaCategoria.COBRO_FIADO,
+                  tipo=CajaTipo.INGRESO, monto="100.00", detalle="Cobro fiado - Ana",
+                  referencia_tipo="fiado", referencia_id=uuid.uuid4())]
+    db = FakeDB(caja, [], origenes={Fiado: []})
+    items = service.get_movimientos_unificados(db, DESDE, HASTA)
+    assert len(items) == 1
+    assert items[0].origen_fecha is None
+    assert items[0].origen_cliente is None
+
+
+def test_los_renglones_de_un_cobro_quedan_ordenables_por_antiguedad():
+    """El caso real: un cobro que tapó tres deudas, todas con el mismo timestamp."""
+    momento = datetime(2026, 7, 20, 15, 30, 45, 123456, tzinfo=timezone.utc)
+    ids = [uuid.uuid4() for _ in range(3)]
+    fechas = [date(2026, 5, 10), date(2026, 2, 1), date(2026, 4, 3)]
+    caja = []
+    for oid, monto in zip(ids, ("100.00", "200.00", "300.00")):
+        linea = _caja(fecha=date(2026, 7, 20), categoria=CajaCategoria.COBRO_DEUDA,
+                      tipo=CajaTipo.INGRESO, monto=monto, detalle=f"Cobro deuda - Ana - {monto}",
+                      referencia_tipo="deuda_simple_cobro", referencia_id=oid)
+        linea.created_at = momento
+        caja.append(linea)
+
+    ana = Cliente(id=uuid.uuid4(), nombre="Ana Torres")
+    deudas = []
+    for oid, f in zip(ids, fechas):
+        d = DeudaSimple(id=oid, fecha=f)
+        d.cliente = ana
+        deudas.append(d)
+    db = FakeDB(caja, [], origenes={DeudaSimple: deudas})
+    items = service.get_movimientos_unificados(db, DESDE, HASTA)
+    # Comparten momento: el orden del feed no los distingue, `origen_fecha` sí.
+    assert len({i.momento for i in items}) == 1
+    assert sorted(i.origen_fecha for i in items) == [
+        date(2026, 2, 1), date(2026, 4, 3), date(2026, 5, 10),
+    ]
+    # Y una sola consulta por tabla, no una por renglón.
+    assert db.consultas_origen == 1
+
+
+def test_el_cliente_con_guion_en_el_nombre_llega_entero():
+    """El motivo por el que el cliente viaja en su propio campo.
+
+    Se intentó sacarlo de la `descripcion` y se rompe justo acá: en
+    "Cobro deuda - Kiosco 24 - Sucursal Centro - Reposición" no hay forma de
+    saber dónde termina el nombre y empieza el concepto, y en pantalla el
+    cliente salía cortado ("Kiosco 24").
+    """
+    deuda_id = uuid.uuid4()
+    caja = [_caja(fecha=date(2026, 7, 20), categoria=CajaCategoria.COBRO_DEUDA,
+                  tipo=CajaTipo.INGRESO, monto="100.00",
+                  detalle="Cobro deuda - Kiosco 24 - Sucursal Centro - Reposición",
+                  referencia_tipo="deuda_simple_cobro", referencia_id=deuda_id)]
+    deuda = DeudaSimple(id=deuda_id, fecha=date(2026, 4, 2))
+    deuda.cliente = Cliente(id=uuid.uuid4(), nombre="Kiosco 24 - Sucursal Centro")
+    db = FakeDB(caja, [], origenes={DeudaSimple: [deuda]})
+    items = service.get_movimientos_unificados(db, DESDE, HASTA)
+    assert items[0].origen_cliente == "Kiosco 24 - Sucursal Centro"

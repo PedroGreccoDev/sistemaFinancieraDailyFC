@@ -317,8 +317,10 @@ const CATEGORIA_LABEL: Record<string, string> = {
   AJUSTE_CAJA:           'Ajuste de caja',
 }
 
-function detalleSecundario(m: MovimientoUnificado): string {
-  const partes: string[] = [CATEGORIA_LABEL[m.categoria] ?? m.categoria]
+// `etiqueta` pisa el nombre de la categoría: lo usa un cobro que tocó deudas de
+// distinto tipo, donde decir "Cobro de fiado" describiría mal a la mitad.
+function detalleSecundario(m: MovimientoUnificado, etiqueta?: string): string {
+  const partes: string[] = [etiqueta ?? CATEGORIA_LABEL[m.categoria] ?? m.categoria]
   if (m.flujo === 'NEUTRO') partes.push('sin movimiento de efectivo')
   if (m.medio_pago) partes.push(m.medio_pago === 'EFECTIVO' ? 'efectivo' : 'transferencia')
   if (m.cotizacion) {
@@ -330,6 +332,93 @@ function detalleSecundario(m: MovimientoUnificado): string {
     partes.push(`${g >= 0 ? 'ganancia' : 'pérdida'} ${fmtMonto(Math.abs(g).toString(), 'ARS')}`)
   }
   return partes.join(' · ')
+}
+
+// ── Cobros de varios renglones en una sola fila ───────────────────────
+//
+// Cobrar un importe libre contra la deuda de un cliente lo imputa de la
+// operación más vieja a la más nueva, y **cada** renglón alcanzado asienta su
+// propia línea de caja (`deudores.cobrar_cliente`). El operador cobró una vez:
+// que el feed muestre tres filas cuenta mal lo que pasó. Acá se juntan en una
+// sola con el total, y el detalle se abre a pedido.
+//
+// Un cobro es **una** operación, así que la fila es una sola aunque el importe
+// haya tapado deudas de distinto tipo: un mismo cobro puede alcanzar un fiado y
+// una deuda libre —son la misma bolsa, la cuenta corriente—, y ahí las líneas
+// salen con categorías distintas. Por eso la categoría **no** entra en la clave
+// de agrupado; lo que define la operación es la transacción.
+const CATEGORIAS_CONSOLIDABLES = new Set(['COBRO_FIADO', 'COBRO_DEUDA', 'COBRO_CUOTA'])
+
+interface CobroConsolidado {
+  esGrupo: true
+  clave: string
+  momento: string
+  fecha: string
+  moneda: string
+  monto: number
+  clienteTexto: string
+  renglones: MovimientoUnificado[]
+}
+
+type Fila = MovimientoUnificado | CobroConsolidado
+
+const esConsolidado = (f: Fila): f is CobroConsolidado => 'esGrupo' in f
+
+// Convierte las filas del día en filas visuales. Lo que no es un cobro de la
+// lista blanca pasa derecho, y un cobro de un solo renglón —el caso normal—
+// vuelve a salir como fila suelta: no hay nada que desplegar.
+function agruparCobros(items: MovimientoUnificado[]): Fila[] {
+  const filas: Fila[] = []
+  const grupos = new Map<string, CobroConsolidado>()
+  for (const m of items) {
+    // `momento` es el created_at de la línea, y todas las de un mismo cobro
+    // comparten transacción, así que comparten timestamp exacto. Una fila sin
+    // timestamp no se agrupa nunca: por `null` se juntarían cobros que no
+    // tienen nada que ver entre sí.
+    if (!CATEGORIAS_CONSOLIDABLES.has(m.categoria) || !m.momento) {
+      filas.push(m)
+      continue
+    }
+    // La moneda va en la clave aunque un cobro nunca mezcle: el grupo tiene un
+    // solo `monto`, y sumar pesos con dólares ahí sería un número inventado.
+    const clave = `${m.momento}|${m.moneda}`
+    const ex = grupos.get(clave)
+    if (ex) {
+      ex.monto += parseFloat(m.monto) || 0
+      ex.renglones.push(m)
+      continue
+    }
+    const grupo: CobroConsolidado = {
+      esGrupo: true,
+      clave,
+      momento: m.momento,
+      fecha: m.fecha,
+      moneda: m.moneda,
+      monto: parseFloat(m.monto) || 0,
+      // Si el backend no lo mandó —una referencia colgada— se muestra la
+      // descripción de la primera línea antes que dejar la fila muda.
+      clienteTexto: m.origen_cliente ?? m.descripcion,
+      renglones: [m],
+    }
+    grupos.set(clave, grupo)
+    // Se encola acá para que el grupo quede en el lugar de su primer renglón y
+    // el día siga leyéndose como la línea de tiempo que ya es.
+    filas.push(grupo)
+  }
+  return filas.map((f) => {
+    if (!esConsolidado(f)) return f
+    if (f.renglones.length === 1) return f.renglones[0]
+    // De la deuda más vieja a la más nueva: el mismo orden en que el cobro las
+    // fue tapando. `origen_fecha` es la fecha de la operación saldada —lo único
+    // que distingue a estas líneas, que comparten `momento` al microsegundo—;
+    // la que no la traiga se va al final antes que desordenar el resto.
+    f.renglones.sort((a, b) => {
+      if (!a.origen_fecha) return b.origen_fecha ? 1 : 0
+      if (!b.origen_fecha) return -1
+      return a.origen_fecha.localeCompare(b.origen_fecha)
+    })
+    return f
+  })
 }
 
 function getRango(preset: PresetFecha, customDesde: string | null, customHasta: string | null) {
@@ -362,6 +451,8 @@ export default function Movimientos() {
   const [traspasando, setTraspasando] = useState(false)
   const [nuevaDivisa, setNuevaDivisa] = useState(false)
   const [eliminarAjusteId, setEliminarAjusteId] = useState<string | null>(null)
+  // Qué cobros multi-renglón tienen el detalle abierto (por clave de grupo).
+  const [cobrosAbiertos, setCobrosAbiertos] = useState<Set<string>>(new Set())
   const queryClient = useQueryClient()
 
   const { desde, hasta } = getRango(preset, customDesde, customHasta)
@@ -460,9 +551,20 @@ export default function Movimientos() {
       map.set(m.fecha, ex)
     }
     return Array.from(map.entries())
-      .map(([fecha, v]) => ({ fecha, ...v }))
+      // `items` queda intacto —es lo que cuenta el encabezado y lo que suma el
+      // resumen—; `filas` es solo cómo se dibuja.
+      .map(([fecha, v]) => ({ fecha, ...v, filas: agruparCobros(v.items) }))
       .sort((a, b) => b.fecha.localeCompare(a.fecha))
   }, [filtrados])
+
+  function toggleCobro(clave: string) {
+    setCobrosAbiertos((prev) => {
+      const siguiente = new Set(prev)
+      if (siguiente.has(clave)) siguiente.delete(clave)
+      else siguiente.add(clave)
+      return siguiente
+    })
+  }
 
   const rangoLabel = desde && hasta ? `${fmtDate(desde)} → ${fmtDate(hasta)}` : '–'
 
@@ -609,7 +711,7 @@ export default function Movimientos() {
       {/* ── Lista agrupada por día ───────────────────────────────────────── */}
       {rangoListo && !isLoading && filtrados.length > 0 && (
         <div style={{ ...CARD, overflow: 'hidden' }}>
-          {porDia.map(({ fecha, resumen, items }) => (
+          {porDia.map(({ fecha, resumen, items, filas }) => (
             <div key={fecha}>
 
               {/* Franja de encabezado del día */}
@@ -637,7 +739,18 @@ export default function Movimientos() {
               </div>
 
               {/* Ítems del día */}
-              {items.map(m => {
+              {filas.map(fila => {
+                if (esConsolidado(fila)) {
+                  return (
+                    <FilaCobroConsolidado
+                      key={fila.clave}
+                      grupo={fila}
+                      abierto={cobrosAbiertos.has(fila.clave)}
+                      onToggle={() => toggleCobro(fila.clave)}
+                    />
+                  )
+                }
+                const m = fila
                 const cfg = cfgGrupo(m.grupo)
                 const initial = m.grupo === 'GASTOS'
                   ? m.descripcion.charAt(0).toUpperCase()
@@ -811,6 +924,139 @@ export default function Movimientos() {
           onClose={() => setEliminarAjusteId(null)}
           onSuccess={() => { setEliminarAjusteId(null); handleAjusteCaja() }}
         />
+      )}
+    </div>
+  )
+}
+
+// Un cobro que tapó varias operaciones de un cliente, en una sola fila. Se
+// dibuja con la misma anatomía que una fila suelta —hora, avatar, texto, monto—
+// para que la grilla no se mueva, y el detalle se abre debajo, indentado.
+function FilaCobroConsolidado({ grupo, abierto, onToggle }: {
+  grupo: CobroConsolidado
+  abierto: boolean
+  onToggle: () => void
+}) {
+  const cfg = cfgGrupo('COBROS')
+  // Los renglones comparten medio de pago y cotización —es un solo cobro—, pero
+  // no siempre la categoría: si tapó un fiado y una deuda libre, ningún nombre
+  // de categoría describe al grupo y la línea dice "Cobro" a secas.
+  const categorias = new Set(grupo.renglones.map(r => r.categoria))
+  const detalle = detalleSecundario(
+    grupo.renglones[0],
+    categorias.size > 1 ? 'Cobro' : undefined,
+  )
+  return (
+    <div style={{ borderBottom: '1px solid var(--ov-004)' }}>
+      <div
+        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--ov-002)' }}
+        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '0.75rem',
+          padding: '0.65rem 1rem',
+        }}
+      >
+        <span
+          title={`Registrado ${fmtFechaHora(grupo.momento)}`}
+          style={{
+            fontFamily: FJ, fontSize: '0.68rem', flexShrink: 0,
+            width: '2.7rem', color: 'rgba(100,116,139,0.55)',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {fmtHora(grupo.momento)}
+        </span>
+
+        <div style={{
+          width: '34px', height: '34px', flexShrink: 0,
+          borderRadius: 'var(--r-sm)',
+          background: cfg.bg,
+          border: `1px solid ${cfg.color}40`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: FN, fontSize: '1rem', color: cfg.color,
+        }}>
+          {cfg.initial}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '2px' }}>
+            <p style={{
+              fontFamily: FM, fontSize: '0.82rem', fontWeight: 600,
+              color: 'var(--text-1)', margin: 0, wordBreak: 'break-word',
+            }}>
+              Cobro - {grupo.clienteTexto}
+            </p>
+            <span style={{
+              fontFamily: FM, fontSize: '0.58rem', fontWeight: 700,
+              color: cfg.color, background: cfg.bg,
+              padding: '1px 7px', borderRadius: '999px',
+              flexShrink: 0,
+            }}>
+              {cfg.label}
+            </span>
+          </div>
+          <p style={{
+            fontFamily: FM, fontSize: '0.68rem',
+            color: 'rgba(100,116,139,0.5)', margin: 0, wordBreak: 'break-word',
+          }}>
+            {detalle} ·{' '}
+            {/* Botón y no un span: se llega con el teclado y el lector de
+                pantalla dice si el detalle está abierto o cerrado. */}
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-expanded={abierto}
+              style={{
+                background: 'transparent', border: 'none', padding: 0,
+                cursor: 'pointer', font: 'inherit', color: ACCENT,
+                textDecoration: 'underline',
+              }}
+            >
+              {abierto ? 'Ocultar detalle' : 'Ver detalle'}
+            </button>
+          </p>
+        </div>
+
+        <span style={{
+          fontFamily: FN, fontSize: '1.1rem', letterSpacing: '0.02em',
+          color: 'var(--text-1)', whiteSpace: 'nowrap', flexShrink: 0,
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          +{fmtMonto(grupo.monto, grupo.moneda)}
+        </span>
+      </div>
+
+      {abierto && (
+        <div style={{
+          background: 'var(--ov-002)',
+          // Alineado con el texto de la fila de arriba: padding + hora + gap +
+          // avatar + gap.
+          padding: '0.15rem 1rem 0.4rem calc(5.2rem + 34px)',
+        }}>
+          {grupo.renglones.map(r => (
+            <div
+              key={r.id}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: '0.75rem', padding: '0.4rem 0',
+                borderTop: '1px solid var(--ov-004)',
+              }}
+            >
+              <span style={{
+                fontFamily: FM, fontSize: '0.72rem', color: 'var(--text-1)',
+                wordBreak: 'break-word',
+              }}>
+                {r.descripcion}
+              </span>
+              <span style={{
+                fontFamily: FJ, fontSize: '0.72rem', color: 'rgba(100,116,139,0.75)',
+                whiteSpace: 'nowrap', flexShrink: 0, fontVariantNumeric: 'tabular-nums',
+              }}>
+                {fmtMonto(r.monto, r.moneda)}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )

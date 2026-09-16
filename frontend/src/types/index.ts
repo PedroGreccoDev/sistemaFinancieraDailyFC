@@ -206,6 +206,14 @@ export interface MovimientoUnificado {
   cotizacion: string | null
   referencia_tipo: string | null
   referencia_id: string | null
+  // Solo en los cobros: la fecha de la operación que esta línea salda (el fiado,
+  // la deuda libre o el préstamo). Es por la que el cobro imputa —de la más
+  // vieja a la más nueva—, y es lo único que permite reconstruir ese orden: las
+  // líneas de un mismo cobro comparten `momento` al microsegundo.
+  origen_fecha: string | null
+  // El cliente de esa operación, de la tabla y no del texto: un nombre con
+  // guion no se puede separar del concepto que va detrás.
+  origen_cliente: string | null
 }
 
 export type MovimientoTipo = 'COMPRA' | 'VENTA'

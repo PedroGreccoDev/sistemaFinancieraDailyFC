@@ -143,6 +143,20 @@ class MovimientoUnificadoRead(BaseModel):
     cotizacion: Decimal | None  # $/USD si el pago cruzó monedas
     referencia_tipo: str | None
     referencia_id: UUID | None
+    # Fecha de origen de la operación que este movimiento salda, y solo para los
+    # cobros (`fecha_fiado` del fiado, `fecha` de la deuda libre, `fecha_inicio`
+    # del préstamo). Es por la que imputa el cobro —de la más vieja a la más
+    # nueva, ver `deudores._ordenar_renglones`—, y sin ella no hay forma de
+    # reconstruir ese orden: un cobro que toca varios renglones escribe todas
+    # sus líneas en la misma transacción, así que comparten `created_at` al
+    # microsegundo y el `id` es un UUID v4. La usa el panel para listar el
+    # detalle de un cobro en el orden en que se imputó.
+    origen_fecha: date | None = None
+    # El cliente de esa operación, también solo en los cobros. Viene de la tabla
+    # y **no** de parsear la `descripcion`: un nombre con guion ("Kiosco 24 -
+    # Sucursal Centro") no se puede separar del concepto que va detrás, y en
+    # pantalla el cliente salía cortado a la mitad.
+    origen_cliente: str | None = None
 
 
 class CuotaCobradaHistorialItem(BaseModel):
