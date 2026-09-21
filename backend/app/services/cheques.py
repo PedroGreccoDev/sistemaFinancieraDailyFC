@@ -76,10 +76,23 @@ def partes_del_pago(cheque: Cheque) -> tuple[Decimal, Decimal, Decimal]:
 
     Las tres partes suman el valor neto. `monto_abonado` en NULL significa **se
     pagó todo**, así que lo que no cubrieron los dólares salió en pesos; con un
-    valor, ese valor es lo que salió de la caja ARS y el resto quedó debido."""
+    valor, ese valor es lo que salió de la caja ARS y el resto quedó debido.
+
+    Raises:
+        ValidationError: si los dólares valen más que el cheque. El alta ya lo
+            rechaza antes, pero sin este corte el resto daría **negativo** y la
+            compra asentaría un egreso en pesos al revés —plata entrando por una
+            categoría de egreso—, que no lo denuncia nada y es justo lo que la
+            caja paralela no puede reconstruir después.
+    """
     neto = neto_compra(cheque)
     en_usd = cubierto_en_usd(cheque)
     resto = (neto - en_usd).quantize(Decimal("0.01"))
+    if resto < _CERO:
+        raise ValidationError(
+            f"Los dólares de {describir(cheque)} valen ${en_usd} y el cheque se "
+            f"compra por ${neto}: se pasan por ${-resto}."
+        )
     en_pesos, a_deber = svc_pasivos.repartir_compra(resto, cheque.monto_abonado)
     return en_usd, en_pesos, a_deber
 

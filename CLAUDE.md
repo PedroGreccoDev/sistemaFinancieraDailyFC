@@ -473,7 +473,15 @@ resync del dispatcher (ver abajo).
 - **Pagar de más falla, no se acomoda.** Si los dólares valen más que el neto, el
   alta lo rechaza diciendo por cuánto se pasa. Con la cotización de por medio el
   error típico es un dedazo en ella o en la cantidad, y acomodarlo dejaría el
-  cheque comprado por un precio que nadie pactó.
+  cheque comprado por un precio que nadie pactó. **`partes_del_pago` tiene su
+  propio corte**, además del schema: sin él un resto negativo asentaría un egreso
+  en pesos al revés —plata entrando por una categoría de egreso— y eso no lo
+  denuncia nada.
+- **Cuando la cuenta no da redonda, el resto se paga en pesos** _(así lo resuelve
+  el dueño, 2026-09-21)_. $7.184.000 a 1555 son 4619,93 dólares: se entregan 4619
+  y los $1.455 que faltan salen de la caja ARS. Por eso no hay ningún modo
+  "pagado entero en dólares" que ajuste la cotización para cerrar exacto: el
+  redondeo lo hace el operador con billetes, no el sistema con la cotización.
 - **No se edita: se elimina y se vuelve a cargar.** Mover el monto o el porcentaje
   cambia cuántos pesos tenían que cubrir esos billetes, y con la cotización ya
   pactada eso no es una corrección de carga. Además esos dólares ya consumieron

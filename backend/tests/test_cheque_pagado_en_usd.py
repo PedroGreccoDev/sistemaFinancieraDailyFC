@@ -21,6 +21,7 @@ from pydantic import ValidationError as PydanticValidationError
 from app.db.models import Cheque, ChequeEstado
 from app.schemas.cheques import ChequeCreate
 from app.services import cheques as svc_cheques
+from app.services.exceptions import ValidationError
 
 
 def _cheque(
@@ -112,6 +113,26 @@ def test_solo_dolares_y_el_resto_a_deber() -> None:
     cheque = _cheque("1000000", "10", usd="400", cotiz="1500", abonado="0")
     assert svc_cheques.partes_del_pago(cheque) == (
         Decimal("600000.00"), Decimal("0.00"), Decimal("300000.00")
+    )
+
+
+def test_los_dolares_que_valen_mas_que_el_cheque_no_dan_pesos_negativos() -> None:
+    # El alta lo rechaza antes, pero el reparto tiene su propio corte: sin él el
+    # resto da negativo y la compra asienta un egreso en pesos al revés —plata
+    # entrando por una categoría de egreso—, que no lo denuncia nada.
+    # $8.000.000 al 10,2% valen $7.184.000; 4620 USD a 1555 son $7.184.100.
+    cheque = _cheque("8000000", "10.2", usd="4620", cotiz="1555")
+    with pytest.raises(ValidationError, match="se pasan"):
+        svc_cheques.partes_del_pago(cheque)
+
+
+def test_el_resto_que_no_da_redondo_se_paga_en_pesos() -> None:
+    # Cómo se resuelve de verdad cuando la cuenta no cierra (dueño, 2026-09-21):
+    # los dólares se redondean para abajo y lo que falta se completa en pesos.
+    # 4619 USD a 1555 son $7.182.545: quedan $1.455 en efectivo.
+    cheque = _cheque("8000000", "10.2", usd="4619", cotiz="1555")
+    assert svc_cheques.partes_del_pago(cheque) == (
+        Decimal("7182545.00"), Decimal("1455.00"), Decimal("0.00")
     )
 
 
