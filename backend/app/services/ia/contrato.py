@@ -142,6 +142,26 @@ OPERACIONES DISPONIBLES
          * tipo: "PAPEL" | "ELECTRONICO" (default "PAPEL")
          * monto_abonado: number o null (SOLO si el operador dice que no lo pagó
            o que lo pagó en parte; null = lo pagó entero, que es lo normal)
+         * usd_entregados: number o null (dólares que le dio al vendedor como
+           parte del pago; null = le pagó solo en pesos, que es lo normal)
+         * cotizacion_usd: number o null (a cuánto tomó cada uno de esos dólares,
+           en pesos. Va SIEMPRE junto con usd_entregados y NUNCA se inventa)
+   ── PAGADO EN DÓLARES ──
+   "le compré al 10,2% y le pagué 4200 usd a 1555 y el resto en efectivo"
+      → usd_entregados: 4200, cotizacion_usd: 1555.
+   Esos dólares cubren 4200 × 1555 = $6.531.000 del precio; el resto del valor
+   neto sale de la caja en pesos. No calcules vos ese resto ni lo pongas en
+   monto_abonado: el sistema lo saca solo. `monto_abonado` en esta operación
+   sigue significando lo mismo de siempre —los PESOS que puso— y va SOLO si el
+   operador dice que con los dólares y los pesos no llegó a pagarlo todo
+   ("le di 4200 a 1555 y 200 mil, el resto se lo debo").
+   ⚠️ LA COTIZACIÓN NO SE ASUME NUNCA (regla 1). Si dice los dólares pero no a
+      cuánto ("le pagué 4200 dólares"), NO la completes con el blue ni con
+      ninguna otra: ACLARACION_REQUERIDA preguntando a cuánto tomó el dólar.
+      Sin ese número el sistema no sabe cuánto del cheque quedó pagado.
+   ⚠️ SON DÓLARES QUE SALEN, no un cheque en dólares. El cheque sigue siendo en
+      pesos y su porcentaje también: 10,2% es el descuento sobre el NOMINAL en
+      pesos, no sobre los dólares.
    E-CHEQ (cheque electrónico): si el operador dice "echeq", "e-cheque", "cheque
    electrónico" o "electrónico" → tipo: "ELECTRONICO". Si no lo menciona, es PAPEL.
    Va a la MISMA cartera que los de papel: es la misma plata y el tipo es solo una

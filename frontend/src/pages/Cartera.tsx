@@ -40,6 +40,13 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
   // Por dónde pagaste el cheque. Solo importa si algo se abonó: una compra
   // enteramente a deber no saca plata de ninguna caja.
   const [medioPago, setMedioPago] = useState<MedioPago>('EFECTIVO')
+  // Pagado (en parte o del todo) con dólares: los billetes cubren su valuación
+  // en pesos y el resto sale de la caja ARS (§Cheque pagado en dólares). La
+  // cotización la pone el operador siempre: el sistema no la asume nunca.
+  const [pagaUsd, setPagaUsd] = useState(false)
+  const [usdEntregados, setUsdEntregados] = useState('')
+  const [cotizacionUsd, setCotizacionUsd] = useState('')
+  const [medioUsd, setMedioUsd] = useState<MedioPago>('EFECTIVO')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
@@ -50,12 +57,22 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
   const compraNum = parseFloat(pctCompra) || 0
   // Lo que vale el cheque = monto·(1−%compra). Es el precio de compra, no el nominal.
   const pagado = montoNum > 0 ? montoNum * (100 - compraNum) / 100 : null
+  // Lo que cubren los dólares, valuados a la cotización pactada. El resto del
+  // precio es lo único que puede salir en pesos o quedar a deber.
+  const usdNum = pagaUsd ? (parseFloat(usdEntregados) || 0) : 0
+  const cotizNum = pagaUsd ? (parseFloat(cotizacionUsd) || 0) : 0
+  const cubiertoUsd = usdNum * cotizNum
+  const restante = pagado !== null ? Math.max(pagado - cubiertoUsd, 0) : null
   // Comprado a deber: de la caja sale solo lo abonado y el resto queda como deuda
   // con el vendedor, que por eso pasa a ser obligatorio (§Comprar sin abonar).
-  const abonadoNum = aDeber ? (parseFloat(montoAbonado) || 0) : (pagado ?? 0)
-  const debe = pagado !== null && aDeber ? Math.max(pagado - abonadoNum, 0) : 0
-  const abonadoExcede = pagado !== null && aDeber && abonadoNum > pagado
+  const abonadoNum = aDeber ? (parseFloat(montoAbonado) || 0) : (restante ?? 0)
+  const debe = restante !== null && aDeber ? Math.max(restante - abonadoNum, 0) : 0
+  const abonadoExcede = restante !== null && aDeber && abonadoNum > restante
   const faltaVendedor = aDeber && !clienteOrigenId
+  // Los dólares no pueden valer más que el cheque: pagar de más no se acomoda
+  // solo, se corrige (mismo criterio que el monto abonado).
+  const usdExcede = pagado !== null && cubiertoUsd > pagado
+  const faltaCotizacion = pagaUsd && (usdNum <= 0 || cotizNum <= 0)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -74,6 +91,9 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
         tipo,
         // Sin la marca no viaja el campo: el backend lo lee como compra pagada.
         ...(aDeber ? { monto_abonado: abonadoNum } : {}),
+        // Ídem con los dólares: sin la marca la compra es la de siempre, toda
+        // en pesos. Los dos campos viajan juntos o no viaja ninguno.
+        ...(pagaUsd ? { usd_entregados: usdNum, cotizacion_usd: cotizNum, medio_usd: medioUsd } : {}),
       })
       const nombre = tipo === 'ELECTRONICO' ? 'E-cheq' : 'Cheque'
       toast('success', aDeber ? `${nombre} cargado en cartera (queda a deber)` : `${nombre} cargado en cartera`)
@@ -117,9 +137,25 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
           {pagado !== null && (
             <div style={{ background: 'var(--ov-003)', border: '1px solid var(--bd-006)', borderRadius: 'var(--r-md)', padding: '0.6rem 0.9rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontFamily: FM, fontSize: '0.78rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'rgba(100,116,139,0.7)' }}>{aDeber ? 'Vale (compra)' : 'Sale de caja (compra)'}</span>
+                <span style={{ color: 'rgba(100,116,139,0.7)' }}>{(aDeber || pagaUsd) ? 'Vale (compra)' : 'Sale de caja (compra)'}</span>
                 <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(pagado)}</span>
               </div>
+              {/* Lo que cubren los billetes y lo que queda en pesos: es la cuenta
+                  que el operador contrasta con lo que arregló con el cliente. */}
+              {pagaUsd && cubiertoUsd > 0 && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'rgba(100,116,139,0.7)' }}>Pagado en dólares</span>
+                    <span style={{ fontWeight: 700, color: '#34d399' }}>{fmtARS(cubiertoUsd)}</span>
+                  </div>
+                  {!aDeber && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'rgba(100,116,139,0.7)' }}>Sale de caja en pesos</span>
+                      <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{fmtARS(restante ?? 0)}</span>
+                    </div>
+                  )}
+                </>
+              )}
               {aDeber && (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -134,10 +170,29 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
               )}
             </div>
           )}
+          {usdExcede && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171' }}>Esos dólares valen {fmtARS(cubiertoUsd)} y el cheque se compra por {fmtARS(pagado ?? 0)}: revisá la cantidad o la cotización.</p>}
           {/* Si no se abonó nada, no sale plata de ninguna caja y el control
               sobra: mostrarlo invitaría a elegir algo que no se va a usar. */}
           {abonadoNum > 0 && (
-            <SelectorMedioPago valor={medioPago} onChange={setMedioPago} label="¿Cómo lo pagaste?" />
+            <SelectorMedioPago valor={medioPago} onChange={setMedioPago} label={pagaUsd ? '¿Cómo pagaste los pesos?' : '¿Cómo lo pagaste?'} />
+          )}
+          {/* Pagar con dólares: los billetes salen de la caja USD y del stock
+              (consumen lotes FIFO, sin ganancia), y el resto del precio sale en
+              pesos o queda a deber. */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', fontFamily: FM, fontSize: '0.76rem', color: 'var(--text-2)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={pagaUsd} onChange={(e) => { setPagaUsd(e.target.checked); if (!e.target.checked) { setUsdEntregados(''); setCotizacionUsd('') } }} style={{ cursor: 'pointer' }} />
+            Le pagué (en parte o del todo) en dólares
+          </label>
+          {pagaUsd && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div><label style={LABEL_STYLE}>Dólares entregados</label><input type="number" step="0.01" min="0.01" value={usdEntregados} onChange={(e) => setUsdEntregados(e.target.value)} placeholder="0.00" style={INPUT_STYLE} /></div>
+                {/* Sin cotización no hay forma de saber cuánto del cheque
+                    cubrieron: se pide, nunca se asume (§Stock de dólares). */}
+                <div><label style={LABEL_STYLE}>¿A cuánto el dólar?</label><input type="number" step="0.01" min="0.01" value={cotizacionUsd} onChange={(e) => setCotizacionUsd(e.target.value)} placeholder="0.00" style={INPUT_STYLE} /></div>
+              </div>
+              <SelectorMedioPago valor={medioUsd} onChange={setMedioUsd} label="¿Cómo le diste los dólares?" />
+            </>
           )}
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', fontFamily: FM, fontSize: '0.76rem', color: 'var(--text-2)', cursor: 'pointer' }}>
             <input type="checkbox" checked={aDeber} onChange={(e) => { setADeber(e.target.checked); if (!e.target.checked) setMontoAbonado('') }} style={{ cursor: 'pointer' }} />
@@ -147,7 +202,7 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
             <div>
               <label style={LABEL_STYLE}>Monto abonado <span style={{ fontWeight: 400, color: 'rgba(100,116,139,0.5)' }}>(vacío = nada)</span></label>
               <input type="number" step="0.01" min="0" value={montoAbonado} onChange={(e) => setMontoAbonado(e.target.value)} placeholder="0.00" style={INPUT_STYLE} />
-              {abonadoExcede && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171', marginTop: '0.3rem' }}>No podés abonar más de {fmtARS(pagado ?? 0)}, que es lo que vale el cheque.</p>}
+              {abonadoExcede && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171', marginTop: '0.3rem' }}>No podés abonar más de {fmtARS(restante ?? 0)}, que es lo que falta pagar.</p>}
               {faltaVendedor && <p style={{ fontFamily: FM, fontSize: '0.7rem', color: '#f87171', marginTop: '0.3rem' }}>Indicá el cliente origen: la deuda queda a su nombre.</p>}
             </div>
           )}
@@ -159,7 +214,7 @@ function ModalNuevoCheque({ onClose, onSuccess }: { onClose: () => void; onSucce
           {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171' }}>{error}</p>}
           <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
             <button type="button" onClick={onClose} style={{ ...btnBordered('neutral'), flex: 1, padding: '0.55rem' }}>Cancelar</button>
-            <button type="submit" disabled={loading || abonadoExcede || faltaVendedor} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: (loading || abonadoExcede || faltaVendedor) ? 0.6 : 1 }}>{loading ? 'Cargando…' : 'Cargar cheque'}</button>
+            <button type="submit" disabled={loading || abonadoExcede || faltaVendedor || usdExcede || faltaCotizacion} style={{ ...btnSolid('primary'), flex: 1, padding: '0.55rem', opacity: (loading || abonadoExcede || faltaVendedor || usdExcede || faltaCotizacion) ? 0.6 : 1 }}>{loading ? 'Cargando…' : 'Cargar cheque'}</button>
           </div>
         </form>
       </div>

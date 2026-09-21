@@ -111,6 +111,10 @@ def _spec(entidad: str) -> _Spec:
 # dólares quedarían dando vueltas en la cadena: prestando su costo a una ganancia
 # futura, o consumiendo un stock que ya nadie sacó.
 _ORIGENES_STOCK: dict[str, tuple[str, ...]] = {
+    # Los dólares con los que se le pagó al vendedor del cheque (§Cheque pagado
+    # en dólares). Anular la compra los devuelve al stock: si el cheque nunca se
+    # compró, esos billetes nunca salieron.
+    "cheque":       ("cheque",),
     "gasto":        ("gasto",),
     "deuda_simple": ("deuda_simple", "deuda_simple_cobro"),
     "prestamo":     ("prestamo", "prestamo_cobro"),

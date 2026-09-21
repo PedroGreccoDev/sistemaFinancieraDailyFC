@@ -4,7 +4,7 @@ import difflib
 import logging
 import uuid
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import func, select
@@ -331,6 +331,71 @@ def _neto_de(item: dict[str, Any]) -> Decimal | None:
     return (monto * (cien - pct) / cien).quantize(Decimal("0.01"))
 
 
+def _cubierto_usd_de(item: dict[str, Any]) -> Decimal:
+    """Cuántos pesos del cheque cubrieron los dólares que se le dieron (0 si no hubo)."""
+    usd = _opt_decimal(item, "usd_entregados")
+    cotiz = _opt_decimal(item, "cotizacion_usd")
+    if usd is None or cotiz is None:
+        return Decimal("0.00")
+    return (usd * cotiz).quantize(Decimal("0.01"))
+
+
+def _falta_en_pesos(item: dict[str, Any]) -> Decimal | None:
+    """Lo que queda por pagar en pesos de un cheque del payload, tras los dólares."""
+    neto = _neto_de(item)
+    if neto is None:
+        return None
+    return max(Decimal("0.00"), (neto - _cubierto_usd_de(item)).quantize(Decimal("0.01")))
+
+
+def _repartir_usd(data: dict[str, Any], items: list[dict[str, Any]]) -> Decimal | None:
+    """Reparte los dólares dichos UNA vez para todo el fajo, de a un cheque.
+
+    Mismo criterio que `_repartir_abonado` y por la misma razón: "le di 4200 a
+    1555 por estos tres" es un pago único, y copiar esos dólares a cada cheque
+    sacaría de la caja 12.600 — tres veces los billetes que salieron del cajón.
+    Se cubre el primero, lo que sobra va al siguiente.
+
+    Los dólares de cada cheque se redondean **para abajo** (`ROUND_DOWN`): así
+    nunca se pasan del valor neto de ese cheque —lo que el alta rechaza— y los
+    centavos que quedan colgando se pagan en pesos, que es lo que pasa de verdad
+    cuando la cuenta no da redonda.
+
+    Devuelve los dólares que sobraron después de cubrir todos los cheques, o
+    None si no había dólares que repartir."""
+    usd = _opt_decimal(data, "usd_entregados")
+    cotiz = _opt_decimal(data, "cotizacion_usd")
+    if usd is None or cotiz is None or cotiz <= 0:
+        return None
+
+    # Un solo cheque: esos dólares son de ese cheque y no hay nada que repartir.
+    if len(items) == 1:
+        if items[0].get("usd_entregados") is None:
+            items[0]["usd_entregados"] = data["usd_entregados"]
+            items[0]["cotizacion_usd"] = data["cotizacion_usd"]
+        return None
+
+    restante = usd
+    for item in items:
+        if item.get("usd_entregados") is not None:
+            # El modelo ya dijo cuántos dólares van en este cheque: manda lo específico.
+            item.setdefault("cotizacion_usd", data["cotizacion_usd"])
+            continue
+        neto = _neto_de(item)
+        if neto is None:
+            continue
+        if restante <= 0:
+            continue
+        necesarios = (neto / cotiz).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        cubre = min(restante, necesarios)
+        if cubre <= 0:
+            continue
+        item["usd_entregados"] = cubre
+        item["cotizacion_usd"] = cotiz
+        restante -= cubre
+    return restante
+
+
 def _repartir_abonado(data: dict[str, Any], items: list[dict[str, Any]]) -> Decimal | None:
     """Reparte el `monto_abonado` dicho UNA vez para todo el fajo, de a un cheque.
 
@@ -365,10 +430,14 @@ def _repartir_abonado(data: dict[str, Any], items: list[dict[str, Any]]) -> Deci
         if item.get("monto_abonado") is not None:
             # El modelo ya dijo cuánto va en este cheque: manda lo específico.
             continue
-        neto = _neto_de(item)
-        if neto is None:
+        # Lo que falta de ESTE cheque después de los dólares que se le
+        # imputaron: los pesos solo tienen que cubrir el resto (§Cheque pagado
+        # en dólares). Sin descontarlos, un fajo pagado con billetes y pesos
+        # tomaría cada cheque por su neto entero y el sobrante daría de más.
+        falta = _falta_en_pesos(item)
+        if falta is None:
             continue
-        cubre = min(restante, neto) if restante > 0 else Decimal("0.00")
+        cubre = min(restante, falta) if restante > 0 else Decimal("0.00")
         item["monto_abonado"] = cubre
         restante -= cubre
     return restante
@@ -408,19 +477,38 @@ def _registrar_cheque(
             "tipo",
         ),
     )
+    # Los dólares se reparten ANTES que los pesos: lo que cubren sale del precio
+    # de cada cheque, y el `monto_abonado` solo tiene que cubrir lo que queda.
+    sobran_usd = _repartir_usd(data, items)
     sobrante = _repartir_abonado(data, items)
 
     if len(items) == 1:
         return _registrar_un_cheque(db, items[0], msg_at, foto)
+
+    # Los dólares alcanzan para más que todos los cheques juntos: mismo criterio
+    # que el sobrante en pesos —es un dedazo en los dólares o en la cotización—,
+    # y no se carga ninguno.
+    if sobran_usd is not None and sobran_usd > 0:
+        cotiz = _opt_decimal(data, "cotizacion_usd")
+        return False, (
+            f"‼️ Me diste U$D {_fmt_num(_opt_decimal(data, 'usd_entregados'))} a "
+            f"{_ars(cotiz)} y con los {len(items)} cheques sobran "
+            f"U$D {_fmt_num(sobran_usd)}.\n"
+            "No cargué ninguno. Revisá los dólares, la cotización o los cheques."
+        )
 
     # Abonó más de lo que valen todos los cheques juntos: no hay dónde imputar el
     # resto y es un dedazo (un cero de más, o el fajo equivocado). No se carga
     # nada — repartir igual dejaría en la caja un egreso que no se puede explicar.
     if sobrante is not None and sobrante > 0:
         abonado = _opt_decimal(data, "monto_abonado")
+        # "Falta pagar" y no "valen netos": si parte del fajo se pagó con
+        # dólares, lo que los pesos tenían que cubrir es el resto, y nombrarlo
+        # por el neto entero haría parecer que el bot no contó los billetes.
+        falta = "valen" if sobran_usd is None else "quedan debiendo"
         return False, (
-            f"‼️ Abonaste {_ars(abonado)} y los {len(items)} cheques valen "
-            f"{_ars(abonado - sobrante)} netos: sobran {_ars(sobrante)}.\n"
+            f"‼️ Abonaste {_ars(abonado)} en pesos y los {len(items)} cheques "
+            f"{falta} {_ars(abonado - sobrante)}: sobran {_ars(sobrante)}.\n"
             "No cargué ninguno. Revisá el monto o los cheques."
         )
 
@@ -431,17 +519,32 @@ def _registrar_cheque(
     cargados: list[str] = []
     fallidos: list[str] = []
     advertencias: list[str] = []
+    # Los totales del fajo: con un pago repartido, cuánto salió de cada caja es
+    # el control que el operador no puede hacer de cabeza sobre cuatro renglones.
+    salio_usd = Decimal("0.00")
+    salio_ars = Decimal("0.00")
     for item in items:
         try:
             cheque, avisos = _alta_de_cheque(db, item, msg_at, foto)
+            _en_usd, _en_pesos, _a_deber = svc_cheques.partes_del_pago(cheque)
+            salio_usd += cheque.usd_entregados or Decimal("0.00")
+            salio_ars += _en_pesos
             ab_txt = ""
+            # Cuántos dólares le tocaron a este cheque del fajo: con un pago
+            # repartido es el mismo control que el de los pesos, y sin esto el
+            # operador no tiene cómo ver si los billetes cayeron donde iban.
+            if cheque.usd_entregados is not None:
+                ab_txt += (
+                    f" — U$D {_fmt_num(cheque.usd_entregados)} a "
+                    f"{_ars(cheque.cotizacion_usd)}"
+                )
             ab = item.get("monto_abonado")
             if reparto_visible and ab is not None:
-                ab_dec, neto_item = Decimal(str(ab)), _neto_de(item)
-                if neto_item is not None and ab_dec < neto_item:
-                    ab_txt = f" — abonado {_ars(ab_dec)}, a deber {_ars(neto_item - ab_dec)}"
+                ab_dec, falta_item = Decimal(str(ab)), _falta_en_pesos(item)
+                if falta_item is not None and ab_dec < falta_item:
+                    ab_txt += f" — abonado {_ars(ab_dec)}, a deber {_ars(falta_item - ab_dec)}"
                 else:
-                    ab_txt = f" — abonado {_ars(ab_dec)}"
+                    ab_txt += f" — abonado {_ars(ab_dec)}"
             # El nombre lo arma `describir` y no este call site: acá salía
             # "Nº None" para un e-cheq de emisión, que es el caso normal cuando la
             # foto trae varios.
@@ -463,6 +566,12 @@ def _registrar_cheque(
     if cargados:
         lines.append(f"✅ *{len(cargados)} cheque(s) en cartera*")
         lines.extend(cargados)
+        # Solo cuando hubo dólares: en un fajo pagado en pesos, el renglón de
+        # cada cheque ya dice lo suyo y el total no agregaría nada.
+        if salio_usd > 0:
+            lines.append(
+                f"Salió de caja: U$D {_fmt_num(salio_usd)} + {_ars(salio_ars)}"
+            )
         if advertencias:
             lines.append("")
             lines.extend(advertencias)
@@ -508,6 +617,11 @@ def _alta_de_cheque(
     # Comprado a deber: `monto_abonado` es lo que se pagó en el acto (0 si nada).
     # El schema lo valida contra el valor neto y exige el vendedor.
     monto_abonado = _opt_decimal(data, "monto_abonado")
+    # Pagado (en parte o del todo) con dólares. Los dos datos van juntos: el
+    # schema rechaza uno sin el otro, y el prompt tiene prohibido inventar la
+    # cotización (§Cheque pagado en dólares).
+    usd_entregados = _opt_decimal(data, "usd_entregados")
+    cotizacion_usd = _opt_decimal(data, "cotizacion_usd")
 
     payload = ChequeCreate(
         nro_cheque=nro,
@@ -518,7 +632,10 @@ def _alta_de_cheque(
         porcentaje_compra=pct_compra,
         cliente_origen_id=cliente_id,
         monto_abonado=monto_abonado,
+        usd_entregados=usd_entregados,
+        cotizacion_usd=cotizacion_usd,
         medio_pago=_medio(data),
+        medio_usd=_medio(data, "medio_usd"),
         tipo=_tipo_cheque(data),
     )
     foto_bytes, foto_mime = foto if foto else (None, None)
@@ -573,8 +690,16 @@ def _registrar_un_cheque(
         lines.append(f"Pago: {_fmt_date(cheque.fecha_pago)}")
 
     # Cuánto salió de la caja: el control inmediato del operador sobre si el bot
-    # entendió que el cheque se pagó o quedó a deber.
-    abonado, a_deber = svc_pasivos.repartir_compra(neto, cheque.monto_abonado)
+    # entendió que el cheque se pagó, se pagó con dólares o quedó a deber. Los
+    # dólares se muestran con su cotización y con lo que cubrieron: si el bot
+    # entendió mal cualquiera de los dos números, la cuenta lo delata acá y no
+    # el día que no cierre la caja.
+    en_usd, abonado, a_deber = svc_cheques.partes_del_pago(cheque)
+    if en_usd > 0:
+        lines.append(
+            f"Pagado en dólares: U$D {_fmt_num(cheque.usd_entregados)} a "
+            f"{_ars(cheque.cotizacion_usd)} = {_ars(en_usd)}"
+        )
     lines.append(f"Salió de caja: {_ars(abonado)}")
     if a_deber > 0:
         lines.append(f"⚠️ Queda a deber: {_ars(a_deber)}")
@@ -2336,55 +2461,16 @@ _CIEN_PCT = Decimal("100")
 
 
 def _resync_caja_cheque(db: Session, cheque: Cheque) -> None:
-    """Reconstruye el rastro de caja de un cheque desde su estado actual.
+    """Reconstruye el rastro de caja de un cheque tras corregirlo por chat.
 
-    Se usa tras editar monto/%compra/%venta: borra las líneas de caja del cheque
-    y las vuelve a crear (egreso de compra siempre; ingreso de venta/cobro según estado).
+    Delega en el servicio en vez de repetir el cálculo: esto era una copia del
+    resync del panel y se había quedado atrás dos veces. Ignoraba
+    `monto_abonado` —corregir por chat el monto de un cheque comprado a deber le
+    asentaba el egreso entero, plata que nunca salió— y no sabía de los dólares
+    con los que se pudo pagar (§Cheque pagado en dólares), así que los borraba de
+    la caja y reasentaba todo en pesos.
     """
-    # Los medios se leen antes de barrer: cada pata del cheque pudo ir por una
-    # caja distinta y rehacerlas todas en efectivo descuadraría las dos
-    # (§Caja paralela). Mismo criterio que `svc_cheques.resync_caja_cheque`.
-    medio_compra = svc_caja.medio_de_referencia(
-        db, "cheque", cheque.id, CajaCategoria.COMPRA_CHEQUE
-    )
-    medio_venta = svc_caja.medio_de_referencia(
-        db,
-        "cheque",
-        cheque.id,
-        CajaCategoria.VENTA_CHEQUE
-        if cheque.estado == ChequeEstado.VENDIDO
-        else CajaCategoria.COBRO_CHEQUE,
-    )
-    svc_caja.borrar_por_referencia(db, "cheque", cheque.id)
-    pagado = (cheque.monto * (_CIEN_PCT - cheque.porcentaje_compra) / _CIEN_PCT).quantize(Decimal("0.01"))
-    # La cartera preexistente nunca asentó el egreso de compra (ver
-    # services/apertura.py): al resincronizar no hay que inventarlo.
-    if pagado > 0 and not cheque.es_carga_inicial:
-        svc_caja.registrar(
-            db, fecha=fecha_local(cheque.created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
-            categoria=CajaCategoria.COMPRA_CHEQUE, monto=pagado,
-            medio_pago=medio_compra,
-            referencia_tipo="cheque", referencia_id=cheque.id,
-            detalle=f"Compra {svc_cheques.describir(cheque)}",
-        )
-    if cheque.estado == ChequeEstado.VENDIDO and cheque.porcentaje_venta is not None:
-        ingreso = (cheque.monto * (_CIEN_PCT - cheque.porcentaje_venta) / _CIEN_PCT).quantize(Decimal("0.01"))
-        if ingreso > 0:
-            svc_caja.registrar(
-                db, fecha=fecha_local(cheque.ultimo_evento_manual_at), moneda=Moneda.ARS, tipo=CajaTipo.INGRESO,
-                categoria=CajaCategoria.VENTA_CHEQUE, monto=ingreso,
-                medio_pago=medio_venta,
-                referencia_tipo="cheque", referencia_id=cheque.id,
-                detalle=f"Venta {svc_cheques.describir(cheque)}",
-            )
-    elif cheque.estado == ChequeEstado.COBRADO:
-        svc_caja.registrar(
-            db, fecha=fecha_local(cheque.ultimo_evento_manual_at), moneda=Moneda.ARS, tipo=CajaTipo.INGRESO,
-            categoria=CajaCategoria.COBRO_CHEQUE, monto=cheque.monto.quantize(Decimal("0.01")),
-            medio_pago=medio_venta,
-            referencia_tipo="cheque", referencia_id=cheque.id,
-            detalle=f"Cobro {svc_cheques.describir(cheque)}",
-        )
+    svc_cheques.resync_caja_cheque(db, cheque)
 
 
 def _resync_caja_gasto(db: Session, gasto: GastoOperativo) -> None:
@@ -2415,6 +2501,17 @@ def _editar_cheque(db: Session, nro: str, campo: str, nuevo_valor: Any) -> Dispa
         return False, (
             f"⚠️ Campo inválido: '{campo}'. "
             f"Para cheques {cheque.estado.value} podés corregir: {', '.join(sorted(campos_validos))}."
+        )
+
+    # Un cheque pagado en dólares no se corrige: mover el monto o el porcentaje
+    # cambia cuántos pesos tenían que cubrir esos billetes, y con la cotización
+    # ya pactada eso no es una corrección de carga (§Cheque pagado en dólares).
+    # Mismo corte que el panel.
+    if campo in {"monto", "porcentaje_compra"} and cheque.usd_entregados is not None:
+        return False, (
+            f"⚠️ El cheque Nº {nro} se pagó en dólares ({cheque.usd_entregados} USD "
+            f"a {_ars(cheque.cotizacion_usd)}): para corregir el monto o el "
+            "porcentaje hay que eliminarlo y volver a cargarlo."
         )
 
     estado_tag = f" _{cheque.estado.value}_" if cheque.estado != ChequeEstado.EN_CARTERA else ""

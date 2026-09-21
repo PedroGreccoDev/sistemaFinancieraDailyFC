@@ -212,7 +212,9 @@ def test_toda_entidad_que_mueve_stock_esta_en_el_catalogo() -> None:
     # anularse: prestando su costo a una ganancia futura, o consumiendo un stock
     # que ya nadie sacó. No falla en ningún lado — solo descuadra.
     assert set(_ORIGENES_STOCK) == {
-        "gasto", "deuda_simple", "prestamo", "fiado", "pasivo"
+        # El cheque entró al catálogo con la compra pagada en dólares: esos
+        # billetes salieron del stock y anular la compra los devuelve.
+        "cheque", "gasto", "deuda_simple", "prestamo", "fiado", "pasivo"
     }
 
 

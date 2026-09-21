@@ -110,9 +110,23 @@ class ChequeCreate(BaseModel):
     monto_abonado: Decimal | None = Field(
         default=None, ge=0, max_digits=18, decimal_places=2
     )
+    # Dólares entregados al vendedor como parte del pago, y a cuánto se los tomó
+    # (§Cheque pagado en dólares). Van juntos o no va ninguno. Lo que cubren en
+    # pesos es `usd_entregados × cotizacion_usd`; el resto del valor neto sale de
+    # la caja ARS (`monto_abonado`) o queda a deber.
+    usd_entregados: Decimal | None = Field(
+        default=None, gt=0, max_digits=18, decimal_places=2
+    )
+    cotizacion_usd: Decimal | None = Field(
+        default=None, gt=0, max_digits=18, decimal_places=6
+    )
     # Por cuál de las dos cajas salió lo abonado (§Caja paralela). No es columna
     # del cheque: solo viaja hasta la línea de caja de la compra.
     medio_pago: MedioPago = MedioPago.EFECTIVO
+    # Y por cuál salieron los dólares, que puede no ser la misma: "le transferí
+    # los pesos y le di los billetes". Mismo criterio que la compra de divisas,
+    # que lleva sus dos medios por separado.
+    medio_usd: MedioPago = MedioPago.EFECTIVO
 
     @model_validator(mode="after")
     def validate_fechas(self) -> "ChequeCreate":
@@ -126,19 +140,56 @@ class ChequeCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_monto_abonado(self) -> "ChequeCreate":
-        if self.monto_abonado is None:
-            return self
+        # Los dólares y su cotización son una sola cosa: con unos sin la otra no
+        # hay forma de saber cuántos pesos del cheque cubrieron.
+        if (self.usd_entregados is None) != (self.cotizacion_usd is None):
+            raise ValueError(
+                "Para pagar un cheque en dólares hacen falta los dos datos: "
+                "cuántos dólares le diste y a cuánto se los tomaste."
+            )
+
         # Lo que se paga por un cheque es su valor neto, no el nominal: un cheque
         # de $1.000.000 al 10% se compra por $900.000, y eso es lo que se debe.
         neto = (
             self.monto * (Decimal("100") - self.porcentaje_compra) / Decimal("100")
         ).quantize(Decimal("0.01"))
-        if self.monto_abonado > neto:
+
+        # Los dólares cubren parte del precio, valuados a la cotización pactada.
+        # El resto se paga en pesos (`monto_abonado`) o queda a deber.
+        cubierto_usd = (
+            (self.usd_entregados * self.cotizacion_usd).quantize(Decimal("0.01"))
+            if self.usd_entregados is not None and self.cotizacion_usd is not None
+            else Decimal("0.00")
+        )
+        if cubierto_usd > neto:
+            # Pagar de más falla, no se acomoda solo (decisión del dueño): con la
+            # cotización de por medio el error típico es un dedazo en la
+            # cotización o en los dólares, y acomodarlo dejaría el cheque
+            # "comprado" por un valor que nadie pactó.
             raise ValueError(
-                f"Abonaste ${self.monto_abonado} y el cheque se compra por ${neto} "
-                f"(neto al {self.porcentaje_compra}%): no puede superar ese valor."
+                f"Le diste {self.usd_entregados} USD a ${self.cotizacion_usd} = "
+                f"${cubierto_usd}, y el cheque se compra por ${neto} (neto al "
+                f"{self.porcentaje_compra}%): los dólares se pasan por "
+                f"${cubierto_usd - neto}."
             )
-        if self.monto_abonado < neto and self.cliente_origen_id is None:
+        # Lo que queda del precio después de los dólares. Sin dólares de por
+        # medio es el valor neto entero, que es como funcionó siempre.
+        restante = (neto - cubierto_usd).quantize(Decimal("0.01"))
+
+        if self.monto_abonado is None:
+            # Se pagó todo: en pesos el resto, y nada queda a deber.
+            return self
+        if self.monto_abonado > restante:
+            detalle_usd = (
+                f" (${neto} netos menos ${cubierto_usd} que cubrieron los dólares)"
+                if cubierto_usd > 0
+                else f" (neto al {self.porcentaje_compra}%)"
+            )
+            raise ValueError(
+                f"Abonaste ${self.monto_abonado} en pesos y falta pagar "
+                f"${restante}{detalle_usd}: no puede superar ese valor."
+            )
+        if self.monto_abonado < restante and self.cliente_origen_id is None:
             raise ValueError(
                 "Un cheque comprado a deber necesita el vendedor: indicá a quién "
                 "le quedás debiendo."
@@ -211,6 +262,10 @@ class ChequeRead(BaseModel):
     # Cuánto se abonó al comprarlo. None = se pagó todo; menos que el valor neto
     # significa que hay un pasivo abierto con el vendedor (§Comprar sin abonar).
     monto_abonado: Decimal | None
+    # Parte del precio pagada en dólares, y a cuánto se tomó cada uno. None = la
+    # compra fue solo en pesos, que es el caso normal (§Cheque pagado en dólares).
+    usd_entregados: Decimal | None
+    cotizacion_usd: Decimal | None
     porcentaje_venta: Decimal | None
     ganancia: Decimal
     estado: ChequeEstado

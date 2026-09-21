@@ -38,7 +38,9 @@ de modo que el asiento de caja y la operación de negocio son **atómicos** (o a
 - `tipo` — `INGRESO` (entra plata) | `EGRESO` (sale plata). El `monto` es **siempre positivo**;
   el signo lo da el `tipo`.
 - `categoria` — el origen del movimiento: `COBRO_CUOTA`, `COBRO_FIADO`, `VENTA_CHEQUE`,
-  `COBRO_CHEQUE`, `COMPRA_CHEQUE`, `COMPRA_USD`, `VENTA_USD`, `OTORGAMIENTO_PRESTAMO`, `GASTO`,
+  `COBRO_CHEQUE`, `COMPRA_CHEQUE` (que **no es siempre ARS**: una compra pagada con
+  billetes asienta también su egreso en USD, §Cheque pagado en dólares),
+  `COMPRA_USD`, `VENTA_USD`, `OTORGAMIENTO_PRESTAMO`, `GASTO`,
   `PAGO_PASIVO`, `VUELTO_PASIVO`, `INGRESO_PASIVO`, `OTORGAMIENTO_DEUDA`, `COBRO_DEUDA`,
   `AJUSTE_CAJA`.
 - `referencia_tipo` / `referencia_id` — enlace flojo a la entidad que lo originó
@@ -422,6 +424,91 @@ no es una compra/venta de divisas se representa como un `MovimientoEfectivo` mar
 
 ---
 
+## Cheque pagado en dólares — el precio se paga con billetes _(régimen definido 2026-09-21)_
+
+El cheque es en pesos y su descuento también, pero al vendedor se le paga con
+dólares: *"te lo tomo al 10,2%, te doy 4200 a 1555 y el resto en efectivo"*.
+Hasta la migración `0034` esa operación no se podía cargar y se anotaba como si
+hubiera salido todo en pesos — **dos descuadres de una**: la caja de dólares
+quedaba alta por lo que se entregó y la de pesos baja por lo mismo, y no aparecía
+hasta el cierre.
+
+**El precio no cambia: sigue siendo el valor neto** (`monto × (1 − %compra)`), en
+pesos. Lo que cambia es con qué se paga, y son tres partes que suman ese neto:
+
+| Parte | De dónde sale | Columna |
+|-------|---------------|---------|
+| En dólares | caja USD + stock FIFO | `usd_entregados` × `cotizacion_usd` |
+| En pesos | caja ARS | `monto_abonado` (NULL = todo el resto) |
+| A deber | pasivo con el vendedor | lo que falte |
+
+`svc_cheques.partes_del_pago(cheque)` devuelve las tres y es el **único** lugar
+donde se reparten: la escriben el alta, el resync de caja y las respuestas del
+bot, que si calcularan cada uno lo suyo se desincronizarían como ya pasó con el
+resync del dispatcher (ver abajo).
+
+- **Las dos columnas van juntas o no va ninguna** (`ck_cheques_usd_completo`):
+  unos dólares sin cotización no se pueden valuar —no habría con qué saber cuánto
+  del cheque cubrieron— y una cotización sin dólares no significa nada. NULL en
+  todo lo cargado antes, que es lo que significan: esa compra no entregó un dólar.
+- **La cotización la dicta el operador, siempre** (regla 1, §4). Es el precio que
+  las dos partes pactaron ese día, no una referencia de mercado: no se asume, no
+  se consulta y no se recalcula nunca después. Sin ella la operación se rechaza y
+  el bot pregunta.
+- **Dos líneas de caja, misma referencia y misma categoría** (`COMPRA_CHEQUE`):
+  el egreso en USD por los billetes —con la cotización en la línea, que es lo que
+  explica por qué ese cheque costó lo que costó— y el egreso en ARS por los
+  pesos. Por eso `resync_caja_cheque` lee los medios **filtrando por moneda**: las
+  dos patas pueden ir por cajas distintas ("le transferí los pesos y le di los
+  billetes") y sin el filtro las dos irían a donde fue la primera (§Caja paralela).
+- **Los dólares salen del stock sin realizar ganancia** _(decisión del dueño,
+  2026-09-21)_. Consumen lotes FIFO como cualquier salida (§Stock de dólares) y
+  lo que se ganó con ellos queda dentro de la ganancia del cheque, cuando se
+  venda. La alternativa —tratarlo como una venta de dólares al precio pactado, que
+  reconocería la diferencia contra el costo del lote en el día— se evaluó y se
+  descartó por ahora; si alguna vez se adopta, el cambio es la rama de
+  `_reimputar_fifo` que elige `es_ajuste`, no el modelo de datos.
+- **Sin stock suficiente la compra se rechaza**, igual que un gasto en dólares: el
+  freno lo pone `_reimputar_fifo`, que es la única puerta de consumo.
+- **Pagar de más falla, no se acomoda.** Si los dólares valen más que el neto, el
+  alta lo rechaza diciendo por cuánto se pasa. Con la cotización de por medio el
+  error típico es un dedazo en ella o en la cantidad, y acomodarlo dejaría el
+  cheque comprado por un precio que nadie pactó.
+- **No se edita: se elimina y se vuelve a cargar.** Mover el monto o el porcentaje
+  cambia cuántos pesos tenían que cubrir esos billetes, y con la cotización ya
+  pactada eso no es una corrección de carga. Además esos dólares ya consumieron
+  lotes que pueden haberse vendido. Mismo corte en el panel y en el bot.
+- **Anular devuelve los dólares**: el cheque está en `anulacion._ORIGENES_STOCK`
+  (`test_stock_usd.py` custodia ese catálogo) y la anulación borra su salida de
+  stock antes de reimputar el FIFO.
+- **Carga inicial: ni caja ni stock.** Un cheque de apertura pagado en dólares no
+  asienta nada — esos billetes salieron antes de que el sistema existiera, igual
+  que los pesos (§Apertura).
+- **Un alta rechazada hace rollback.** `create_cheque` ya hizo `add()` y `flush()`
+  cuando salta la regla de negocio: sin el `except ServiceError` que revierte, el
+  cheque no se guardaba ahí pero **lo guardaba el próximo commit de la sesión** y
+  aparecía en cartera una compra que el sistema había dicho que no hizo. Valía
+  también para los rechazos que ya existían (compra a deber sin vendedor).
+- **Panel:** casilla "Le pagué (en parte o del todo) en dólares" en el alta de
+  Cartera, con los dólares, la cotización y su propio selector de medio. El
+  resumen muestra las tres partes: lo que vale, lo que cubren los dólares y lo que
+  sale en pesos.
+- **Bot:** `usd_entregados` y `cotizacion_usd` en cada cheque de
+  `REGISTRAR_CHEQUE`. Dichos una vez para un fajo **se reparten, no se copian**
+  (`_repartir_usd`, FIFO como `monto_abonado`): copiarlos sacaría del cajón los
+  billetes tantas veces como cheques haya. El reparto por cheque redondea **para
+  abajo**, para que ninguno quede pagado de más, y los centavos que sobran se
+  pagan en pesos. La respuesta dice cuántos dólares salieron, a cuánto y cuánto
+  cubrieron — el control inmediato del operador sobre los dos números que el bot
+  pudo entender mal.
+- **El resync de caja del bot era una copia y se había quedado atrás dos veces**:
+  ignoraba `monto_abonado` —corregir por chat el monto de un cheque comprado a
+  deber le asentaba el egreso entero— y no sabía de los dólares. Ahora delega en
+  `svc_cheques.resync_caja_cheque`; si aparece un tercer lugar que necesite
+  rehacer la caja de un cheque, va por ahí.
+
+---
+
 ## Comprar sin abonar — la compra que queda a deber _(régimen definido 2026-08-21)_
 
 El negocio compra a crédito: un lote de dólares o un cheque que se paga después.
@@ -620,6 +707,9 @@ imposible esa reconstrucción.
 - **La compra puede quedar a deber** (§Comprar sin abonar): el cheque entra a
   cartera igual, sale de caja solo lo abonado y el resto se convierte en un
   pasivo con el vendedor, por el **valor neto**.
+- **La compra puede pagarse en dólares** (§Cheque pagado en dólares): el precio
+  sigue siendo el valor neto en pesos, pero lo cubren billetes a una cotización
+  pactada —dos líneas de caja, una por moneda— y esos dólares salen del stock.
 
 - **Identidad:** la PK de `cheques` es la subrogada `id` (UUID). El `nro_cheque` **no es
   único globalmente** (solo lo es dentro de un banco); por eso la unicidad real es
@@ -2295,6 +2385,12 @@ que sería un loop infinito).
     categoría y su referencia de caja, y ninguna línea cuando el pago es con cheque. Custodia
     además el prompt del bot: que el cobro general sea el default, y que un mensaje sin
     importe ("Juan pagó") pida el monto en vez de asumir una cuota entera.
+  - **`test_cheque_pagado_en_usd.py`** — el cheque que se le paga al vendedor con
+    dólares (§Cheque pagado en dólares): el reparto del precio en sus tres partes
+    (dólares, pesos y lo que queda a deber), que los dólares no puedan pasarse del
+    valor del cheque ni venir sin cotización, y el reparto FIFO de un pago en
+    billetes dicho una vez para todo un fajo —incluido el redondeo para abajo, que
+    es lo que impide que un cheque del lote quede pagado de más—.
   - **`test_anulacion.py`** — reglas de bloqueo del motor de anulación (§Anulación): fiado con
     cobros encima, cheque usado para pagar un pasivo, compra de USD ya consumida y venta que no
     es la última. Incluye dos tests que **custodian el catálogo `_ENTIDADES`**: si una entidad
@@ -2528,8 +2624,10 @@ tabla: el **cobro con cheque**, la **anulación** y la **corrección**.
   `0029`/`0030` (e-cheq: tipo de cheque, y el número opcional) y `0031` (préstamo a
   interés fijo: `tipo_prestamo`, `monto_interes_fijo`, `dia_cobro` y `capital_pendiente` —
   ver §3.b) y `0032` (`acreedor_destino` en cheques: a qué acreedor se le entregó el papel —
-  ver §5 y §Historial unificado) y `0033` (tabla `eventos`: el registro de operaciones —
-  ver §Registro de operaciones). **Head actual: `0033`.**
+  ver §5 y §Historial unificado), `0033` (tabla `eventos`: el registro de operaciones —
+  ver §Registro de operaciones) y `0034` (`usd_entregados`/`cotizacion_usd` en cheques: la
+  compra que se le paga al vendedor en dólares — ver §Cheque pagado en dólares).
+  **Head actual: `0034`.**
 - **Una columna con un ENUM que ya existe va con `postgresql.ENUM(..., create_type=False)`**,
   no con `sa.Enum(...)`: el genérico intenta crear el tipo igual y la migración muere a
   mitad de camino con "ya existe un tipo moneda". Le pasó a la `0033` y se vio al probarla

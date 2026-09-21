@@ -32,6 +32,10 @@ export interface Cheque {
   // Cuánto se abonó al comprarlo. null = se pagó todo; menos que el valor neto
   // significa que hay una deuda abierta con el vendedor (§Comprar sin abonar).
   monto_abonado: string | null
+  // Dólares con los que se le pagó al vendedor y a cuánto se los tomó. null =
+  // la compra fue solo en pesos, que es el caso normal (§Cheque pagado en USD).
+  usd_entregados: string | null
+  cotizacion_usd: string | null
   porcentaje_venta: string | null
   ganancia: string
   estado: ChequeEstado

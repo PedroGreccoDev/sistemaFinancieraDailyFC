@@ -301,6 +301,15 @@ class Cheque(AnulableMixin, Base):
             "fecha_pago IS NULL OR fecha_emision IS NULL OR fecha_pago >= fecha_emision",
             name="ck_cheques_fecha_pago_after_emision",
         ),
+        # Los dólares del pago y su cotización van juntos o no va ninguno: unos
+        # dólares sin cotización no se pueden valuar en pesos —no habría con qué
+        # saber cuánto del cheque cubrieron— y una cotización sin dólares no
+        # significa nada (migración 0034).
+        sa.CheckConstraint(
+            "(usd_entregados IS NULL AND cotizacion_usd IS NULL) OR "
+            "(usd_entregados > 0 AND cotizacion_usd > 0)",
+            name="ck_cheques_usd_completo",
+        ),
         # El número de cheque NO es único globalmente: solo lo es dentro de un mismo
         # banco. Dos cheques de bancos distintos pueden compartir número. Por eso la
         # identidad es la PK subrogada `id` y la unicidad es (banco, nro_cheque).
@@ -347,6 +356,18 @@ class Cheque(AnulableMixin, Base):
     # reconstruye desde acá al editar: derivarlo del saldo del pasivo daría mal
     # apenas ese pasivo reciba un pago.
     monto_abonado:     Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+    # Dólares entregados al vendedor como parte del pago, y a cuánto se los tomó
+    # (pesos por 1 USD, dictada por el operador — nunca se asume). Van juntas o
+    # ninguna: sin cotización esos dólares no se pueden valuar en pesos.
+    # NULL en todo lo cargado hasta la migración 0034, que es lo que significan:
+    # esa compra no entregó un dólar.
+    #
+    # Lo que cubren es `usd_entregados × cotizacion_usd` en pesos. `monto_abonado`
+    # sigue siendo lo mismo de siempre —los **pesos** que salieron de la caja—, y
+    # entre los dos llegan al valor neto; lo que falte queda a deber (§Cheque
+    # pagado en dólares).
+    usd_entregados:    Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 2), nullable=True)
+    cotizacion_usd:    Mapped[Decimal | None] = mapped_column(sa.Numeric(18, 6), nullable=True)
     porcentaje_venta:  Mapped[Decimal | None] = mapped_column(sa.Numeric(7, 4), nullable=True)
     ganancia:          Mapped[Decimal]        = mapped_column(sa.Numeric(18, 2), default=Decimal("0.00"))
     estado:            Mapped[ChequeEstado]   = mapped_column(

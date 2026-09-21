@@ -36,6 +36,14 @@ export interface ChequeCreatePayload {
   // Menos que el valor neto deja el resto a deber: no descuenta la caja y genera
   // la deuda con el vendedor, que pasa a ser obligatorio (§Comprar sin abonar).
   monto_abonado?: number
+  // Parte del precio pagada con dólares, y a cuánto se tomó cada uno (§Cheque
+  // pagado en dólares). Van los dos o ninguno: el backend rechaza uno solo. Lo
+  // que cubren es `usd_entregados × cotizacion_usd`; el resto sale en pesos o
+  // queda a deber.
+  usd_entregados?: number
+  cotizacion_usd?: number
+  /** Por cuál caja salieron los dólares, que puede no ser la de los pesos. */
+  medio_usd?: MedioPago
 }
 
 export const crearCheque = (payload: ChequeCreatePayload): Promise<Cheque> =>

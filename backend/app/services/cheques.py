@@ -34,14 +34,90 @@ from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
 from app.services import eventos as svc_eventos
 from app.services import pasivos as svc_pasivos
+from app.services import stock_usd as svc_stock
 from app.services.exceptions import (
     ConflictError,
     DatabaseWriteError,
     NotFoundError,
+    ServiceError,
     ValidationError,
 )
 
 _CIEN = Decimal("100")
+_CERO = Decimal("0.00")
+
+# De qué operación salen los dólares que se entregaron al comprar un cheque. Lo
+# usa el catálogo de `anulacion._ORIGENES_STOCK`, que tiene que encontrarlos para
+# devolverlos al stock cuando el cheque se anula.
+_ORIGEN_STOCK = "cheque"
+
+
+def neto_compra(cheque: Cheque) -> Decimal:
+    """Lo que vale el cheque para quien lo trajo: nominal menos el descuento."""
+    return (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(
+        Decimal("0.01")
+    )
+
+
+def cubierto_en_usd(cheque: Cheque) -> Decimal:
+    """Cuántos pesos del precio cubrieron los dólares que se entregaron.
+
+    Cero cuando la compra fue solo en pesos, que es el caso normal. La cotización
+    la dictó el operador al cargar y no se vuelve a tocar: es el precio que las
+    dos partes pactaron ese día, no una referencia de mercado (§Cheque pagado en
+    dólares)."""
+    if cheque.usd_entregados is None or cheque.cotizacion_usd is None:
+        return _CERO
+    return (cheque.usd_entregados * cheque.cotizacion_usd).quantize(Decimal("0.01"))
+
+
+def partes_del_pago(cheque: Cheque) -> tuple[Decimal, Decimal, Decimal]:
+    """Con qué se pagó el cheque: `(en dólares, en pesos, a deber)`, todo en ARS.
+
+    Las tres partes suman el valor neto. `monto_abonado` en NULL significa **se
+    pagó todo**, así que lo que no cubrieron los dólares salió en pesos; con un
+    valor, ese valor es lo que salió de la caja ARS y el resto quedó debido."""
+    neto = neto_compra(cheque)
+    en_usd = cubierto_en_usd(cheque)
+    resto = (neto - en_usd).quantize(Decimal("0.01"))
+    en_pesos, a_deber = svc_pasivos.repartir_compra(resto, cheque.monto_abonado)
+    return en_usd, en_pesos, a_deber
+
+
+def _resync_stock_cheque(db: Session, cheque: Cheque) -> None:
+    """Rehace la salida de stock de un cheque pagado en dólares (sin commit).
+
+    Los dólares que se entregaron se fueron del negocio, así que consumen lotes
+    FIFO igual que cualquier otra salida (§Stock de dólares). **Sin realizar
+    ganancia** _(decisión del dueño, 2026-09-21)_: no se los vendió a nadie por
+    separado, y lo que se ganó con ellos queda dentro de la ganancia del cheque
+    cuando se venda.
+
+    Se barre siempre, aunque el cheque ya no tenga dólares: una compra corregida
+    de dólares a pesos tiene que devolver los que había consumido. El
+    `_reimputar_fifo` del final es el que rechaza la operación si no hay stock
+    suficiente —el consumo lo hace solo él (§Stock de dólares)—."""
+    tenia = svc_stock.listar_por_origen(db, _ORIGEN_STOCK, cheque.id)
+    entrega = None if cheque.es_carga_inicial else cheque.usd_entregados
+    if not tenia and entrega is None:
+        return
+
+    svc_stock.borrar_por_origen(db, _ORIGEN_STOCK, cheque.id)
+    if entrega is not None:
+        svc_stock.egresar(
+            db,
+            monto=entrega,
+            fecha=fecha_local(cheque.created_at),
+            origen_tipo=_ORIGEN_STOCK,
+            origen_id=cheque.id,
+            detalle=f"Compra {describir(cheque)} pagada en dólares",
+        )
+    # El SELECT de la reimputación no vería el borrado ni el alta recién hechos:
+    # la sesión va con autoflush=False.
+    db.flush()
+    from app.services.movimientos import _reimputar_fifo
+
+    _reimputar_fifo(db)
 
 
 def describir(cheque: Cheque, con_monto: bool = True) -> str:
@@ -146,6 +222,9 @@ def create_cheque(
     # construir el modelo o SQLAlchemy lo rechaza por columna inexistente.
     datos = payload.model_dump()
     medio_compra = datos.pop("medio_pago", MedioPago.EFECTIVO)
+    # Los dólares pueden salir por otra caja que los pesos ("le transferí lo que
+    # faltaba y le di los billetes"), igual que en la compra de divisas.
+    medio_usd = datos.pop("medio_usd", MedioPago.EFECTIVO)
     cheque = Cheque(
         **datos,
         estado=ChequeEstado.EN_CARTERA,
@@ -165,12 +244,27 @@ def create_cheque(
     try:
         db.add(cheque)
         db.flush()
-        # Comprar el cheque saca plata de la caja ARS: lo pagado = monto·(1−%compra).
-        pagado = (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(Decimal("0.01"))
+        # Comprar el cheque saca plata de la caja: el precio es monto·(1−%compra),
+        # y se paga con dólares, con pesos, o queda a deber (§Cheque pagado en USD).
         detalle = f"Compra {describir(cheque)}"
-        abonado, a_deber = svc_pasivos.repartir_compra(pagado, cheque.monto_abonado)
+        en_usd, abonado, a_deber = partes_del_pago(cheque)
 
+        if en_usd > 0 and not cheque.es_carga_inicial:
+            # La línea va en USD y por su monto en dólares: la caja de dólares
+            # cuenta billetes, no pesos. La cotización pactada viaja en la línea
+            # —es lo que después explica por qué ese cheque costó lo que costó—.
+            svc_caja.registrar(
+                db, fecha=fecha_local(created_at), moneda=Moneda.USD, tipo=CajaTipo.EGRESO,
+                categoria=CajaCategoria.COMPRA_CHEQUE, monto=cheque.usd_entregados,
+                medio_pago=medio_usd, cotizacion=cheque.cotizacion_usd,
+                referencia_tipo="cheque", referencia_id=cheque.id,
+                detalle=f"{detalle} — pagado en dólares",
+            )
+            _resync_stock_cheque(db, cheque)
         if abonado > 0 and not cheque.es_carga_inicial:
+            # "Pago parcial" es lo que quedó a deber, no lo que se pagó en
+            # dólares: un cheque pagado mitad en billetes y mitad en pesos está
+            # pagado entero.
             svc_caja.registrar(
                 db, fecha=fecha_local(created_at), moneda=Moneda.ARS, tipo=CajaTipo.EGRESO,
                 categoria=CajaCategoria.COMPRA_CHEQUE, monto=abonado,
@@ -197,6 +291,14 @@ def create_cheque(
     except IntegrityError as exc:
         db.rollback()
         raise ConflictError(_msg_duplicado(db, payload.nro_cheque, payload.banco)) from exc
+    except ServiceError:
+        # Un alta rechazada por una regla de negocio —sin stock para los dólares,
+        # sin vendedor para lo que queda a deber— ya hizo `db.add()` y `flush()`:
+        # el INSERT está en la transacción abierta. Sin este rollback el cheque
+        # no se guarda ahora pero **lo guarda el próximo commit de la sesión**,
+        # y aparece en cartera una compra que el sistema dijo que no había hecho.
+        db.rollback()
+        raise
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("No se pudo crear el cheque.") from exc
@@ -560,8 +662,15 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
     Los medios se leen **antes** de barrer: un cheque comprado por transferencia
     y vendido en efectivo tiene cada pata en una caja distinta, y rehacerlas
     todas en efectivo descuadraría las dos (§Caja paralela)."""
+    # Se filtra por moneda: una compra pagada en dólares asienta **dos** líneas
+    # COMPRA_CHEQUE —los billetes y los pesos— y cada pata pudo ir por una caja
+    # distinta. Sin el filtro se leería el medio de la primera y se aplicaría a
+    # las dos (§Caja paralela).
     medio_compra = svc_caja.medio_de_referencia(
-        db, "cheque", cheque.id, CajaCategoria.COMPRA_CHEQUE
+        db, "cheque", cheque.id, CajaCategoria.COMPRA_CHEQUE, moneda=Moneda.ARS
+    )
+    medio_usd = svc_caja.medio_de_referencia(
+        db, "cheque", cheque.id, CajaCategoria.COMPRA_CHEQUE, moneda=Moneda.USD
     )
     medio_venta = svc_caja.medio_de_referencia(
         db,
@@ -572,11 +681,20 @@ def resync_caja_cheque(db: Session, cheque: Cheque) -> None:
         else CajaCategoria.COBRO_CHEQUE,
     )
     svc_caja.borrar_por_referencia(db, "cheque", cheque.id)
-    pagado = (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(Decimal("0.01"))
     # El egreso es por lo que se abonó, no por el valor neto: un cheque comprado a
     # deber solo sacó de la caja lo que se pagó en el acto. Sin esto, cualquier
     # edición posterior (hasta cambiar el banco) le inventaría el egreso entero.
-    abonado, _a_deber = svc_pasivos.repartir_compra(pagado, cheque.monto_abonado)
+    en_usd, abonado, _a_deber = partes_del_pago(cheque)
+    pagado = (neto_compra(cheque) - en_usd).quantize(Decimal("0.01"))
+    if en_usd > 0 and not cheque.es_carga_inicial:
+        svc_caja.registrar(
+            db, fecha=fecha_local(cheque.created_at), moneda=Moneda.USD,
+            tipo=CajaTipo.EGRESO, categoria=CajaCategoria.COMPRA_CHEQUE,
+            monto=cheque.usd_entregados,
+            medio_pago=medio_usd, cotizacion=cheque.cotizacion_usd,
+            referencia_tipo="cheque", referencia_id=cheque.id,
+            detalle=f"Compra {describir(cheque)} — pagado en dólares",
+        )
     # La cartera preexistente nunca asentó el egreso de compra: al resincronizar
     # no hay que inventarlo. Sin esto, editar un cheque de carga inicial le haría
     # aparecer un egreso que no existió.
@@ -660,6 +778,18 @@ def editar_cheque(db: Session, cheque_id: uuid.UUID, payload: ChequeUpdate) -> C
         raise ConflictError(
             "Este cheque se compró a deber y su deuda ya está cargada: para "
             "corregir el monto o el porcentaje, eliminalo y volvé a cargarlo."
+        )
+
+    # Mismo criterio para el cheque pagado en dólares: mover el monto o el
+    # porcentaje cambia cuántos pesos tenían que cubrir esos dólares, y con la
+    # cotización fija eso solo se puede arreglar de dos maneras —entregando otros
+    # dólares o cambiando lo pactado—, ninguna de las cuales es una corrección de
+    # carga. Además los dólares ya consumieron lotes FIFO que pueden haberse
+    # vendido desde entonces. Se corrige eliminando y volviendo a cargar.
+    if ("monto" in data or "porcentaje_compra" in data) and cheque.usd_entregados is not None:
+        raise ConflictError(
+            "Este cheque se pagó en dólares: para corregir el monto o el "
+            "porcentaje, eliminalo y volvé a cargarlo."
         )
 
     # Campos solo disponibles tras la venta/fiado.

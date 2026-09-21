@@ -50,6 +50,11 @@ _CH = [
     # devuelve un cheque comprado a deber como pagado, y al editarlo el resync le
     # asienta el egreso entero que nunca salió de la caja.
     "monto_abonado",
+    # Con qué dólares se le pagó al vendedor y a cuánto se los tomó (§Cheque
+    # pagado en dólares). Sin ellos el import devuelve la compra como si hubiera
+    # salido todo en pesos: la caja de dólares queda alta por lo que se entregó y
+    # la de pesos baja por lo mismo, y editar el cheque después lo consolida.
+    "usd_entregados", "cotizacion_usd",
     "ultimo_evento_manual_at", "ultimo_operador_id", "ultimo_motivo_manual",
     "foto", "foto_mime", "cliente_origen_id", "cliente_destino_id",
     # A qué acreedor se le entregó el cheque (§5). Sin él, un backup restaurado
@@ -202,6 +207,10 @@ _DEC_COLS = frozenset({
     "cotizacion_usd", "cotizacion", "cotizacion_ingreso_usd",
     # Compras a deber y compensaciones (§Comprar sin abonar, §Compensación).
     "monto_abonado", "imputado_cliente", "imputado_pasivo", "excedente",
+    # Dólares con los que se pagó un cheque (§Cheque pagado en dólares). Sin
+    # esto el import lo devuelve como float y la cuenta contra el valor neto
+    # empieza a arrastrar centavos que nadie puso.
+    "usd_entregados",
     # Préstamo a interés fijo (§Interés fijo).
     "monto_interes_fijo", "capital_pendiente",
 })
