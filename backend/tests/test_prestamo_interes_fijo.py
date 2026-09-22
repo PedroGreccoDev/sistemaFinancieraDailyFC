@@ -314,6 +314,101 @@ def test_con_dos_periodos_la_proxima_es_30_dias_despues_del_segundo() -> None:
     assert svc.proxima_fecha_cobro(p) == date(2026, 5, 9)
 
 
+# ── Cobro por adelantado (decisión del dueño, 2026-09-22) ────────────────────
+
+# El día en que se opera, salvo que el test diga otro.
+_HOY = date(2026, 3, 1)
+
+
+def _cobrar(cuota: Cuota) -> None:
+    cuota.monto_pagado = cuota.monto
+    cuota.estado = CuotaEstado.COBRADA
+
+
+def test_antes_del_dia_de_cobro_el_interes_a_cobrar_es_el_fijo_completo() -> None:
+    # Era el bug: sin período devengado el modal mostraba $0,00.
+    p = _prestamo()
+    assert svc.puede_adelantar(p, _HOY) is True
+    assert svc.interes_a_cobrar(p, _HOY) == Decimal("500000")
+
+
+def test_adelantar_crea_el_periodo_con_su_fecha_de_siempre() -> None:
+    p = _prestamo()
+    cuota = svc.adelantar_periodo(FakeDB(), p, _HOY)
+    assert cuota is not None
+    assert cuota.numero_cuota == 1
+    assert cuota.fecha_vencimiento == date(2026, 3, 10)
+    assert cuota.monto == Decimal("500000")
+    # Nace como cualquier período: suma al total y a la ganancia.
+    assert p.total_a_cobrar == Decimal("5500000")
+    assert p.ganancia == Decimal("500000")
+
+
+def test_pagar_antes_no_corre_el_calendario() -> None:
+    # Próximo cobro = la fecha que tenía + 30, no el día del pago + 30.
+    p = _prestamo()
+    _cobrar(svc.adelantar_periodo(FakeDB(), p, _HOY))
+    assert svc.proxima_fecha_cobro(p) == date(2026, 4, 9)
+
+
+def test_el_periodo_adelantado_no_se_vuelve_a_devengar_en_su_fecha() -> None:
+    p = _prestamo()
+    _cobrar(svc.adelantar_periodo(FakeDB(), p, _HOY))
+    assert _devengar(p, date(2026, 3, 10)) is False
+    assert [c.numero_cuota for c in p.cuotas_detalle] == [1]
+    assert p.ganancia == Decimal("500000")
+    # Y el siguiente nace normal en la suya.
+    _devengar(p, date(2026, 4, 9))
+    assert [c.numero_cuota for c in p.cuotas_detalle] == [1, 2]
+
+
+def test_con_el_vigente_impago_se_cobra_ese_y_no_se_adelanta() -> None:
+    p = _prestamo()
+    hoy = date(2026, 3, 20)
+    _devengar(p, hoy)
+    assert svc.puede_adelantar(p, hoy) is False
+    assert svc.adelantar_periodo(FakeDB(), p, hoy) is None
+    assert svc.interes_a_cobrar(p, hoy) == Decimal("500000")
+
+
+def test_con_el_vigente_cobrado_se_adelanta_el_siguiente() -> None:
+    p = _prestamo()
+    hoy = date(2026, 3, 20)
+    _devengar(p, hoy)
+    _cobrar(svc.periodo_vigente(p))
+    cuota = svc.adelantar_periodo(FakeDB(), p, hoy)
+    assert cuota.numero_cuota == 2
+    assert cuota.fecha_vencimiento == date(2026, 4, 9)
+
+
+def test_no_se_adelanta_un_segundo_periodo_hasta_que_arranque_el_primero() -> None:
+    # Un segundo clic no puede cobrar dos meses de golpe.
+    p = _prestamo()
+    _cobrar(svc.adelantar_periodo(FakeDB(), p, _HOY))
+    assert svc.puede_adelantar(p, _HOY) is False
+    assert svc.puede_adelantar(p, date(2026, 3, 9)) is False
+    assert svc.interes_a_cobrar(p, _HOY) == Decimal("0.00")
+    # El día que arranca el período siguiente, se puede cobrar ese.
+    assert svc.puede_adelantar(p, date(2026, 3, 10)) is True
+    assert svc.adelantar_periodo(FakeDB(), p, date(2026, 3, 10)).numero_cuota == 2
+
+
+def test_con_el_capital_devuelto_no_se_adelanta_nada() -> None:
+    p = _prestamo(capital_pendiente="0")
+    assert svc.puede_adelantar(p, _HOY) is False
+    assert svc.interes_a_cobrar(p, _HOY) == Decimal("0.00")
+
+
+def test_adelantar_no_toca_la_mora_vieja() -> None:
+    p = _prestamo()
+    hoy = date(2026, 4, 9)
+    _devengar(p, hoy)
+    _cobrar(svc.periodo_vigente(p))
+    svc.adelantar_periodo(FakeDB(), p, hoy)
+    assert svc.mora_acumulada(p) == Decimal("500000")
+    assert svc.periodos(p)[0].estado == CuotaEstado.EN_MORA
+
+
 # ── Cómo entra en la cuenta consolidada del cliente ──────────────────────────
 
 def test_el_cobro_a_cuenta_del_cliente_baja_interes_y_nunca_capital() -> None:

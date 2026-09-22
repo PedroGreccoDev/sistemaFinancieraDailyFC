@@ -66,6 +66,22 @@ function proximaFechaCobro(p: Prestamo): string | null {
   return base.toISOString().slice(0, 10)
 }
 
+/** Lo que cobra "Cobrar interés" sin la mora — espejo de
+ *  `svc_prestamos.interes_a_cobrar`. Es el vigente si se debe; si no (todavía no
+ *  arrancó ningún período, o el vigente ya se cobró), el siguiente, por
+ *  adelantado y completo: el interés se puede cobrar en cualquier momento antes
+ *  de su fecha, y cobrarlo antes no corre el calendario. De a un período: si el
+ *  último ya se cobró por adelantado, hasta su fecha no hay nada más que cobrar. */
+function periodoACobrar(p: Prestamo): { numero: number; monto: number; adelantado: boolean; vence: string | null } | null {
+  const vigente = periodoVigente(p)
+  if (vigente && saldoCuota(vigente) > 0) {
+    return { numero: vigente.numero_cuota, monto: saldoCuota(vigente), adelantado: false, vence: vigente.fecha_vencimiento }
+  }
+  if (vigente && daysUntil(vigente.fecha_vencimiento) > 0) return null
+  if (!p.monto_interes_fijo || !p.dia_cobro || capitalPendiente(p) <= 0) return null
+  return { numero: p.cuotas_detalle.length + 1, monto: parseFloat(p.monto_interes_fijo), adelantado: true, vence: proximaFechaCobro(p) }
+}
+
 /** Capital + interés del período vigente (completo, sin prorrateo). La mora
  *  entra o no según decida el operador. */
 function totalCancelacion(p: Prestamo, incluirMora: boolean): number {
@@ -232,6 +248,9 @@ function ModalInteresFijoCobro({
   const mora = moraAcumulada(prestamo)
   const capital = capitalPendiente(prestamo)
   const interesVigente = vigente ? saldoCuota(vigente) : 0
+  // Cobrar interés no depende de que el período ya haya arrancado: sin vigente
+  // impago, se cobra el siguiente por adelantado (y la cancelación no cambia).
+  const aCobrar = modo === 'interes' ? periodoACobrar(prestamo) : null
 
   const [incluirMora, setIncluirMora] = useState(modo === 'cancelar')
   const [medioPago, setMedioPago] = useState<MedioPago>('EFECTIVO')
@@ -242,7 +261,7 @@ function ModalInteresFijoCobro({
 
   const total = modo === 'cancelar'
     ? totalCancelacion(prestamo, incluirMora)
-    : interesVigente + (incluirMora ? mora : 0)
+    : (aCobrar?.monto ?? 0) + (incluirMora ? mora : 0)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -288,12 +307,27 @@ function ModalInteresFijoCobro({
           </div>
         )}
 
+        {modo === 'interes' && !aCobrar && vigente && daysUntil(vigente.fecha_vencimiento) > 0 && (
+          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'var(--success)', lineHeight: 1.45, margin: 0 }}>
+            El período #{vigente.numero_cuota} ya está cobrado por adelantado. El siguiente se puede cobrar desde el {fmtDate(vigente.fecha_vencimiento)}.
+          </p>
+        )}
+
         <CajaResumen>
           {modo === 'cancelar' && <FilaResumen label="Capital pendiente" value={fmtMonto(capital, prestamo.moneda)} />}
-          <FilaResumen
-            label={vigente ? `Interés del período #${vigente.numero_cuota}` : 'Interés del período'}
-            value={fmtMonto(interesVigente, prestamo.moneda)}
-          />
+          {modo === 'interes' ? (
+            <FilaResumen
+              label={aCobrar
+                ? `Interés del período #${aCobrar.numero}${aCobrar.adelantado && aCobrar.vence ? ` (vence ${fmtDate(aCobrar.vence)})` : ''}`
+                : 'Interés del período'}
+              value={fmtMonto(aCobrar?.monto ?? 0, prestamo.moneda)}
+            />
+          ) : (
+            <FilaResumen
+              label={vigente ? `Interés del período #${vigente.numero_cuota}` : 'Interés del período'}
+              value={fmtMonto(interesVigente, prestamo.moneda)}
+            />
+          )}
           {incluirMora && mora > 0 && <FilaResumen label="Mora acumulada" value={fmtMonto(mora, prestamo.moneda)} destacado="mora" />}
           <FilaResumen label="Total a cobrar" value={fmtMonto(total, prestamo.moneda)} destacado="total" />
         </CajaResumen>
@@ -1140,6 +1174,10 @@ function PanelInteresFijo({ prestamo }: { prestamo: Prestamo }) {
   const capital = capitalPendiente(prestamo)
   const proxima = proximaFechaCobro(prestamo)
   const interesVigente = vigente && vigente.estado !== 'COBRADA' ? saldoCuota(vigente) : 0
+  // Un período cuya fecha todavía no llegó solo existe si se cobró por
+  // adelantado: dice "Cobrado" hasta esa fecha, que es cuando arranca el
+  // siguiente, y desde ahí vuelve a "sin devengar".
+  const adelantado = vigente !== null && interesVigente === 0 && daysUntil(vigente.fecha_vencimiento) > 0
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginBottom: '0.25rem' }}>
@@ -1154,12 +1192,12 @@ function PanelInteresFijo({ prestamo }: { prestamo: Prestamo }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.25rem', borderTop: '1px solid var(--bd-006)' }}>
         <span style={{ color: 'rgba(100,116,139,0.7)' }}>
-          {vigente ? `Período #${vigente.numero_cuota}` : 'Período en curso'}
+          {vigente && (interesVigente > 0 || adelantado) ? `Período #${vigente.numero_cuota}` : 'Período en curso'}
         </span>
         <span style={{ color: interesVigente > 0 ? 'var(--warning)' : 'var(--success)', fontWeight: 700 }}>
-          {vigente
-            ? (interesVigente > 0 ? `${fmtMonto(interesVigente, prestamo.moneda)} impago` : 'al día')
-            : 'sin devengar'}
+          {interesVigente > 0
+            ? `${fmtMonto(interesVigente, prestamo.moneda)} impago`
+            : adelantado ? 'Cobrado' : 'sin devengar'}
         </span>
       </div>
 

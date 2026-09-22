@@ -378,29 +378,76 @@ def devengar_periodos(db: Session, prestamo: Prestamo, hasta: date | None = None
 
     objetivo = periodos_cumplidos(prestamo.dia_cobro, hasta or hoy_local())
     ya = len(prestamo.cuotas_detalle)
-    nuevas: list[Cuota] = []
-    for numero in range(ya + 1, objetivo + 1):
-        cuota = Cuota(
-            prestamo=prestamo,
-            numero_cuota=numero,
-            fecha_vencimiento=fecha_de_periodo(prestamo.dia_cobro, numero),
-            # El interés se congela al devengarse: editarlo después vale para los
-            # períodos que vengan, no reescribe lo que ya se debía.
-            monto=prestamo.monto_interes_fijo,
-        )
-        db.add(cuota)
-        nuevas.append(cuota)
-
-    if nuevas:
-        devengado = sum((c.monto for c in nuevas), _CERO)
-        # El total a cobrar de un préstamo a interés fijo no se conoce al alta:
-        # se va conociendo. Arranca en el capital y crece con cada interés que
-        # nace, y la ganancia es exactamente ese interés devengado.
-        prestamo.total_a_cobrar = (prestamo.total_a_cobrar + devengado).quantize(Decimal("0.01"))
-        prestamo.ganancia = (prestamo.ganancia + devengado).quantize(Decimal("0.01"))
+    # Si hay un período cobrado por adelantado, `ya` supera al objetivo y no
+    # nace nada: ese período ya existe y el día que arranca no se vuelve a crear.
+    nuevas = [_nacer_periodo(db, prestamo, numero) for numero in range(ya + 1, objetivo + 1)]
 
     cambio_mora = _marcar_mora(prestamo)
     return bool(nuevas) or cambio_mora
+
+
+def _nacer_periodo(db: Session, prestamo: Prestamo, numero: int) -> Cuota:
+    """Crea la cuota del período `numero` y suma su interés al préstamo (sin commit)."""
+    cuota = Cuota(
+        prestamo=prestamo,
+        numero_cuota=numero,
+        fecha_vencimiento=fecha_de_periodo(prestamo.dia_cobro, numero),
+        # El interés se congela al devengarse: editarlo después vale para los
+        # períodos que vengan, no reescribe lo que ya se debía.
+        monto=prestamo.monto_interes_fijo,
+    )
+    db.add(cuota)
+    # El total a cobrar de un préstamo a interés fijo no se conoce al alta: se
+    # va conociendo. Arranca en el capital y crece con cada interés que nace, y
+    # la ganancia es exactamente ese interés devengado.
+    prestamo.total_a_cobrar = (prestamo.total_a_cobrar + cuota.monto).quantize(Decimal("0.01"))
+    prestamo.ganancia = (prestamo.ganancia + cuota.monto).quantize(Decimal("0.01"))
+    return cuota
+
+
+def puede_adelantar(prestamo: Prestamo, hoy: date | None = None) -> bool:
+    """Si "Cobrar interés" cobraría hoy el período siguiente, por adelantado.
+
+    Pasa cuando no hay interés vigente impago: todavía no arrancó ningún período,
+    o el vigente ya se cobró. El interés se puede cobrar en cualquier momento
+    antes de su fecha (decisión del dueño, 2026-09-22), y siempre completo. Con
+    el capital ya devuelto no nace un período nuevo, tampoco adelantado.
+
+    **De a un período.** Si el último ya está cobrado por adelantado (su fecha
+    todavía no llegó), no se adelanta otro: un segundo clic cobraría dos meses
+    de golpe. El siguiente se puede cobrar desde esa fecha, que es cuando
+    arranca."""
+    if not es_interes_fijo(prestamo) or prestamo.monto_interes_fijo is None:
+        return False
+    if prestamo.dia_cobro is None or (prestamo.capital_pendiente or _CERO) <= _CERO:
+        return False
+    vigente = periodo_vigente(prestamo)
+    if vigente is None:
+        return True
+    return saldo_cuota(vigente) <= _CERO and vigente.fecha_vencimiento <= (hoy or hoy_local())
+
+
+def interes_a_cobrar(prestamo: Prestamo, hoy: date | None = None) -> Decimal:
+    """Lo que cobra "Cobrar interés" sin mora: el vigente impago o, si no hay, el
+    período siguiente completo. Es el número que muestran el panel y el bot."""
+    if puede_adelantar(prestamo, hoy):
+        return prestamo.monto_interes_fijo
+    vigente = periodo_vigente(prestamo)
+    return saldo_cuota(vigente) if vigente is not None else _CERO
+
+
+def adelantar_periodo(db: Session, prestamo: Prestamo, hoy: date | None = None) -> Cuota | None:
+    """Crea el período siguiente antes de su fecha, para cobrarlo ya (sin commit).
+
+    **No corre el calendario**: el período nace con su fecha de siempre
+    (`dia_cobro + 30·(k−1)`), así que el próximo cobro queda 30 días después de
+    la fecha que tenía, no 30 días después del pago. Cuando llegue esa fecha,
+    `devengar_periodos` ve que el período ya existe y no lo vuelve a crear."""
+    if not puede_adelantar(prestamo, hoy):
+        return None
+    cuota = _nacer_periodo(db, prestamo, len(prestamo.cuotas_detalle) + 1)
+    _marcar_mora(prestamo)
+    return cuota
 
 
 def devengar(db: Session, prestamos: list[Prestamo], hasta: date | None = None) -> int:
@@ -494,19 +541,33 @@ def cobrar_interes(
             raise NotFoundError("Uno o más períodos no pertenecen a este préstamo.")
         elegidas = [por_id[i] for i in payload.cuota_ids]
     else:
-        vigente = periodo_vigente(prestamo)
-        elegidas = [vigente] if vigente is not None else []
+        # El período a cobrar es el vigente si se debe; si no, el siguiente, por
+        # adelantado y completo (`adelantar_periodo`). Sin esto, antes de la fecha
+        # de cobro no había nada que cobrar y el panel mostraba $0,00.
+        adelantado = adelantar_periodo(db, prestamo)
+        if adelantado is not None:
+            # El flush le da `id`: la línea de caja referencia la cuota por id.
+            db.flush()
+            elegidas = [adelantado]
+        else:
+            vigente = periodo_vigente(prestamo)
+            elegidas = [vigente] if vigente is not None else []
         if payload.incluir_mora:
             elegidas = periodos_en_mora(prestamo) + elegidas
 
     a_cobrar = [c for c in elegidas if saldo_cuota(c) > _CERO]
     if not a_cobrar:
-        if not prestamo.cuotas_detalle:
+        if payload.cuota_ids:
+            raise ConflictError("Esos períodos ya están cobrados.")
+        vigente = periodo_vigente(prestamo)
+        if vigente is not None and vigente.fecha_vencimiento > hoy_local():
             raise ConflictError(
-                "Todavía no se devengó ningún interés: el primer período arranca "
-                f"el {prestamo.dia_cobro:%d/%m/%Y}."
+                f"El período #{vigente.numero_cuota} ya está cobrado por adelantado. "
+                f"El siguiente se puede cobrar desde el {vigente.fecha_vencimiento:%d/%m/%Y}."
             )
-        raise ConflictError("No hay interés pendiente para cobrar en este préstamo.")
+        raise ConflictError(
+            "No hay interés para cobrar: el capital ya se devolvió y no nace un período nuevo."
+        )
 
     fecha = payload.fecha_cobro or hoy_local()
     for cuota in sorted(a_cobrar, key=lambda c: c.numero_cuota):

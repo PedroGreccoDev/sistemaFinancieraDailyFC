@@ -175,8 +175,10 @@ class InteresFijoOperacionBase(BaseModel):
 class CobrarInteresRequest(InteresFijoOperacionBase):
     """Cobro del interés de uno o varios períodos.
 
-    Sin `cuota_ids` cobra el **período vigente** (el último devengado); con
-    `incluir_mora`, además todos los períodos viejos impagos, que se acumulan."""
+    Sin `cuota_ids` cobra el **período vigente** (el último devengado) o, si ese
+    ya está cobrado o todavía no arrancó ninguno, el siguiente **por adelantado**
+    y completo; con `incluir_mora`, además todos los períodos viejos impagos,
+    que se acumulan."""
 
     cuota_ids: list[UUID] | None = None
     incluir_mora: bool = False

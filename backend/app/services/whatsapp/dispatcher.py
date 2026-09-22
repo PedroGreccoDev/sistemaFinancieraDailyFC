@@ -1274,8 +1274,8 @@ def _cobrar_interes(db: Session, data: dict[str, Any], msg_at: datetime | None =
 
     incluir_mora = _bandera(data, "incluir_mora", default=False)
     antes = svc_prestamos.mora_acumulada(prestamo)
-    vigente = svc_prestamos.periodo_vigente(prestamo)
-    a_cobrar = svc_prestamos.saldo_cuota(vigente) if vigente is not None else Decimal("0.00")
+    # El vigente impago o, si no hay, el período siguiente por adelantado.
+    a_cobrar = svc_prestamos.interes_a_cobrar(prestamo)
     total = a_cobrar + (antes if incluir_mora else Decimal("0.00"))
 
     prestamo = svc_prestamos.cobrar_interes(

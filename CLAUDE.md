@@ -1188,6 +1188,20 @@ operación de la modalidad. Es **idempotente**: mirar el panel dos veces no cobr
 el capital ya saldado **no nacen períodos nuevos** — el interés se cobra por tener el capital
 afuera; el que estuviera en curso al devolverlo se debe igual.
 
+**El interés se puede cobrar por adelantado** _(decisión del dueño, 2026-09-22)_. Antes del
+`dia_cobro` no existía ningún período, así que "Cobrar interés" se rechazaba y el modal mostraba
+$0,00. Ahora, si no hay interés vigente impago, el cobro **crea el período siguiente antes de su
+fecha** (`adelantar_periodo`) y lo cobra, siempre por el fijo completo:
+- **No corre el calendario.** El período nace con su fecha de siempre, así que el próximo cobro
+  queda en *la fecha que tenía + 30*, no en *el día del pago + 30*. Cuando llega esa fecha,
+  `devengar_periodos` ve que el período ya existe y no lo vuelve a crear ni a sumar.
+- **De a uno.** Con el último ya cobrado por adelantado no se adelanta otro hasta su fecha: un
+  doble clic cobraría dos meses. El mensaje dice desde qué día se puede cobrar el siguiente.
+- `interes_a_cobrar` es el número que muestran el bot y el panel (`periodoACobrar` es su
+  espejo en `Creditos.tsx`). La cancelación y la mora no cambiaron.
+- **Tarjeta:** "Cobrado" mientras el período adelantado no llegó a su fecha; desde esa fecha
+  (arranca el siguiente) vuelve a "sin devengar". Un período impago sigue diciendo "impago".
+
 **`cuotas` vale 0** en esta modalidad. No es "cero cuotas": es "no tiene cuadro". La cantidad de
 períodos se cuenta con las filas de `cuotas`. Un CHECK
 (`ck_prestamos_cuotas_por_tipo`) lo impone, y otro (`ck_prestamos_interes_fijo_coherente`) exige
