@@ -1,3 +1,12 @@
+> **Note (EN):** This is the backend + frontend for an internal financial management
+> system I built end-to-end for a real client — loan and check-portfolio management,
+> with a WhatsApp bot as the primary operator interface and a cascading multi-model
+> OCR pipeline for check processing that cut image-processing costs by ~8x. Backed by
+> 630+ automated tests and in active production use. Full docs below are in Spanish
+> (the client's working language).
+
+---
+
 # Sistema Financiera Daily FC
 
 Monorepo para un sistema interno de gestion financiera y cartera privada.
