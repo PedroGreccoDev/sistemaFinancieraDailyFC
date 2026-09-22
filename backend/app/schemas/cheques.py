@@ -275,6 +275,10 @@ class ChequeRead(BaseModel):
     ultimo_motivo_manual: str | None
     cliente_origen_id: UUID | None
     cliente_destino_id: UUID | None
+    # A qué acreedor se le entregó para pagarle una deuda del negocio (§5). La
+    # entrega deja el cheque en VENDIDO igual que una venta: sin esto el panel no
+    # puede decir "entregado a Pedro" y la mostraría como una venta sin cliente.
+    acreedor_destino: str | None = None
     tiene_foto: bool
     # Qué vuelta de este mismo papel por el negocio es esta fila (§Recompra). 1 = la
     # primera y única, que es el caso normal; 2 o más significa que el cheque se

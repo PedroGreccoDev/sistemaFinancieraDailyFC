@@ -249,6 +249,55 @@ function filterByRange(cheques: Cheque[], start: string, end: string): Cheque[] 
   })
 }
 
+// Búsqueda por número de cheque. Solo letras y dígitos: el operador tipea el
+// número como lo lee del papel, con o sin guiones y espacios.
+function soloAlfanum(texto: string): string {
+  return texto.replace(/[^0-9a-z]/gi, '').toLowerCase()
+}
+
+/** ¿El número contiene lo tipeado? Parcial: "4521" encuentra "00874521". */
+function coincideNro(nro: string | null, consulta: string): boolean {
+  const q = soloAlfanum(consulta)
+  if (!q) return true
+  return !!nro && soloAlfanum(nro).includes(q)
+}
+
+/** El número exacto va primero: es el que se estaba buscando. */
+function exactosPrimero(cheques: Cheque[], consulta: string): Cheque[] {
+  const q = soloAlfanum(consulta)
+  if (!q) return cheques
+  const exacto = (c: Cheque) => (c.nro_cheque && soloAlfanum(c.nro_cheque) === q ? 0 : 1)
+  return [...cheques].sort((a, b) => exacto(a) - exacto(b))
+}
+
+/**
+ * Cómo salió el cheque de la cartera. Son cinco salidas y el estado solo tiene
+ * cuatro: la entrega a un acreedor queda VENDIDO igual que una venta, y lo que
+ * las separa es a quién se fue.
+ */
+function tipoSalida(c: Cheque): { label: string; color: string } {
+  if (c.estado === 'VENDIDO' && c.acreedor_destino) return { label: 'Entregado', color: '#38bdf8' }
+  if (c.estado === 'VENDIDO')   return { label: 'Vendido',   color: '#4ade80' }
+  if (c.estado === 'FIADO')     return { label: 'Fiado',     color: '#fbbf24' }
+  if (c.estado === 'COBRADO')   return { label: 'Cobrado',   color: '#a3e635' }
+  if (c.estado === 'RECHAZADO') return { label: 'Rechazado', color: '#f87171' }
+  return { label: c.estado, color: '#94a3b8' }
+}
+
+/** Cobrado y rechazado son terminales y no se editan (el backend los rechaza). */
+function editableEnSalida(c: Cheque): boolean {
+  return c.estado === 'VENDIDO' || c.estado === 'FIADO'
+}
+
+function SalidaBadge({ cheque }: { cheque: Cheque }) {
+  const { label, color } = tipoSalida(cheque)
+  return (
+    <span style={{ fontFamily: FM, fontSize: '0.66rem', fontWeight: 700, color, background: `${color}18`, border: `1px solid ${color}35`, padding: '1px 7px', whiteSpace: 'nowrap' }}>
+      {label}
+    </span>
+  )
+}
+
 function diasBadge(dias: number | null) {
   if (dias === null) return <span style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.6)' }}>Sin fecha</span>
   const s = (color: string, label: string) => (
@@ -355,12 +404,15 @@ export default function Cartera() {
   // este cliente, y qué le vendí—. Uno solo filtraría la de abajo sin que se vea.
   const [busqueda, setBusqueda] = useState('')
   const [busquedaVendidos, setBusquedaVendidos] = useState('')
+  // El número, en cambio, es uno solo para las dos tablas: la pregunta es "¿dónde
+  // está este papel?", y la respuesta puede estar arriba o abajo.
+  const [busquedaNro, setBusquedaNro] = useState('')
   const queryClient = useQueryClient()
 
   function handleEditSuccess() {
     setChequeEditar(null)
     queryClient.invalidateQueries({ queryKey: ['cartera'] })
-    queryClient.invalidateQueries({ queryKey: ['cheques-vendidos'] })
+    queryClient.invalidateQueries({ queryKey: ['cheques-salidos'] })
   }
 
   /** Revertir y eliminar mueven caja: hay que refrescar también reporte y feed. */
@@ -368,7 +420,7 @@ export default function Cartera() {
     setChequeRevertir(null)
     setChequeEliminar(null)
     queryClient.invalidateQueries({ queryKey: ['cartera'] })
-    queryClient.invalidateQueries({ queryKey: ['cheques-vendidos'] })
+    queryClient.invalidateQueries({ queryKey: ['cheques-salidos'] })
     queryClient.invalidateQueries({ queryKey: ['fiados'] })
     queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
     queryClient.invalidateQueries({ queryKey: ['reporte'] })
@@ -397,15 +449,21 @@ export default function Cartera() {
     : customDesde ? `Desde ${fmtDate(customDesde)}` : 'Personalizado'
 
   const { data: cheques, isLoading, error, refetch } = useQuery({ queryKey: ['cartera'], queryFn: getChequeCartera, refetchInterval: 30_000 })
-  const { data: vendidos } = useQuery({ queryKey: ['cheques-vendidos'], queryFn: () => getCheques('VENDIDO'), refetchInterval: 60_000 })
+  // Todo lo que salió de la cartera, no solo lo vendido: fiado, entregado a un
+  // acreedor, cobrado o rechazado también es "dónde terminó este cheque".
+  const { data: todos } = useQuery({ queryKey: ['cheques-salidos'], queryFn: () => getCheques(), refetchInterval: 60_000 })
+  const salidos = todos ? todos.filter((c) => c.estado !== 'EN_CARTERA') : []
   const { data: clientesCartera = [] } = useQuery({ queryKey: ['clientes'], queryFn: getClientes, staleTime: 60_000 })
 
   // El cheque guarda ids, no nombres: de quién vino (origen) y a quién se le fue
   // (destino). En cartera importa el primero —es lo único que ya pasó—; en el
-  // historial, el segundo, que es a quién se le vendió.
+  // historial, los dos.
   const nombreDe = new Map(clientesCartera.map((c) => [c.id, c.nombre]))
   const clienteOrigen = (c: Cheque) => (c.cliente_origen_id ? nombreDe.get(c.cliente_origen_id) ?? '' : '')
-  const clienteDestino = (c: Cheque) => (c.cliente_destino_id ? nombreDe.get(c.cliente_destino_id) ?? '' : '')
+  // A quién se fue: el cliente que lo compró o al que se le fió, o el acreedor al
+  // que se le entregó. Cobrado y rechazado no tienen destinatario.
+  const destino = (c: Cheque) =>
+    c.acreedor_destino || (c.cliente_destino_id ? nombreDe.get(c.cliente_destino_id) ?? '' : '')
 
   const sorted = cheques
     ? [...cheques].sort((a, b) => {
@@ -416,16 +474,27 @@ export default function Cartera() {
       })
     : []
 
-  const visibles = sorted.filter((c) => coincide(clienteOrigen(c), busqueda))
+  const buscandoNro = soloAlfanum(busquedaNro) !== ''
+  const visibles = exactosPrimero(
+    sorted.filter((c) => coincide(clienteOrigen(c), busqueda) && coincideNro(c.nro_cheque, busquedaNro)),
+    busquedaNro,
+  )
 
   const [rangeStart, rangeEnd] = presetRange(preset, customDesde, customHasta)
-  const vendidosDelPeriodo = vendidos ? filterByRange(vendidos, rangeStart, rangeEnd) : []
-  const filteredVendidos = [...vendidosDelPeriodo]
-    .sort((a, b) => (b.ultimo_evento_manual_at ?? '').localeCompare(a.ultimo_evento_manual_at ?? ''))
-    .filter((c) => coincide(clienteDestino(c), busquedaVendidos))
-  // La ganancia del período es la de todas las ventas, se esté buscando o no: el
-  // KPI no puede cambiar porque el operador esté mirando a un cliente.
-  const totalGanancia = vendidosDelPeriodo.reduce((acc, c) => acc + parseFloat(c.ganancia), 0)
+  const salidosDelPeriodo = filterByRange(salidos, rangeStart, rangeEnd)
+  // Buscando por número no se mira el período: el cheque que se busca puede
+  // haber salido hace meses, y "no está" sería mentira.
+  const filteredSalidos = exactosPrimero(
+    (buscandoNro ? salidos : salidosDelPeriodo)
+      .filter((c) => coincide(destino(c), busquedaVendidos) && coincideNro(c.nro_cheque, busquedaNro))
+      .sort((a, b) => (b.ultimo_evento_manual_at ?? '').localeCompare(a.ultimo_evento_manual_at ?? '')),
+    busquedaNro,
+  )
+  // La ganancia del período es la de las ventas (VENDIDO, como siempre), se esté
+  // buscando o no: el KPI no puede cambiar porque el operador esté mirando algo.
+  const totalGanancia = salidosDelPeriodo
+    .filter((c) => c.estado === 'VENDIDO')
+    .reduce((acc, c) => acc + parseFloat(c.ganancia), 0)
 
   return (
     <div className="px-4 pt-5 sm:px-8 sm:pt-6 pb-fab" style={{ fontFamily: FM }}>
@@ -463,10 +532,16 @@ export default function Cartera() {
         </div>
       )}
 
-      {/* Buscador de la cartera */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem', marginBottom: '1rem' }}>
+      {/* Buscadores de la cartera. El del número filtra también el historial */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.75rem', marginBottom: buscandoNro ? '0.4rem' : '1rem' }}>
+        <BuscadorCliente value={busquedaNro} onChange={setBusquedaNro} label="Nº de cheque" placeholder="Número o parte…" ancho={180} />
         <BuscadorCliente value={busqueda} onChange={setBusqueda} placeholder="Cliente de origen…" />
       </div>
+      {buscandoNro && (
+        <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginBottom: '1rem' }}>
+          Buscando el número en la cartera y en el historial de salidas (sin filtro de período).
+        </p>
+      )}
 
       {/* Tabla cartera */}
       <div style={{ ...CARD, overflow: 'hidden', marginBottom: '2.5rem' }}>
@@ -476,8 +551,13 @@ export default function Cartera() {
         {sorted.length > 0 && visibles.length === 0 && (
           <div style={{ padding: '3rem', textAlign: 'center' }}>
             <p style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔍</p>
-            <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>Ningún cheque de ese cliente en cartera</p>
-            <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.4)', marginTop: '0.25rem' }}>Buscando "{busqueda}"</p>
+            <p style={{ fontFamily: FM, fontSize: '0.82rem', fontWeight: 600, color: 'rgba(100,116,139,0.6)' }}>
+              {buscandoNro ? 'Ningún cheque con ese número en cartera' : 'Ningún cheque de ese cliente en cartera'}
+            </p>
+            <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.4)', marginTop: '0.25rem' }}>
+              Buscando "{[busquedaNro.trim(), busqueda.trim()].filter(Boolean).join('" y "')}"
+              {buscandoNro && ' · mirá abajo si ya salió'}
+            </p>
           </div>
         )}
         {visibles.length > 0 && (
@@ -568,11 +648,11 @@ export default function Cartera() {
         )}
       </div>
 
-      {/* Historial de ventas */}
+      {/* Historial de salidas */}
       <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
-          <h2 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Historial de Ventas</h2>
-          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Cheques vendidos por período</p>
+          <h2 style={{ fontFamily: FN, fontSize: '2rem', letterSpacing: '0.06em', color: 'var(--text-1)', lineHeight: 1, marginBottom: '0.2rem' }}>Historial de Salidas</h2>
+          <p style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 500, color: 'rgba(100,116,139,0.8)' }}>Todo cheque que salió de cartera: vendido, fiado, entregado, cobrado o rechazado</p>
         </div>
       </div>
 
@@ -589,7 +669,7 @@ export default function Cartera() {
           ]}
           onChange={handlePreset}
         />
-        <BuscadorCliente value={busquedaVendidos} onChange={setBusquedaVendidos} placeholder="Cliente que lo compró…" />
+        <BuscadorCliente value={busquedaVendidos} onChange={setBusquedaVendidos} placeholder="A quién se fue…" />
         {showPicker && (
           <DateRangePicker
             from={customDesde} to={customHasta}
@@ -601,8 +681,8 @@ export default function Cartera() {
 
       <div className="grid grid-cols-2 gap-3 sm:max-w-xl" style={{ marginBottom: '1.25rem' }}>
         {[
-          { label: 'Cheques vendidos', value: String(filteredVendidos.length), color: 'var(--text-strong)', sub: 'en el período' },
-          { label: 'Ganancia del período', value: fmtARS(totalGanancia), color: '#4ade80', sub: 'spread acumulado' },
+          { label: 'Salieron', value: String(salidosDelPeriodo.length), color: 'var(--text-strong)', sub: 'cheques en el período' },
+          { label: 'Ganancia del período', value: fmtARS(totalGanancia), color: '#4ade80', sub: 'spread de las ventas' },
         ].map(({ label, value, color, sub }) => (
           <div key={label} className="lift" style={{ ...CARD, padding: '0.8rem 1rem' }}>
             <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.7)', marginBottom: '0.3rem' }}>{label}</p>
@@ -613,15 +693,17 @@ export default function Cartera() {
       </div>
 
       <div style={{ ...CARD, overflow: 'hidden' }}>
-        {filteredVendidos.length === 0 ? (
+        {filteredSalidos.length === 0 ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: 'rgba(100,116,139,0.6)', fontFamily: FM, fontSize: '0.82rem' }}>
-            {busquedaVendidos.trim() ? 'Sin ventas a ese cliente en el período' : 'Sin ventas en el período'}
+            {buscandoNro ? 'Ningún cheque con ese número salió de cartera'
+              : busquedaVendidos.trim() ? 'Nada salió hacia ese nombre en el período'
+              : 'No salió ningún cheque en el período'}
           </div>
         ) : (
           <>
           {/* Mobile: tarjetas */}
           <div className="sm:hidden">
-            {filteredVendidos.map((c) => {
+            {filteredSalidos.map((c) => {
               return (
                 <div key={c.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem', padding: '0.8rem 1rem', borderBottom: '1px solid var(--ov-004)' }}>
                   <div style={{ minWidth: 0 }}>
@@ -629,63 +711,76 @@ export default function Cartera() {
                     <p style={{ fontFamily: FM, fontSize: '0.7rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px' }}>
                       {fmtARS(c.monto)} · {fmtFechaHora(c.ultimo_evento_manual_at)}
                     </p>
-                    {clienteDestino(c) && <p style={{ fontFamily: FM, fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-2)', marginTop: '2px', wordBreak: 'break-word' }}>{clienteDestino(c)}</p>}
+                    <p style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <SalidaBadge cheque={c} />
+                      {destino(c) && <span style={{ fontFamily: FM, fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-2)', wordBreak: 'break-word' }}>{destino(c)}</span>}
+                    </p>
+                    {clienteOrigen(c) && <p style={{ fontFamily: FM, fontSize: '0.68rem', color: 'rgba(100,116,139,0.7)', marginTop: '2px', wordBreak: 'break-word' }}>Vino de {clienteOrigen(c)}</p>}
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)' }}>Ganancia</p>
-                    <p style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: '#4ade80', marginTop: '2px' }}>{fmtARS(c.ganancia)}</p>
+                    {c.estado === 'VENDIDO' && (
+                      <>
+                        <p style={{ fontFamily: FM, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)' }}>Ganancia</p>
+                        <p style={{ fontFamily: FM, fontSize: '0.88rem', fontWeight: 700, color: '#4ade80', marginTop: '2px' }}>{fmtARS(c.ganancia)}</p>
+                      </>
+                    )}
                     <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'flex-end', marginTop: '6px', flexWrap: 'wrap' }}>
-                      <button onClick={() => setChequeEditar(c)} style={{ ...btnBordered('neutral'), fontSize: '0.66rem', padding: '2px 8px' }}>Editar</button>
-                      <button onClick={() => setChequeRevertir(c)} title="Deshacer la venta y volver el cheque a cartera" style={{ ...btnBordered('warning'), fontSize: '0.66rem', padding: '2px 8px' }}>Revertir</button>
+                      {editableEnSalida(c) && <button onClick={() => setChequeEditar(c)} style={{ ...btnBordered('neutral'), fontSize: '0.66rem', padding: '2px 8px' }}>Editar</button>}
+                      <button onClick={() => setChequeRevertir(c)} title="Deshacer la salida y volver el cheque a cartera" style={{ ...btnBordered('warning'), fontSize: '0.66rem', padding: '2px 8px' }}>Revertir</button>
                       <button onClick={() => setChequeEliminar(c)} style={{ ...btnBordered('danger'), fontSize: '0.66rem', padding: '2px 8px' }}>Eliminar</button>
                     </div>
                   </div>
                 </div>
               )
             })}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.8rem 1rem', background: 'var(--ov-0025)' }}>
-              <span style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, color: 'rgba(148,163,184,0.8)' }}>Total ganancia</span>
-              <span style={{ fontFamily: FM, fontSize: '0.9rem', fontWeight: 700, color: '#4ade80' }}>{fmtARS(totalGanancia)}</span>
-            </div>
+            {!buscandoNro && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.8rem 1rem', background: 'var(--ov-0025)' }}>
+                <span style={{ fontFamily: FM, fontSize: '0.78rem', fontWeight: 700, color: 'rgba(148,163,184,0.8)' }}>Ganancia de las ventas</span>
+                <span style={{ fontFamily: FM, fontSize: '0.9rem', fontWeight: 700, color: '#4ade80' }}>{fmtARS(totalGanancia)}</span>
+              </div>
+            )}
           </div>
           {/* Desktop: tabla */}
           <div className="hidden sm:block" style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '720px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '960px' }}>
               <thead>
                 <tr>
                   <th style={TH}>Nº Cheque</th>
-                  <th style={TH} title="A quién se le vendió">Cliente</th>
+                  <th style={TH}>Salida</th>
+                  <th style={TH} title="A quién se fue: comprador, cliente al que se le fió o acreedor">Destino</th>
+                  <th style={TH} title="De quién se recibió el cheque">Origen</th>
                   <th style={{ ...TH, textAlign: 'right' }}>Monto</th>
-                  <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">% Compra</th>
-                  <th style={{ ...TH, textAlign: 'right' }} className="hidden sm:table-cell">% Venta</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>% Compra</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>% Venta</th>
                   <th style={{ ...TH, textAlign: 'right' }}>Ganancia</th>
-                  <th style={{ ...TH, textAlign: 'center' }}>Fecha venta</th>
+                  <th style={{ ...TH, textAlign: 'center' }}>Fecha salida</th>
                   <th style={{ ...TH, textAlign: 'right' }} aria-label="Acciones" />
                 </tr>
               </thead>
               <tbody>
-                {filteredVendidos.map(c => {
+                {filteredSalidos.map(c => {
+                  const raya = <span style={{ color: 'rgba(100,116,139,0.45)' }}>—</span>
                   return (
                     <tr key={c.id}
                       onMouseEnter={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'var(--ov-002)'}
                       onMouseLeave={(e) => (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'}>
                       <td style={{ ...TD, fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem' }}><TipoBadge tipo={c.tipo} />{fmtNroCheque(c.nro_cheque)}<VueltaBadge vuelta={c.vuelta} /></td>
-                      <td style={{ ...TD, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {clienteDestino(c) || <span style={{ color: 'rgba(100,116,139,0.45)' }}>—</span>}
-                      </td>
+                      <td style={TD}><SalidaBadge cheque={c} /></td>
+                      <td style={{ ...TD, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{destino(c) || raya}</td>
+                      <td style={{ ...TD, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-2)' }}>{clienteOrigen(c) || raya}</td>
                       <td style={{ ...TD, textAlign: 'right', fontWeight: 600 }}>{fmtARS(c.monto)}</td>
-                      <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">{parseFloat(c.porcentaje_compra).toFixed(2)}%</td>
-                      <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }} className="hidden sm:table-cell">
+                      <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }}>{parseFloat(c.porcentaje_compra).toFixed(2)}%</td>
+                      <td style={{ ...TD, textAlign: 'right', color: 'rgba(148,163,184,0.65)' }}>
                         {c.porcentaje_venta !== null ? `${parseFloat(c.porcentaje_venta).toFixed(2)}%` : '—'}
                       </td>
-                      <td style={{ ...TD, textAlign: 'right', fontWeight: 600, color: '#4ade80' }}>{fmtARS(c.ganancia)}</td>
+                      <td style={{ ...TD, textAlign: 'right', fontWeight: 600, color: '#4ade80' }}>{c.estado === 'VENDIDO' ? fmtARS(c.ganancia) : raya}</td>
                       <td style={{ ...TD, textAlign: 'center', color: 'rgba(148,163,184,0.65)', fontSize: '0.72rem' }}>
                         {fmtFechaHora(c.ultimo_evento_manual_at)}
                       </td>
                       <td style={{ ...TD, textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                          <button onClick={() => setChequeEditar(c)} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>Editar</button>
-                          <button onClick={() => setChequeRevertir(c)} title="Deshacer la venta y volver el cheque a cartera" style={{ ...btnBordered('warning'), fontSize: '0.68rem', padding: '2px 8px' }}>Revertir</button>
+                          {editableEnSalida(c) && <button onClick={() => setChequeEditar(c)} style={{ ...btnBordered('neutral'), fontSize: '0.68rem', padding: '2px 8px' }}>Editar</button>}
+                          <button onClick={() => setChequeRevertir(c)} title="Deshacer la salida y volver el cheque a cartera" style={{ ...btnBordered('warning'), fontSize: '0.68rem', padding: '2px 8px' }}>Revertir</button>
                           <button onClick={() => setChequeEliminar(c)} style={{ ...btnBordered('danger'), fontSize: '0.68rem', padding: '2px 8px' }}>Eliminar</button>
                         </div>
                       </td>
@@ -693,14 +788,15 @@ export default function Cartera() {
                   )
                 })}
               </tbody>
-              <tfoot>
-                <tr style={{ borderTop: '1px solid var(--bd-010)', background: 'var(--ov-0025)' }}>
-                  <td colSpan={5} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="hidden sm:table-cell">Total</td>
-                  <td colSpan={5} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }} className="sm:hidden">Total</td>
-                  <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#4ade80', borderBottom: 'none' }}>{fmtARS(totalGanancia)}</td>
-                  <td colSpan={2} style={{ ...TD, borderBottom: 'none' }} />
-                </tr>
-              </tfoot>
+              {!buscandoNro && (
+                <tfoot>
+                  <tr style={{ borderTop: '1px solid var(--bd-010)', background: 'var(--ov-0025)' }}>
+                    <td colSpan={7} style={{ ...TD, textAlign: 'right', fontWeight: 700, color: 'rgba(148,163,184,0.8)', borderBottom: 'none' }}>Ganancia de las ventas</td>
+                    <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#4ade80', borderBottom: 'none' }}>{fmtARS(totalGanancia)}</td>
+                    <td colSpan={2} style={{ ...TD, borderBottom: 'none' }} />
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
           </>

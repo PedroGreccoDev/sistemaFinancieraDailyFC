@@ -45,6 +45,9 @@ export interface Cheque {
   ultimo_motivo_manual: string | null
   cliente_origen_id: string | null
   cliente_destino_id: string | null
+  // A qué acreedor se le entregó para pagarle una deuda del negocio. La entrega
+  // deja el cheque VENDIDO igual que una venta: esto es lo que las distingue.
+  acreedor_destino: string | null
   tiene_foto: boolean
   // Qué vuelta de este mismo papel por el negocio es esta fila (§Recompra). 1 es
   // el caso normal; 2 o más significa que el cheque se vendió, siguió girando en

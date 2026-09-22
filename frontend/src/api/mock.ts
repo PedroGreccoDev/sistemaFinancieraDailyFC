@@ -36,7 +36,7 @@ function enCartera(id: string, nro: string, banco: string | null, monto: string,
     porcentaje_compra: compra, monto_abonado: null, usd_entregados: null, cotizacion_usd: null,
     porcentaje_venta: null, ganancia: '0.00',
     estado: 'EN_CARTERA', ultimo_evento_manual_at: null, ultimo_operador_id: null,
-    ultimo_motivo_manual: null, cliente_origen_id: origen, cliente_destino_id: null,
+    ultimo_motivo_manual: null, cliente_origen_id: origen, cliente_destino_id: null, acreedor_destino: null,
     tipo: 'PAPEL', tiene_foto: false, vuelta: 1, created_at: ts(createdOff), updated_at: ts(createdOff),
   }
 }
@@ -48,7 +48,7 @@ function vendido(id: string, nro: string, banco: string, monto: string, compra: 
     porcentaje_compra: compra, monto_abonado: null, usd_entregados: null, cotizacion_usd: null,
     porcentaje_venta: venta, ganancia,
     estado: 'VENDIDO', ultimo_evento_manual_at: ts(ventaOff), ultimo_operador_id: 'panel-web',
-    ultimo_motivo_manual: 'Venta a financiera', cliente_origen_id: origen, cliente_destino_id: destino,
+    ultimo_motivo_manual: 'Venta a financiera', cliente_origen_id: origen, cliente_destino_id: destino, acreedor_destino: null,
     tipo: 'PAPEL', tiene_foto: false, vuelta: 1, created_at: ts(ventaOff - 20), updated_at: ts(ventaOff),
   }
 }
@@ -69,6 +69,11 @@ const cheques: Cheque[] = [
   vendido('ch-v3', '00092345', 'Macro',     '900000', '9.00',  '5.00', '36000', -8,  'cli-3', 'cli-1'),
   vendido('ch-v4', '00093456', 'Nación',    '150000', '11.00', '8.00', '4500',  -12, 'cli-4', 'cli-2'),
   vendido('ch-v5', '00094567', 'Santander', '420000', '10.50', '6.50', '16800', -1,  'cli-5', 'cli-3'),
+  // Las otras salidas de cartera, para el historial de salidas
+  { ...vendido('ch-fi-1', '00055111', 'Galicia', '300000', '10.00', '8.00', '0', -7, 'cli-3', 'cli-2'), estado: 'FIADO', ganancia: '0.00' },
+  { ...vendido('ch-e1', '00095678', 'Macro', '800000', '9.50', '6.00', '28000', -3, 'cli-1', 'cli-4'), cliente_destino_id: null, acreedor_destino: 'Cuello Hermanos' },
+  { ...vendido('ch-co1', '00096789', 'Nación', '250000', '8.00', '0', '0', -6, 'cli-2', 'cli-1'), estado: 'COBRADO', porcentaje_venta: null, ganancia: '0.00', cliente_destino_id: null },
+  { ...vendido('ch-re1', '00097890', 'BBVA', '175000', '12.00', '0', '0', -4, 'cli-4', 'cli-1'), estado: 'RECHAZADO', porcentaje_venta: null, ganancia: '0.00', cliente_destino_id: null },
 ]
 
 // ── Fiados ────────────────────────────────────────────────────────────

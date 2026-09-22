@@ -2449,6 +2449,16 @@ que sería un loop infinito).
   **Cartera** se agregó la columna **Cliente** en las dos tablas —origen arriba (de quién se
   recibió), destino en el historial (a quién se le vendió)—: filtrar por un dato invisible
   deja filas que parecen no tener nada que ver.
+  - **Cartera también busca por número de cheque** _(pedido del dueño, 2026-09-22)_: un solo
+    campo que filtra **las dos tablas** —la pregunta es "¿dónde está este papel?"—, por parte
+    del número (solo letras y dígitos) con el exacto primero, y que **ignora el período** del
+    historial: un cheque que salió hace meses no puede dar "no está".
+  - **El historial es de SALIDAS, no de ventas** _(decisión del dueño, 2026-09-22)_: todo
+    cheque que dejó la cartera —vendido, fiado, entregado a un acreedor, cobrado o
+    rechazado—, con su destino y su origen. La entrega se distingue de la venta por
+    `acreedor_destino` (viaja en `ChequeRead`); una entrega anterior a la `0032` no lo tiene
+    y se ve como "Vendido" sin destino. La ganancia del período sigue siendo **solo la de los
+    `VENDIDO`**, igual que antes, y Editar no aparece en cobrados ni rechazados (terminales).
 - **Sección "Créditos" (frontend):** los **préstamos**, en su propia entrada del navbar (`/creditos` → `pages/Creditos.tsx`, ex `DeudoresPrestamos.tsx`). Era la pestaña "Préstamos" de Deudores hasta 2026-09-12; se mudó entera, con las mismas funciones (alta, cuadro de cuotas, cobro por cuota y en lote, cobro con cheque, pago libre, interés fijo, abonar capital, cancelar). `/deudores/prestamos` queda como `<Navigate>` a `/creditos`. Es la **única** pantalla desde donde se cobra un préstamo: el consolidado de Deudores ya no los toca (§2.c).
 
 ---
