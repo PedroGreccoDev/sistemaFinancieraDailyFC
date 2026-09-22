@@ -1195,12 +1195,30 @@ fecha** (`adelantar_periodo`) y lo cobra, siempre por el fijo completo:
 - **No corre el calendario.** El período nace con su fecha de siempre, así que el próximo cobro
   queda en *la fecha que tenía + 30*, no en *el día del pago + 30*. Cuando llega esa fecha,
   `devengar_periodos` ve que el período ya existe y no lo vuelve a crear ni a sumar.
-- **De a uno.** Con el último ya cobrado por adelantado no se adelanta otro hasta su fecha: un
-  doble clic cobraría dos meses. El mensaje dice desde qué día se puede cobrar el siguiente.
+- **La fecha pactada es una sola** _(el dueño, 2026-09-22)_: pagar antes no mueve la fecha de
+  ningún período.
+- **Sin tope de adelantos** _(decisión del dueño)_: cada cobro adelanta un período más. Un cobro
+  de más no se evita, se deshace: **Revertir pago**.
 - `interes_a_cobrar` es el número que muestran el bot y el panel (`periodoACobrar` es su
   espejo en `Creditos.tsx`). La cancelación y la mora no cambiaron.
-- **Tarjeta:** "Cobrado" mientras el período adelantado no llegó a su fecha; desde esa fecha
-  (arranca el siguiente) vuelve a "sin devengar". Un período impago sigue diciendo "impago".
+- **Tarjeta:** "Cobrado · vence dd/mm" (la fecha pactada) mientras el período adelantado no
+  llegó a su fecha; desde esa fecha arranca el siguiente y vuelve a "sin devengar". Con varios
+  adelantados agrega "Pagado por adelantado: N períodos, hasta el dd/mm".
+
+**Revertir pago** (`POST …/interes-fijo/cuotas/{cuota_id}/revertir-cobro`,
+`svc_prestamos.revertir_cobro_interes`). Botón en la tarjeta; deshace el **último** período
+cobrado, con `operador_id` + `motivo` como toda anulación.
+- Borra la línea `COBRO_CUOTA` del período y, en USD, su lote de stock (se busca por origen
+  `prestamo_cobro` + el detalle "Stock por interés período #k -", porque el origen es el
+  préstamo y no la cuota). **Bloquea** si esos dólares ya se vendieron.
+- Un período **adelantado** se borra entero (y resta su interés de `total_a_cobrar` y
+  `ganancia`): antes de su fecha no se debe, y dejarlo impago lo mostraría como deuda. Nace
+  solo al llegar su fecha. Uno **ya vencido** vuelve a impago.
+- **Los adelantados se revierten del último hacia atrás** (`bloqueo_revertir_cobro`, pura):
+  revertir uno del medio dejaría un hueco en el calendario.
+- Solo revierte lo cobrado con "Cobrar interés" (una línea de caja por período). Un pago libre
+  o con cheque no deja esa línea y se deshace anulando esa operación.
+- Anota un evento `ANULACION`: sin eso el cobro desaparecería de Movimientos sin rastro.
 
 **`cuotas` vale 0** en esta modalidad. No es "cero cuotas": es "no tiene cuadro". La cantidad de
 períodos se cuenta con las filas de `cuotas`. Un CHECK

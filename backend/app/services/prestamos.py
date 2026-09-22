@@ -21,6 +21,7 @@ from app.db.models import (
     FrecuenciaCuotas,
     MedioPago,
     Moneda,
+    MovimientoCaja,
     Prestamo,
     PrestamoEstado,
     PrestamoTipo,
@@ -413,18 +414,14 @@ def puede_adelantar(prestamo: Prestamo, hoy: date | None = None) -> bool:
     antes de su fecha (decisión del dueño, 2026-09-22), y siempre completo. Con
     el capital ya devuelto no nace un período nuevo, tampoco adelantado.
 
-    **De a un período.** Si el último ya está cobrado por adelantado (su fecha
-    todavía no llegó), no se adelanta otro: un segundo clic cobraría dos meses
-    de golpe. El siguiente se puede cobrar desde esa fecha, que es cuando
-    arranca."""
+    **Sin tope**: se pueden adelantar varios períodos seguidos (decisión del
+    dueño). Un cobro de más se deshace con `revertir_cobro_interes`."""
     if not es_interes_fijo(prestamo) or prestamo.monto_interes_fijo is None:
         return False
     if prestamo.dia_cobro is None or (prestamo.capital_pendiente or _CERO) <= _CERO:
         return False
     vigente = periodo_vigente(prestamo)
-    if vigente is None:
-        return True
-    return saldo_cuota(vigente) <= _CERO and vigente.fecha_vencimiento <= (hoy or hoy_local())
+    return vigente is None or saldo_cuota(vigente) <= _CERO
 
 
 def interes_a_cobrar(prestamo: Prestamo, hoy: date | None = None) -> Decimal:
@@ -559,12 +556,6 @@ def cobrar_interes(
     if not a_cobrar:
         if payload.cuota_ids:
             raise ConflictError("Esos períodos ya están cobrados.")
-        vigente = periodo_vigente(prestamo)
-        if vigente is not None and vigente.fecha_vencimiento > hoy_local():
-            raise ConflictError(
-                f"El período #{vigente.numero_cuota} ya está cobrado por adelantado. "
-                f"El siguiente se puede cobrar desde el {vigente.fecha_vencimiento:%d/%m/%Y}."
-            )
         raise ConflictError(
             "No hay interés para cobrar: el capital ya se devolvió y no nace un período nuevo."
         )
@@ -586,6 +577,123 @@ def cobrar_interes(
     except SQLAlchemyError as exc:
         db.rollback()
         raise DatabaseWriteError("No se pudo registrar el cobro del interés.") from exc
+
+
+def bloqueo_revertir_cobro(prestamo: Prestamo, cuota: Cuota, hoy: date | None = None) -> str | None:
+    """Por qué no se puede revertir el cobro de este período, o None si se puede.
+
+    Los períodos cobrados por adelantado se revierten **del último hacia atrás**:
+    deshacer uno del medio dejaría un hueco en el calendario —un período futuro
+    sin cobrar entre dos cobrados— y ese período no existiría ni como deuda, porque
+    todavía no llegó su fecha. Pura (sin BD)."""
+    if cuota.estado != CuotaEstado.COBRADA and (cuota.monto_pagado or _CERO) <= _CERO:
+        return f"El período #{cuota.numero_cuota} no tiene ningún cobro para revertir."
+    hoy = hoy or hoy_local()
+    posteriores = [
+        c for c in periodos(prestamo)
+        if c.numero_cuota > cuota.numero_cuota and c.fecha_vencimiento > hoy
+    ]
+    if posteriores:
+        ultimo = posteriores[-1].numero_cuota
+        return (
+            f"Los pagos adelantados se revierten del último hacia atrás: "
+            f"revertí primero el período #{ultimo}."
+        )
+    return None
+
+
+def revertir_cobro_interes(
+    db: Session,
+    prestamo_id: uuid.UUID,
+    cuota_id: uuid.UUID,
+    *,
+    operador_id: str,
+    motivo: str,
+) -> Prestamo:
+    """Deshace el cobro del interés de un período: el pago cargado de más o por error.
+
+    Devuelve lo que ese cobro movió —la línea de caja y, si fue en dólares, su
+    entrada al stock— y deja el período como antes de cobrarlo. Si era un período
+    **adelantado** (su fecha todavía no llegó), además lo borra: antes de su fecha
+    no se debe, y dejarlo impago lo mostraría como deuda. Cuando llegue su fecha
+    nace solo, como cualquier otro.
+
+    Solo revierte lo cobrado con "Cobrar interés", que es lo que deja una línea
+    de caja por período. Un pago libre o un cheque imputan contra el préstamo y
+    se deshacen por su propia puerta.
+    """
+    prestamo = _prestamo_interes_fijo_bloqueado(db, prestamo_id)
+    cuota = next((c for c in prestamo.cuotas_detalle if c.id == cuota_id), None)
+    if cuota is None:
+        raise NotFoundError("Ese período no pertenece a este préstamo.")
+    bloqueo = bloqueo_revertir_cobro(prestamo, cuota)
+    if bloqueo:
+        raise ConflictError(bloqueo)
+
+    lineas = list(db.scalars(
+        select(MovimientoCaja).where(
+            MovimientoCaja.referencia_tipo == "cuota",
+            MovimientoCaja.referencia_id == cuota.id,
+            MovimientoCaja.categoria == CajaCategoria.COBRO_CUOTA,
+        )
+    ))
+    if not lineas:
+        raise ConflictError(
+            f"El período #{cuota.numero_cuota} no se cobró con «Cobrar interés» "
+            "(fue con un pago libre o con un cheque): se deshace anulando esa operación."
+        )
+    revertido = sum((l.monto for l in lineas), _CERO)
+
+    # Los dólares que entraron con ese cobro salen del stock. Se validan antes de
+    # tocar nada: si ya se vendieron, sacarlos reescribiría esa venta.
+    etiqueta = _etiqueta_cuota(prestamo, cuota).lower()
+    lotes = [
+        m for m in svc_stock.listar_por_origen(db, "prestamo_cobro", prestamo.id)
+        if (m.observaciones or "").startswith(f"Stock por {etiqueta} -")
+    ]
+    for lote in lotes:
+        if lote.usd_restante != lote.monto:
+            raise ConflictError(
+                f"No se puede revertir: {lote.monto - lote.usd_restante} de los "
+                f"{lote.monto} USD que entraron con este cobro ya se vendieron."
+            )
+
+    cliente_nombre = prestamo.cliente.nombre if prestamo.cliente else "—"
+    adelantado = cuota.fecha_vencimiento > hoy_local()
+    try:
+        for lote in lotes:
+            db.delete(lote)
+        if lotes:
+            _reimputar_stock(db)
+        svc_caja.borrar_por_referencia(db, "cuota", cuota.id, categoria=CajaCategoria.COBRO_CUOTA)
+
+        cuota.monto_pagado = max((cuota.monto_pagado or _CERO) - revertido, _CERO)
+        if adelantado and cuota.monto_pagado <= _CERO:
+            prestamo.total_a_cobrar = (prestamo.total_a_cobrar - cuota.monto).quantize(Decimal("0.01"))
+            prestamo.ganancia = (prestamo.ganancia - cuota.monto).quantize(Decimal("0.01"))
+            prestamo.cuotas_detalle.remove(cuota)
+        else:
+            cuota.estado = CuotaEstado.PENDIENTE
+            if cuota.monto_pagado <= _CERO:
+                cuota.fecha_cobro = None
+            _marcar_mora(prestamo)
+
+        svc_eventos.anulacion(
+            db,
+            descripcion=f"cobro del {_etiqueta_cuota(prestamo, cuota).lower()} - {cliente_nombre}",
+            motivo=motivo,
+            operador=operador_id,
+            referencia_tipo="cuota",
+            referencia_id=cuota.id,
+            monto=revertido,
+            moneda=prestamo.moneda,
+        )
+        recalcular_estado(prestamo)
+        db.commit()
+        return get_prestamo(db, prestamo.id)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise DatabaseWriteError("No se pudo revertir el cobro del interés.") from exc
 
 
 def abonar_capital(

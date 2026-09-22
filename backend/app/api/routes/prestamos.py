@@ -26,6 +26,7 @@ from app.schemas.prestamos import (
     PrestamoPagoRequest,
     PrestamoRead,
     PrestamoUpdate,
+    RevertirCobroInteresRequest,
 )
 from app.services import prestamos as service
 
@@ -76,6 +77,22 @@ def cobrar_interes(
 ) -> PrestamoRead:
     """Cobra el interés del período vigente (y la mora, si se pide)."""
     return service.cobrar_interes(db, prestamo_id, payload)
+
+
+@router.post(
+    "/{prestamo_id}/interes-fijo/cuotas/{cuota_id}/revertir-cobro",
+    response_model=PrestamoRead,
+)
+def revertir_cobro_interes(
+    prestamo_id: UUID,
+    cuota_id: UUID,
+    payload: RevertirCobroInteresRequest,
+    db: DbSession,
+) -> PrestamoRead:
+    """Deshace el cobro del interés de un período (caja, stock y, si era adelantado, el período)."""
+    return service.revertir_cobro_interes(
+        db, prestamo_id, cuota_id, operador_id=payload.operador_id, motivo=payload.motivo
+    )
 
 
 @router.post("/{prestamo_id}/interes-fijo/abonar-capital", response_model=PrestamoRead)

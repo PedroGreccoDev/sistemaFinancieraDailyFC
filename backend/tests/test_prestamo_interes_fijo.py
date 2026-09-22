@@ -381,16 +381,43 @@ def test_con_el_vigente_cobrado_se_adelanta_el_siguiente() -> None:
     assert cuota.fecha_vencimiento == date(2026, 4, 9)
 
 
-def test_no_se_adelanta_un_segundo_periodo_hasta_que_arranque_el_primero() -> None:
-    # Un segundo clic no puede cobrar dos meses de golpe.
+def test_se_pueden_adelantar_varios_periodos_seguidos() -> None:
+    # Sin tope (decisión del dueño): cada cobro adelanta uno más, con su fecha.
     p = _prestamo()
-    _cobrar(svc.adelantar_periodo(FakeDB(), p, _HOY))
-    assert svc.puede_adelantar(p, _HOY) is False
-    assert svc.puede_adelantar(p, date(2026, 3, 9)) is False
-    assert svc.interes_a_cobrar(p, _HOY) == Decimal("0.00")
-    # El día que arranca el período siguiente, se puede cobrar ese.
-    assert svc.puede_adelantar(p, date(2026, 3, 10)) is True
-    assert svc.adelantar_periodo(FakeDB(), p, date(2026, 3, 10)).numero_cuota == 2
+    for _ in range(3):
+        _cobrar(svc.adelantar_periodo(FakeDB(), p, _HOY))
+    assert [(c.numero_cuota, c.fecha_vencimiento) for c in svc.periodos(p)] == [
+        (1, date(2026, 3, 10)), (2, date(2026, 4, 9)), (3, date(2026, 5, 9)),
+    ]
+    assert svc.proxima_fecha_cobro(p) == date(2026, 6, 8)
+    assert svc.interes_a_cobrar(p, _HOY) == Decimal("500000")
+
+
+# ── Revertir un cobro ───────────────────────────────────────────────────────
+
+def test_los_adelantados_se_revierten_del_ultimo_hacia_atras() -> None:
+    p = _prestamo()
+    for _ in range(2):
+        _cobrar(svc.adelantar_periodo(FakeDB(), p, _HOY))
+    primero, segundo = svc.periodos(p)
+    assert "período #2" in svc.bloqueo_revertir_cobro(p, primero, _HOY)
+    assert svc.bloqueo_revertir_cobro(p, segundo, _HOY) is None
+
+
+def test_un_periodo_ya_vencido_se_revierte_aunque_haya_otros_cobrados_despues() -> None:
+    # Ya llegó la fecha de los dos: revertir el primero lo deja debiendo, sin hueco.
+    p = _prestamo()
+    hoy = date(2026, 4, 9)
+    _devengar(p, hoy)
+    for c in svc.periodos(p):
+        _cobrar(c)
+    assert svc.bloqueo_revertir_cobro(p, svc.periodos(p)[0], hoy) is None
+
+
+def test_no_se_revierte_un_periodo_sin_cobro() -> None:
+    p = _prestamo()
+    _devengar(p, date(2026, 3, 10))
+    assert "no tiene ningún cobro" in svc.bloqueo_revertir_cobro(p, svc.periodos(p)[0], date(2026, 3, 10))
 
 
 def test_con_el_capital_devuelto_no_se_adelanta_nada() -> None:

@@ -184,6 +184,14 @@ class CobrarInteresRequest(InteresFijoOperacionBase):
     incluir_mora: bool = False
 
 
+class RevertirCobroInteresRequest(BaseModel):
+    """Deshacer el cobro del interés de un período. Como toda anulación, queda
+    registrado quién lo hizo y por qué (§Anulación)."""
+
+    operador_id: str = Field(min_length=1)
+    motivo: str = Field(min_length=1)
+
+
 class AbonarCapitalRequest(InteresFijoOperacionBase):
     """Devolución de capital, total o parcial. No toca el interés."""
 

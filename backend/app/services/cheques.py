@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from sqlalchemy import false as sa_false, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
     CajaCategoria,
@@ -361,6 +361,50 @@ def pasadas_anteriores(
     if excluir_id is not None:
         query = query.where(Cheque.id != excluir_id)
     return list(db.scalars(query.order_by(Cheque.created_at)))
+
+
+def historial_por_numero(db: Session, nro_cheque: str, banco: str | None = None) -> list[Cheque]:
+    """Todas las filas que existen de ese número, de la más vieja a la más nueva.
+
+    Es la búsqueda de la consulta de historial (§Consulta de cheque): el operador
+    tiene un papel en la mano —casi siempre uno que le devolvieron rebotado— y
+    pregunta si pasó por el negocio y de quién vino. Se diferencia de
+    `resolve_cheque` en tres cosas, y las tres son a propósito:
+
+      - **No elige una fila, las devuelve todas.** Con la recompra un mismo papel
+        puede tener varias pasadas y la pregunta es por el papel, no por una
+        pasada. Quedarse con "la operable" contestaría una sola vuelta.
+      - **No filtra por banco.** Si el número está cargado pero con otro banco, eso
+        es justo lo que hay que mostrar —con la advertencia, que la pone el que
+        arma el mensaje— y no un "nunca lo tuviste". El banco que dicta un OCR es
+        de lo primero que sale mal.
+      - **Trae los anulados.** Si el operador pregunta por un papel, que esa carga
+        se haya anulado es parte de la respuesta: algo pasó con él.
+
+    Nada de esto sirve para operar: acá no se decide sobre qué fila impactar, se
+    cuenta lo que hubo. Para operar sigue estando `resolve_cheque`.
+    """
+    nro = (nro_cheque or "").strip()
+    if not nro:
+        raise ValidationError("Indicá el número de cheque.")
+
+    def _buscar(condicion) -> list[Cheque]:
+        return list(
+            db.scalars(
+                select(Cheque)
+                .options(
+                    selectinload(Cheque.cliente_origen),
+                    selectinload(Cheque.cliente_destino),
+                )
+                .where(condicion)
+                .order_by(Cheque.created_at)
+            )
+        )
+
+    # Por sufijo solo si el exacto no dio nada, igual que `resolve_cheque`: el
+    # operador nombra el cheque por los últimos dígitos ("el 681") tanto para
+    # operar como para preguntar.
+    return _buscar(Cheque.nro_cheque == nro) or _buscar(Cheque.nro_cheque.endswith(nro))
 
 
 def verificar_no_esta_en_cartera(db: Session, nro_cheque: str | None, banco: str | None) -> None:

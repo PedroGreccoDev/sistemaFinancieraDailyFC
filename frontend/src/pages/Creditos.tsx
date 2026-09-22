@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   getPrestamos, createPrestamo, cobrarCuotasLote, cobrarCuotasConChequeLote, editarPrestamo,
-  cobrarInteres, abonarCapital, cancelarInteresFijo, editarInteresFijo,
+  cobrarInteres, abonarCapital, cancelarInteresFijo, editarInteresFijo, revertirCobroInteres,
 } from '../api/prestamos'
 import { getClientes, createCliente } from '../api/clientes'
 import { fmtMonto, fmtDate, daysUntil, fmtFechaConHora } from '../lib/fmt'
 import { btnSolid, btnBordered } from '../lib/ui'
 import { useToast } from '../lib/toast'
+import { useAuth } from '../auth/AuthContext'
 import { Skeleton } from '../components/Skeleton'
 import { IconPlus } from '../components/icons'
 import SelectorMedioPago from '../components/SelectorMedioPago'
@@ -70,16 +71,28 @@ function proximaFechaCobro(p: Prestamo): string | null {
  *  `svc_prestamos.interes_a_cobrar`. Es el vigente si se debe; si no (todavía no
  *  arrancó ningún período, o el vigente ya se cobró), el siguiente, por
  *  adelantado y completo: el interés se puede cobrar en cualquier momento antes
- *  de su fecha, y cobrarlo antes no corre el calendario. De a un período: si el
- *  último ya se cobró por adelantado, hasta su fecha no hay nada más que cobrar. */
+ *  de su fecha, y cobrarlo antes no corre el calendario. Sin tope: se pueden
+ *  adelantar varios, y uno de más se deshace con "Revertir pago". */
 function periodoACobrar(p: Prestamo): { numero: number; monto: number; adelantado: boolean; vence: string | null } | null {
   const vigente = periodoVigente(p)
   if (vigente && saldoCuota(vigente) > 0) {
     return { numero: vigente.numero_cuota, monto: saldoCuota(vigente), adelantado: false, vence: vigente.fecha_vencimiento }
   }
-  if (vigente && daysUntil(vigente.fecha_vencimiento) > 0) return null
   if (!p.monto_interes_fijo || !p.dia_cobro || capitalPendiente(p) <= 0) return null
   return { numero: p.cuotas_detalle.length + 1, monto: parseFloat(p.monto_interes_fijo), adelantado: true, vence: proximaFechaCobro(p) }
+}
+
+/** Los períodos cobrados por adelantado: los que existen antes de su fecha
+ *  pactada. Solo pueden estar ahí porque se cobraron. */
+function periodosAdelantados(p: Prestamo): Cuota[] {
+  return periodos(p).filter((c) => daysUntil(c.fecha_vencimiento) > 0)
+}
+
+/** El cobro que deshace "Revertir pago": el del último período cobrado. Los
+ *  adelantados se revierten del último hacia atrás, y el backend lo exige. */
+function ultimoCobrado(p: Prestamo): Cuota | null {
+  const cobrados = periodos(p).filter((c) => c.estado === 'COBRADA')
+  return cobrados.length ? cobrados[cobrados.length - 1] : null
 }
 
 /** Capital + interés del período vigente (completo, sin prorrateo). La mora
@@ -307,12 +320,6 @@ function ModalInteresFijoCobro({
           </div>
         )}
 
-        {modo === 'interes' && !aCobrar && vigente && daysUntil(vigente.fecha_vencimiento) > 0 && (
-          <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'var(--success)', lineHeight: 1.45, margin: 0 }}>
-            El período #{vigente.numero_cuota} ya está cobrado por adelantado. El siguiente se puede cobrar desde el {fmtDate(vigente.fecha_vencimiento)}.
-          </p>
-        )}
-
         <CajaResumen>
           {modo === 'cancelar' && <FilaResumen label="Capital pendiente" value={fmtMonto(capital, prestamo.moneda)} />}
           {modo === 'interes' ? (
@@ -360,6 +367,61 @@ function ModalInteresFijoCobro({
           disabled={total <= 0}
           texto={modo === 'cancelar' ? 'Confirmar cancelación' : 'Confirmar cobro'}
         />
+      </form>
+    </ModalShell>
+  )
+}
+
+// ── Modal: revertir el último cobro de interés ────────────────────────────
+
+/** Deshace un cobro cargado por error —típicamente un adelanto de más—. Como
+ *  toda anulación, pide el motivo: queda en Movimientos quién lo hizo y por qué. */
+function ModalRevertirCobro({ prestamo, clienteNombre, onClose, onSuccess }: { prestamo: Prestamo; clienteNombre: string; onClose: () => void; onSuccess: () => void }) {
+  const toast = useToast()
+  const { user } = useAuth()
+  const cuota = ultimoCobrado(prestamo)
+  const adelantado = !!cuota && daysUntil(cuota.fecha_vencimiento) > 0
+  const [motivo, setMotivo] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!cuota) return
+    setError(null)
+    setLoading(true)
+    try {
+      await revertirCobroInteres(prestamo.id, cuota.id, { operador_id: user?.username ?? 'panel', motivo: motivo.trim() })
+      toast('success', `Pago del período #${cuota.numero_cuota} revertido`)
+      onSuccess()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <ModalShell titulo="Revertir pago" subtitulo={`${clienteNombre} · último interés cobrado`}>
+      <form onSubmit={handleSubmit} style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+        {cuota && (
+          <CajaResumen>
+            <FilaResumen label={`Período #${cuota.numero_cuota} · vence ${fmtDate(cuota.fecha_vencimiento)}`} value={fmtMonto(cuota.monto_pagado || cuota.monto, prestamo.moneda)} />
+            {cuota.fecha_cobro && <FilaResumen label="Cobrado el" value={fmtDate(cuota.fecha_cobro)} />}
+          </CajaResumen>
+        )}
+        <p style={{ fontFamily: FM, fontSize: '0.72rem', color: 'rgba(100,116,139,0.8)', lineHeight: 1.45, margin: 0 }}>
+          La plata sale de la caja por la que entró.{' '}
+          {adelantado
+            ? 'Como se había cobrado por adelantado, el período vuelve a quedar pendiente de su fecha pactada.'
+            : 'El período vuelve a quedar impago.'}
+        </p>
+        <div>
+          <label style={LABEL_STYLE}>Motivo</label>
+          <input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ej.: se cargó un mes de más" required style={INPUT_STYLE} />
+        </div>
+        {error && <p style={{ fontFamily: FM, fontSize: '0.75rem', color: '#f87171', margin: 0 }}>{error}</p>}
+        <BotonesModal onClose={onClose} loading={loading} disabled={!cuota || !motivo.trim()} texto="Revertir pago" />
       </form>
     </ModalShell>
   )
@@ -1175,9 +1237,12 @@ function PanelInteresFijo({ prestamo }: { prestamo: Prestamo }) {
   const proxima = proximaFechaCobro(prestamo)
   const interesVigente = vigente && vigente.estado !== 'COBRADA' ? saldoCuota(vigente) : 0
   // Un período cuya fecha todavía no llegó solo existe si se cobró por
-  // adelantado: dice "Cobrado" hasta esa fecha, que es cuando arranca el
-  // siguiente, y desde ahí vuelve a "sin devengar".
-  const adelantado = vigente !== null && interesVigente === 0 && daysUntil(vigente.fecha_vencimiento) > 0
+  // adelantado. El período en curso es el primero de ellos: dice "Cobrado" con
+  // su fecha pactada —que no se mueve por pagar antes— y al llegar esa fecha
+  // arranca el siguiente, que vuelve a "sin devengar".
+  const adelantados = periodosAdelantados(prestamo)
+  const enCurso = interesVigente === 0 ? adelantados[0] ?? null : null
+  const hasta = adelantados.length > 1 ? adelantados[adelantados.length - 1] : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginBottom: '0.25rem' }}>
@@ -1192,14 +1257,23 @@ function PanelInteresFijo({ prestamo }: { prestamo: Prestamo }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem', paddingTop: '0.25rem', borderTop: '1px solid var(--bd-006)' }}>
         <span style={{ color: 'rgba(100,116,139,0.7)' }}>
-          {vigente && (interesVigente > 0 || adelantado) ? `Período #${vigente.numero_cuota}` : 'Período en curso'}
+          {vigente && interesVigente > 0
+            ? `Período #${vigente.numero_cuota}`
+            : enCurso ? `Período #${enCurso.numero_cuota}` : 'Período en curso'}
         </span>
         <span style={{ color: interesVigente > 0 ? 'var(--warning)' : 'var(--success)', fontWeight: 700 }}>
           {interesVigente > 0
             ? `${fmtMonto(interesVigente, prestamo.moneda)} impago`
-            : adelantado ? 'Cobrado' : 'sin devengar'}
+            : enCurso ? `Cobrado · vence ${fmtDate(enCurso.fecha_vencimiento)}` : 'sin devengar'}
         </span>
       </div>
+
+      {hasta && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.72rem' }}>
+          <span style={{ color: 'rgba(100,116,139,0.7)' }}>Pagado por adelantado</span>
+          <span style={{ color: 'var(--success)', fontWeight: 600 }}>{adelantados.length} períodos, hasta el {fmtDate(hasta.fecha_vencimiento)}</span>
+        </div>
+      )}
 
       {mora > 0 && (
         <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: FM, fontSize: '0.78rem' }}>
@@ -1232,6 +1306,7 @@ export default function Creditos() {
   const [cobroFijo, setCobroFijo] = useState<{ prestamo: Prestamo; modo: 'interes' | 'cancelar' } | null>(null)
   const [abonandoCapital, setAbonandoCapital] = useState<Prestamo | null>(null)
   const [editandoInteres, setEditandoInteres] = useState<Prestamo | null>(null)
+  const [revirtiendoCobro, setRevirtiendoCobro] = useState<Prestamo | null>(null)
   const [busqueda, setBusqueda] = useState('')
   const queryClient = useQueryClient()
 
@@ -1303,6 +1378,7 @@ export default function Creditos() {
     setCobroFijo(null)
     setAbonandoCapital(null)
     setEditandoInteres(null)
+    setRevirtiendoCobro(null)
     queryClient.invalidateQueries({ queryKey: ['prestamos'] })
     queryClient.invalidateQueries({ queryKey: ['reporte-caja'] })
     queryClient.invalidateQueries({ queryKey: ['reporte'] })
@@ -1495,6 +1571,16 @@ export default function Creditos() {
                     >
                       Editar interés
                     </button>
+                    {ultimoCobrado(p) && (
+                      <button
+                        type="button"
+                        onClick={() => setRevirtiendoCobro(p)}
+                        title="Deshacer el último cobro de interés (por ejemplo, un pago adelantado cargado de más)"
+                        style={{ ...btnBordered('danger'), flex: '1 1 8rem', padding: '0.45rem 0.8rem', fontSize: '0.75rem', textAlign: 'center' }}
+                      >
+                        Revertir pago
+                      </button>
+                    )}
                   </>
                 ) : (
                   <>
@@ -1632,6 +1718,14 @@ export default function Creditos() {
           prestamo={editandoInteres}
           clienteNombre={clienteMap.get(editandoInteres.cliente_id) ?? '…'}
           onClose={() => setEditandoInteres(null)}
+          onSuccess={handleOperacionInteresFijo}
+        />
+      )}
+      {revirtiendoCobro && (
+        <ModalRevertirCobro
+          prestamo={revirtiendoCobro}
+          clienteNombre={clienteMap.get(revirtiendoCobro.cliente_id) ?? '…'}
+          onClose={() => setRevirtiendoCobro(null)}
           onSuccess={handleOperacionInteresFijo}
         />
       )}

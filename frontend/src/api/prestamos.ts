@@ -108,6 +108,18 @@ export const cobrarInteres = (id: string, payload: CobrarInteresPayload): Promis
     body: JSON.stringify(payload),
   })
 
+/** Deshace el cobro del interés de un período. Si era adelantado, el período
+ *  se borra y vuelve a nacer en su fecha pactada. */
+export const revertirCobroInteres = (
+  id: string,
+  cuotaId: string,
+  payload: { operador_id: string; motivo: string },
+): Promise<Prestamo> =>
+  apiFetch<Prestamo>(
+    `/prestamos/${encodeURIComponent(id)}/interes-fijo/cuotas/${encodeURIComponent(cuotaId)}/revertir-cobro`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  )
+
 export interface AbonarCapitalPayload extends InteresFijoOperacionBase {
   monto: number
 }
