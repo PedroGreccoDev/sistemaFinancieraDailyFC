@@ -321,7 +321,11 @@ const CATEGORIA_LABEL: Record<string, string> = {
 // distinto tipo, donde decir "Cobro de fiado" describiría mal a la mitad.
 function detalleSecundario(m: MovimientoUnificado, etiqueta?: string): string {
   const partes: string[] = [etiqueta ?? CATEGORIA_LABEL[m.categoria] ?? m.categoria]
-  if (m.flujo === 'NEUTRO') partes.push('sin movimiento de efectivo')
+  // Una anulación no mueve plata por sí misma, pero decir "sin movimiento de
+  // efectivo" se lee como que la plata no volvió: lo que hizo fue borrar el
+  // renglón de caja de la operación deshecha, que ya no suma ni resta.
+  if (m.categoria === 'ANULACION') partes.push('se borró el renglón original: la caja ya no lo cuenta')
+  else if (m.flujo === 'NEUTRO') partes.push('sin movimiento de efectivo')
   if (m.medio_pago) partes.push(m.medio_pago === 'EFECTIVO' ? 'efectivo' : 'transferencia')
   if (m.cotizacion) {
     const c = parseFloat(m.cotizacion).toLocaleString('es-AR', { minimumFractionDigits: 2 })
