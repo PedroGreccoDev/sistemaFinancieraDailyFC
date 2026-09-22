@@ -28,6 +28,11 @@ para simular lo que el operador escribe junto a la captura:
     {
       "mensaje": "compré este echeq al 12",
       "intent": "REGISTRAR_CHEQUE",
+      "data": {"tipo": "CHEQUE"},          # campos sueltos de `data`, opcional
+      "historial": [                       # turnos previos de la sesión, opcional
+        {"role": "user", "content": "..."},
+        {"role": "assistant", "content": "..."}
+      ],
       "cheques": [
         {"nro_cheque": "00001020", "monto": 1900000, "fecha_pago": "2026-09-10",
          "banco": "Galicia", "tipo": "ELECTRONICO"}
@@ -97,10 +102,15 @@ def _fmt(valor: Any) -> str:
     return "—" if valor in (None, "") else str(valor)
 
 
-async def _leer(ruta: Path, mensaje: str) -> dict[str, Any]:
+async def _leer(
+    ruta: Path, mensaje: str, historial: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     mime = mimetypes.guess_type(ruta.name)[0] or "image/jpeg"
     resultado = await ia.extraer_intencion(
-        text=mensaje, image_bytes=ruta.read_bytes(), history=[], media_mime_type=mime
+        text=mensaje,
+        image_bytes=ruta.read_bytes(),
+        history=historial or [],
+        media_mime_type=mime,
     )
     return {
         "intent": resultado.intent,
@@ -123,6 +133,16 @@ def _comparar(leido: dict[str, Any], esperado: dict[str, Any]) -> list[str]:
 
     if "intent" in esperado and leido["intent"] != esperado["intent"]:
         fallas.append(f"intent: esperaba {esperado['intent']}, leyó {leido['intent']}")
+
+    # Campos sueltos de `data` (ej: el `tipo` de una consulta). Van aparte de
+    # `cheques` porque no todo lo que se le pide al modelo mirando una foto es
+    # un alta: "¿de quién vino este cheque?" es una CONSULTA con tipo CHEQUE, y
+    # sin esto el intent daba bien y el tipo podía ser cualquiera.
+    for campo, valor in (esperado.get("data") or {}).items():
+        if _norm(leido["data"].get(campo)) != _norm(valor):
+            fallas.append(
+                f"data.{campo}: esperaba {_fmt(valor)}, leyó {_fmt(leido['data'].get(campo))}"
+            )
 
     esperados = esperado.get("cheques") or []
     leidos = _cheques_de(leido["data"])
@@ -186,12 +206,14 @@ async def main() -> int:
 
         mensaje = esperado.get("mensaje", "")
         print(f"▸ {ruta.name}" + (f'  ("{mensaje}")' if mensaje else ""))
+        if esperado.get("historial"):
+            print(_color(f"  (con {len(esperado['historial'])} turno(s) de historial)", _GRIS))
 
         for corrida in range(1, args.corridas + 1):
             if args.corridas > 1:
                 print(_color(f"  — corrida {corrida}/{args.corridas}", _GRIS))
             try:
-                leido = await _leer(ruta, mensaje)
+                leido = await _leer(ruta, mensaje, esperado.get("historial"))
             except Exception as exc:  # el detalle importa: puede ser la API caída
                 print(_color(f"  ERROR llamando al modelo: {exc}", _ROJO))
                 total += 1

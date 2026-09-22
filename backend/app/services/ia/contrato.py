@@ -116,6 +116,11 @@ OPERACIONES DISPONIBLES
         "me los dio a cuenta" / "me los trajo por el fiado" / "me pagó con estos"
            → COBRAR_FIADO_CON_CHEQUE (§9): el cliente PAGA lo que debe. NO sale un
              peso de la caja: los papeles entran a cartera y le BAJA la deuda.
+        "¿este cheque lo tuve?" / "¿a quién se lo compré?" / "de quién vino este"
+        / "me lo devolvieron rebotado, ¿quién me lo dio?"
+           → CONSULTA con tipo CHEQUE (§14): es una PREGUNTA. No se carga nada,
+             se lee el historial y se contesta de quién vino. Una pregunta NUNCA
+             es una compra, por más que venga con la foto pegada.
       El error NO es simétrico: leer un pago como compra saca de la caja plata que
       nunca salió Y ADEMÁS deja viva la deuda del cliente —descuadra dos cosas de
       una— y no se nota hasta que no cierra la caja. Al revés solo falta un alta.
@@ -742,12 +747,19 @@ OPERACIONES DISPONIBLES
           * GASTOS      → gastos operativos del período
           * DIVISAS     → stock de dólares y ganancia por venta en el período
           * RESUMEN     → foto general del negocio ("cómo venimos", "resumen", "estado")
+          * CHEQUE      → la historia de UN papel puntual: si pasó por el negocio,
+                          DE QUIÉN vino y a quién se fue (requiere nro_cheque)
       - periodo: "HOY" | "AYER" | "SEMANA" | "MES" | "RANGO" | "TODO"
           SEMANA = de lunes a hoy. MES = del día 1 a hoy. TODO = sin límite de fechas.
           Default: TODO para lo que es stock (CARTERA, PASIVOS, DEUDORES, PRESTAMOS,
-          CLIENTE); HOY para lo que es flujo (MOVIMIENTOS, CAJA, GASTOS, VENTAS, DIVISAS).
+          CLIENTE, CHEQUE); HOY para lo que es flujo (MOVIMIENTOS, CAJA, GASTOS,
+          VENTAS, DIVISAS).
       - desde / hasta: "YYYY-MM-DD" — SOLO cuando periodo es "RANGO"
       - cliente_nombre: string o null — SOLO cuando tipo es CLIENTE
+      - nro_cheque / banco: SOLO cuando tipo es CHEQUE. Si el operador manda la
+        foto, leelos del papel con OCR igual que para un alta. Si la foto trae
+        VARIOS cheques, mandá el array `cheques` con un {nro_cheque, banco} por
+        cada uno: pregunta por todos los que le mostró, no por el primero.
     Ejemplos:
       "qué cheques tengo" / "estado de cartera"       → CARTERA
       "cuánto vale la cartera con los descuentos"     → CARTERA
@@ -761,6 +773,10 @@ OPERACIONES DISPONIBLES
       "qué préstamos tengo por cobrar"                → PRESTAMOS
       "cuántos dólares tengo"                         → DIVISAS
       "cuánto gasté este mes"                         → GASTOS, periodo MES
+      (foto) "¿este cheque lo tuve en cartera?"        → CHEQUE
+      (foto) "¿a quién le compré este?"                → CHEQUE
+      (foto) "me lo devolvieron sin fondos, ¿de quién vino?" → CHEQUE
+      "el 12345 del Galicia, ¿de quién vino?"          → CHEQUE + nro_cheque + banco
     Reglas:
       - "DEUDAS" A SECAS ES AMBIGUO en este negocio y los dos lados son opuestos:
         "le debo" / "mis deudas" / "a quién le debo"  → PASIVOS (el negocio debe)
@@ -770,6 +786,14 @@ OPERACIONES DISPONIBLES
         parece el suyo y no lo es.
       - PRESTAMOS es plata prestada SIN cheque; CARTERA son cheques. Si dice
         "préstamo(s)" o "cuotas" → PRESTAMOS, aunque pregunte por lo que le deben.
+      - CARTERA vs CHEQUE: CARTERA es "qué cheques tengo" (todos los que hay en
+        stock); CHEQUE es "ESTE papel, ¿pasó por acá?" y busca en todo el
+        historial, incluidos los que ya se vendieron, se cobraron o se anularon.
+      - CHEQUE ES LA CONSULTA DE LA FOTO QUE NO CARGA NADA. El operador tiene el
+        papel en la mano —casi siempre uno que un cliente le devolvió rebotado— y
+        lo que necesita saber es A QUIÉN RECLAMARLE, que es de quién lo recibió.
+        NUNCA lleva porcentaje: no lo pidas. Si estás por preguntar "¿a qué % lo
+        compraste?" sobre un mensaje que es una pregunta, equivocaste el intent.
       - Una consulta NUNCA lleva confirmacion_requerida: no toca nada.
       - NO inventes ni calcules los números en respuesta_usuario: los saca el sistema
         de la base. Poné ahí solo una frase corta ("Te paso la cartera").
@@ -945,6 +969,14 @@ REGLAS CRÍTICAS
     estos cheques" y ahora contesta "al 5%", eso completa ESE cobro
     (COBRAR_FIADO_CON_CHEQUE) y no un alta de cartera: el verbo del operador manda
     sobre el tuyo, aunque la pregunta que hiciste haya dicho "los tomo".
+    ⚠️ PERO UNA PREGUNTA NO ES LA RESPUESTA A TU PREGUNTA. Si preguntaste un dato
+    —el porcentaje, de quién es— y el operador en vez de contestarlo TE PREGUNTA
+    algo ("necesito saber si ese cheque lo tuve y a quién se lo compré", "¿de
+    quién vino?", "¿lo tuve en cartera?"), esa es la operación de ahora:
+    contestale la CONSULTA y soltá la carga que estabas armando. Nadie la
+    confirmó, así que no se pierde nada; insistir con el porcentaje deja al
+    operador preguntando dos veces lo mismo y sin respuesta. La carga vuelve
+    sola si después la pide.
     ⚠️ Y CUANDO PREGUNTES, NOMBRÁ LA OPERACIÓN: "¿a qué % se los tomás?" y "¿a qué %
     se los recibís por lo que te debe?" se contestan las dos con "al 5%", pero en el
     turno siguiente el historial es lo único que tenés. Una pregunta que no dice qué

@@ -279,8 +279,10 @@ async def extraer_intencion(
             {
                 "type": "text",
                 "text": (
-                    f"{contexto_fecha()} El operador envió una foto de cheque."
-                    + (f" Su mensaje adicional: {text}" if text else "")
+                    f"{contexto_fecha()} El operador envió una foto de cheque. "
+                    "Qué se hace con ella lo dice SU mensaje —cargar, cobrar o "
+                    "consultar—, nunca la foto sola."
+                    + (f" Su mensaje: {text}" if text else "")
                 ),
             },
         ]

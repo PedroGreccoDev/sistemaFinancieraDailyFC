@@ -863,6 +863,68 @@ Tampoco vienen nunca en el comprobante el **porcentaje de compra** (sale del
 mensaje del operador) ni el **banco** de forma confiable (solo si se ve el nombre
 de la entidad; no se deduce de los colores de la app).
 
+#### 1.d Consulta de cheque — de quién vino este papel _(régimen definido 2026-09-22)_
+
+Un cliente vuelve al mostrador con un cheque que el negocio le vendió y que rebotó:
+*"vos me diste este cheque"*. Lo que el operador necesita en ese momento es **a quién
+reclamarle**, que es de quién recibió el papel. Manda la foto por WhatsApp, pregunta,
+y el bot le contesta con la operación de compra: **vendedor, fecha, porcentaje y
+monto**. Es `CONSULTA` con `tipo: "CHEQUE"` (§Bot) y **no escribe nada**
+_(decisión del dueño: "solo sea de lectura, y nada más que lectura")_.
+
+**Lo que se busca es el papel, no una pasada.** `svc_cheques.historial_por_numero`
+devuelve **todas** las filas de ese número, de la más vieja a la más nueva, y el bot
+las muestra numeradas (`1ª vuelta`, `2ª vuelta`). Con la recompra (§1.b) cada vuelta
+tiene **su propio vendedor**: quedarse con una sola mandaría a reclamarle al
+equivocado. Es deliberadamente más ancha que `resolve_cheque`, que elige una fila
+para operar sobre ella:
+
+| | `resolve_cheque` (operar) | `historial_por_numero` (consultar) |
+|---|---|---|
+| Cuántas devuelve | Una | Todas |
+| Filtra por banco | Sí | **No** — el banco va como advertencia |
+| Trae anulados | No | **Sí** |
+
+**Los tres desencuentros se avisan, nunca esconden el cheque** _(decisiones del dueño)_:
+
+- **Banco distinto** → se muestra igual con *"el que tengo es de X, no de Y"*. El banco
+  que dicta un OCR es de lo primero que sale mal, y contestar "no lo tuviste" sobre un
+  cheque que sí pasó es el peor resultado posible de esta consulta.
+- **Carga anulada** → se muestra igual, marcada. Si el operador pregunta por el papel,
+  que esa carga se haya anulado es parte de la respuesta.
+- **Número resuelto por sufijo** → se avisa el número completo.
+
+**"De X" y no "se lo compraste a X".** Un cheque entra a cartera de dos maneras
+—comprado, o recibido de un cliente que pagaba lo que debía— y para el reclamo las dos
+terminan en la misma persona, así que la respuesta no las distingue. `cliente_origen_id`
+se carga en los dos caminos. La **carga inicial** (§Apertura) no tiene vendedor: dice
+*"estaba en cartera desde antes del sistema"* en vez de inventar uno.
+
+**Las fechas salen del libro de caja, no del timestamp** (`_fechas_en_caja`): el cheque
+guarda cuándo se creó la fila, pero la fecha que el operador reconoce es la del
+movimiento —el día que pagó, el día que cobró—. El timestamp queda de respaldo para lo
+que no deja línea de caja: la carga inicial, el fiado, el rechazo.
+
+**El riesgo de esta consulta está en el prompt, no en el handler.** La misma foto, con
+otro verbo, es una compra que saca plata de la caja. Tres frenos, los tres en
+`contrato.py`:
+
+1. **§1 lista el tercer camino de una foto**: compra, cobro con cheque, o **pregunta**.
+   *"Una pregunta NUNCA es una compra, por más que venga con la foto pegada."*
+2. **`CHEQUE` no lleva porcentaje y el prompt lo dice**: si el modelo está por preguntar
+   "¿a qué % lo compraste?" sobre un mensaje que es una pregunta, equivocó el intent.
+3. **La regla 13 (reconstrucción multi-turno) cede ante una pregunta.** El flujo real es
+   ese: el operador manda la foto sola, el bot le pregunta el porcentaje, y el operador
+   contesta *"necesito saber si ese cheque lo tuve y a quién se lo compré"*. Sin el freno,
+   la regla 13 completa la carga que quedó a medias y el bot insiste con el porcentaje
+   para siempre. La carga se suelta —nadie la confirmó, no se pierde nada— y se contesta
+   la consulta. La foto sigue viva ese turno por `session.set_foto_aclaracion`, así que
+   el OCR la lee de nuevo sin pedírsela al operador.
+
+Que el modelo obedezca esas tres reglas **no lo ve ningún unitario**: se verifica con
+`scripts/probar_ocr.py` sobre `echeques-ejemplos/consulta-historial/`, que incluye el
+caso del pivote con su historial de sesión (§Testing: lo que los unitarios NO pueden ver).
+
 ### 2. Fiados _(módulo agregado 2026-06-09)_
 
 Cuando se **fía** un cheque se genera una **deuda abierta** del cliente, sin cuotas fijas.
@@ -2315,8 +2377,8 @@ que sería un loop infinito).
   como alias** —el dispatcher los mapea en `_CONSULTAS_LEGACY`— porque una sesión abierta
   arrastra historial con el contrato viejo y bajarlos a `DESCONOCIDO` haría que el bot
   conteste "no entendí" a media conversación. El prompt ya no los documenta.
-  - **Once tipos:** `CARTERA`, `VENTAS`, `PASIVOS`, `DEUDORES`, `CLIENTE`, `PRESTAMOS`,
-    `MOVIMIENTOS`, `CAJA`, `GASTOS`, `DIVISAS`, `RESUMEN`. El ruteo es la tabla
+  - **Doce tipos:** `CARTERA`, `VENTAS`, `PASIVOS`, `DEUDORES`, `CLIENTE`, `PRESTAMOS`,
+    `MOVIMIENTOS`, `CAJA`, `GASTOS`, `DIVISAS`, `RESUMEN`, `CHEQUE`. El ruteo es la tabla
     `_CONSULTAS` del dispatcher: **una consulta nueva es una línea ahí y un renglón en el
     prompt**. Los dos catálogos tienen que coincidir y `test_bot_consultas.py` los compara
     en las dos direcciones — un tipo que el prompt enseña sin handler no falla en ningún
@@ -2354,6 +2416,8 @@ que sería un loop infinito).
     que el cliente debe, préstamo incluido. **Ese total puede no imputarse de una sola vez**:
     el cobro son dos bolsas (§2.c) y si el cliente debe en las dos, `COBRAR_DEUDA_CLIENTE`
     pregunta contra cuál va antes de tocar nada.
+  - **`CHEQUE` es la consulta de historial de UN papel** (§Consulta de cheque). Es la única
+    consulta que puede llegar **con una foto**: el operador manda la imagen y pregunta.
   - **`CONSULTA` tipo `CLIENTE` tiene que cubrir las tres fuentes de deuda de un cliente:**
     préstamos activos, fiados abiertos y **otras deudas** (§2.b). Una fuente que falte no
     da error: el bot contesta "no tiene deudas activas" con toda seguridad mientras el
@@ -2501,6 +2565,12 @@ que sería un loop infinito).
     inicio o al revés se rechace en vez de devolver un período que nadie pidió—. Custodia
     además que **la fecha de hoy no esté en el system prompt** (rompería el caché en cada
     cambio de día, sin dar error) y que el neto de compra sea la misma cuenta que el panel.
+  - **`test_bot_consulta_cheque.py`** — la consulta de historial de un papel (§1.d): que
+    el tipo `CHEQUE` esté ruteado y en el prompt, que la respuesta traiga **siempre al
+    vendedor** —es el dato por el que existe la consulta—, y que los tres desencuentros
+    (banco distinto, carga anulada, número por sufijo) muestren el cheque **con** la
+    advertencia en vez de esconderlo. Fija además, leyendo el prompt, los tres frenos que
+    impiden que una pregunta con foto termine cargando una compra.
   - **`test_apertura.py`** — fecha de corte de la carga inicial (§Apertura): el día del corte es
     inclusive, después vuelve a descontar, y sin corte definido todo es operación normal. Fija
     además que `SALDO_INICIAL` va al grupo `APERTURA` y no cuenta como ingreso del día.
@@ -2547,7 +2617,7 @@ pero no es gratis y no puede correr en cada commit):
 
 | Script | Qué prueba |
 |---|---|
-| `backend/scripts/probar_ocr.py` | Que el modelo **lea** bien la captura: campo por campo contra lo esperado |
+| `backend/scripts/probar_ocr.py` | Que el modelo **lea** bien la captura, y que haga con ella **lo que el mensaje dice**: campo por campo contra lo esperado, más el `intent` y los campos sueltos de `data` (ej. el `tipo` de una consulta). El `.json` puede traer `historial` para simular una sesión ya empezada |
 | `backend/scripts/smoke_echeq.py` | Lo que pasa **después**: que el cheque quede en la base, que la caja salga por el neto y que el comprobante avise lo que tiene que avisar |
 | `backend/scripts/chat_bot.py` | La **conversación**: se le escribe al bot como el operador y se ve qué contesta. Mismo modelo, mismo dispatcher, misma base; solo se reemplaza el envío por WhatsApp |
 
@@ -2590,6 +2660,15 @@ armaba el nombre a mano y no llevaba ninguna de las tres advertencias del camino
 cheque solo, así que una foto con dos e-cheq de emisión contestaba "✅ 2 cheque(s) en
 cartera · Nº None · Nº None" y **no avisaba que ninguno tenía número** —que es lo que
 después impide operarlos por chat—. Las dos puntas salen ahora de `_alta_de_cheque`.
+
+**La foto que pregunta en vez de cargar: probado el 2026-09-22.** La carpeta
+`consulta-historial/` reusa dos de esas capturas con un verbo de pregunta, para que el
+modelo tenga que elegir entre el alta y la consulta (§1.d). El tercer caso es el del
+**pivote**: lleva `historial` en su `.json` —los turnos previos de la sesión— y simula al
+operador contestando con una pregunta el pedido de porcentaje del bot. 6/6 en dos
+corridas, y las cinco capturas de carga siguen en 10/10: el encuadre de la foto cambió
+para los dos motores ("qué se hace con ella lo dice SU mensaje") y había que confirmar
+que no se llevara puesto el OCR que ya andaba.
 
 **Lo que NO está cubierto, y hay que cerrar cuando aparezca el caso:** otros bancos
 (Santander, BBVA, Macro…). Cuando llegue una captura nueva, el camino es sumarla a la

@@ -3729,6 +3729,230 @@ def _consulta_resumen(
     return "\n".join(lines)
 
 
+# ── Historial de un cheque ───────────────────────────────────────────────────
+
+def _cheques_consultados(data: dict[str, Any]) -> list[tuple[str, str | None]]:
+    """Qué papeles preguntó el operador: `[(nro, banco), ...]`, sin repetir.
+
+    Acepta las dos formas en que el modelo los manda —uno en la raíz, o varios en
+    `cheques`— porque una foto puede traer más de un papel y el operador pregunta
+    por la foto entera. Contestar por uno solo cuando preguntó por tres es el
+    mismo agujero que tapa la guarda de lote, con la diferencia de que acá no se
+    carga nada: se deja de contar.
+    """
+    crudos: list[dict[str, Any]] = [
+        item for item in (data.get("cheques") or []) if isinstance(item, dict)
+    ]
+    if not crudos:
+        crudos = [data]
+
+    pedidos: list[tuple[str, str | None]] = []
+    for item in crudos:
+        nro = str(item.get("nro_cheque") or "").strip()
+        if not nro:
+            continue
+        banco = str(item.get("banco") or "").strip() or None
+        if (nro, banco) not in pedidos:
+            pedidos.append((nro, banco))
+    return pedidos
+
+
+def _fechas_en_caja(db: Session, cheques: list[Cheque]) -> dict[Any, dict[CajaCategoria, date]]:
+    """Cuándo entró y cuándo salió cada cheque, según el libro de caja.
+
+    El cheque no guarda la fecha de su compra ni la de su venta: guarda cuándo se
+    creó la fila y cuándo se la tocó por última vez. La fecha que el operador
+    reconoce es la del movimiento de caja —el día que pagó, el día que cobró—,
+    así que se lee de ahí y el timestamp queda de respaldo para lo que no dejó
+    línea: la carga inicial, el fiado, el rechazo.
+    """
+    ids = [c.id for c in cheques if c.id is not None]
+    if not ids:
+        return {}
+    filas = db.scalars(
+        select(MovimientoCaja)
+        .where(
+            MovimientoCaja.referencia_tipo == "cheque",
+            MovimientoCaja.referencia_id.in_(ids),
+            MovimientoCaja.categoria.in_(
+                [
+                    CajaCategoria.COMPRA_CHEQUE,
+                    CajaCategoria.VENTA_CHEQUE,
+                    CajaCategoria.COBRO_CHEQUE,
+                ]
+            ),
+        )
+        .order_by(MovimientoCaja.fecha)
+    )
+    fechas: dict[Any, dict[CajaCategoria, date]] = {}
+    for mov in filas:
+        # La primera de cada categoría: una compra pagada en pesos y en dólares
+        # deja dos líneas COMPRA_CHEQUE del mismo día.
+        fechas.setdefault(mov.referencia_id, {}).setdefault(mov.categoria, mov.fecha)
+    return fechas
+
+
+def _fecha_o_timestamp(fecha: date | None, dt: datetime | None) -> str:
+    """La fecha del libro de caja; si esa operación no dejó línea, el timestamp."""
+    if fecha is not None:
+        return _fmt_date(fecha)
+    return _fmt_date(fecha_local(dt)) if dt is not None else "—"
+
+
+def _linea_compra(cheque: Cheque, fecha: date | None) -> str:
+    """De quién vino el papel y a qué precio. Es el renglón que se consulta.
+
+    Va primero y con el nombre en negrita a propósito: la consulta se usa cuando
+    un cheque volvió rebotado y lo que el operador necesita es **a quién
+    reclamarle**. Todo lo demás del bloque es contexto.
+
+    Dice "de" y no "se lo compraste" porque un cheque entra a cartera de dos
+    maneras —comprado, o recibido de un cliente que pagaba lo que debía— y para
+    el reclamo las dos terminan en la misma persona _(decisión del dueño,
+    2026-09-22)_.
+    """
+    if cheque.es_carga_inicial:
+        return "🛒 Ya estaba en cartera cuando arrancó el sistema — no hay vendedor cargado."
+
+    quien = cheque.cliente_origen.nombre if cheque.cliente_origen else None
+    de = f"De *{quien}*" if quien else "De *(sin vendedor cargado)*"
+    cuando = _fecha_o_timestamp(fecha, cheque.created_at)
+    precio = _neto_compra(cheque)
+
+    extra = ""
+    try:
+        en_usd, en_pesos, a_deber = svc_cheques.partes_del_pago(cheque)
+    except ServiceError:
+        # Una consulta no se cae por un dato raro: muestra el precio y sigue.
+        en_usd = a_deber = Decimal("0.00")
+        en_pesos = precio
+    if a_deber > 0:
+        extra = f" — le pagaste {_ars(en_pesos)} y le quedaste debiendo {_ars(a_deber)}"
+    if en_usd > 0 and cheque.usd_entregados is not None:
+        extra += f" (incluye U$D{_fmt_num(cheque.usd_entregados)})"
+
+    return f"🛒 {de} — el {cuando}, al {_pct(cheque.porcentaje_compra)}% ({_ars(precio)}){extra}"
+
+
+def _linea_salida(cheque: Cheque, fechas: dict[CajaCategoria, date]) -> str:
+    """Qué pasó con el papel después: dónde está hoy y quién se lo llevó.
+
+    Sirve para lo otro que se comprueba en el mostrador: que el cliente que lo
+    trae de vuelta sea de verdad el que se lo llevó."""
+    cuando_salida = _fecha_o_timestamp(
+        fechas.get(CajaCategoria.VENTA_CHEQUE), cheque.ultimo_evento_manual_at
+    )
+    destino = cheque.cliente_destino.nombre if cheque.cliente_destino else None
+    pct_venta = (
+        f" al {_pct(cheque.porcentaje_venta)}%" if cheque.porcentaje_venta is not None else ""
+    )
+
+    if cheque.estado == ChequeEstado.EN_CARTERA:
+        return "📦 Sigue en cartera: no salió del negocio."
+
+    if cheque.estado == ChequeEstado.VENDIDO:
+        if cheque.acreedor_destino:
+            return (
+                f"➡️ Se lo entregaste a *{cheque.acreedor_destino}* el {cuando_salida}, "
+                "para pagarle una deuda tuya."
+            )
+        a_quien = f" a *{destino}*" if destino else ""
+        cobrado = _neto_venta(cheque)
+        plata = f" — cobraste {_ars(cobrado)}" if cobrado is not None else ""
+        gan = f", ganancia {_ars(cheque.ganancia)}" if cheque.ganancia else ""
+        return f"➡️ Se lo vendiste{a_quien} el {cuando_salida}{pct_venta}{plata}{gan}."
+
+    if cheque.estado == ChequeEstado.FIADO:
+        a_quien = f" a *{destino}*" if destino else ""
+        return f"➡️ Se lo fiaste{a_quien} el {cuando_salida}{pct_venta}: te lo debe."
+
+    if cheque.estado == ChequeEstado.COBRADO:
+        cuando = _fecha_o_timestamp(
+            fechas.get(CajaCategoria.COBRO_CHEQUE), cheque.ultimo_evento_manual_at
+        )
+        return f"🏦 Lo cobraste por ventanilla el {cuando}."
+
+    return f"⛔ Quedó marcado como rechazado el {cuando_salida}."
+
+
+def _avisos_identidad(cheque: Cheque, nro: str, banco: str | None) -> list[str]:
+    """Cuando lo que se encontró no es exactamente lo que el operador preguntó.
+
+    Ninguno esconde el resultado: el cheque se muestra igual y el operador decide
+    si es el que tiene en la mano. Callarlos sería darle por cierto un papel que
+    puede no ser el suyo; esconder el cheque porque el banco no coincide lo
+    dejaría creyendo que nunca lo tuvo, que es peor todavía —el banco que dicta
+    un OCR es de lo primero que sale mal—.
+    """
+    avisos: list[str] = []
+    if cheque.nro_cheque and cheque.nro_cheque != nro.strip():
+        avisos.append(
+            f"⚠️ Lo encontré por los últimos dígitos: el número completo es {cheque.nro_cheque}."
+        )
+    if banco and not cheque.banco:
+        avisos.append(f"⚠️ Está cargado sin banco; vos me dijiste {banco}.")
+    elif banco and cheque.banco and banco.lower() not in cheque.banco.lower():
+        avisos.append(f"⚠️ El que tengo es de {cheque.banco}, no de {banco}.")
+    return avisos
+
+
+def _historial_de_un_cheque(db: Session, nro: str, banco: str | None) -> str:
+    """El bloque de respuesta de un papel: sí o no, y de quién vino cada vuelta."""
+    filas = svc_cheques.historial_por_numero(db, nro, banco)
+    banco_txt = f" de {banco}" if banco else ""
+    if not filas:
+        return (
+            f"❌ *No, el cheque Nº {nro}{banco_txt} nunca pasó por acá.*\n"
+            "Busqué por número en todo el historial, incluidos los que ya se "
+            "vendieron, se cobraron o se anularon."
+        )
+
+    fechas = _fechas_en_caja(db, filas)
+    lines = [f"✅ *Sí, el cheque Nº {nro}{banco_txt} pasó por el negocio.*"]
+
+    for i, cheque in enumerate(filas, start=1):
+        # La vuelta solo se nombra cuando hay más de una: el papel volvió a
+        # comprarse y cada pasada tiene su propio vendedor (§Recompra).
+        vuelta = f" — {i}ª vuelta" if len(filas) > 1 else ""
+        propias = fechas.get(cheque.id, {})
+        pago = _fmt_date(cheque.fecha_pago) if cheque.fecha_pago else "sin fecha"
+        lines.extend(
+            [
+                "",
+                f"📄 {svc_cheques.describir(cheque, con_monto=False)} | "
+                f"{_ars(cheque.monto)} | pago {pago}{vuelta}",
+                _linea_compra(cheque, propias.get(CajaCategoria.COMPRA_CHEQUE)),
+                _linea_salida(cheque, propias),
+            ]
+        )
+        if cheque.anulado_at is not None:
+            lines.append(
+                f"🚫 *Esta carga está anulada* (el "
+                f"{_fmt_date(fecha_local(cheque.anulado_at))}): quedó sin efecto."
+            )
+        lines.extend(_avisos_identidad(cheque, nro, banco))
+
+    return "\n".join(lines)
+
+
+def _consulta_cheque(
+    db: Session, desde: date, hasta: date, data: dict[str, Any], periodo: str
+) -> str:
+    """Si ese papel pasó por el negocio y, sobre todo, de quién vino (§Consulta de cheque).
+
+    Es una consulta de stock y busca en todo el historial: el período no
+    significa nada acá. Que la respuesta dependiera de si fue este mes sería
+    contestar "no lo tuviste" sobre algo que sí pasó.
+    """
+    pedidos = _cheques_consultados(data)
+    if not pedidos:
+        return (
+            "❓ ¿De qué cheque? Decime el número o mandame la foto y te digo si "
+            "pasó por acá y de quién vino."
+        )
+    return "\n\n".join(_historial_de_un_cheque(db, nro, banco) for nro, banco in pedidos)
+
+
 # Tipo de consulta → handler. Agregar una consulta nueva es una línea acá y un
 # renglón en el prompt (§Bot): el ruteo no se toca.
 _CONSULTAS = {
@@ -3743,6 +3967,7 @@ _CONSULTAS = {
     "GASTOS":      _consulta_gastos,
     "DIVISAS":     _consulta_divisas,
     "RESUMEN":     _consulta_resumen,
+    "CHEQUE":      _consulta_cheque,
 }
 
 

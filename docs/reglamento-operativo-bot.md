@@ -61,6 +61,7 @@ bueno: es plata.
 |---|---|
 | *(foto)* + "al 8%" | Carga el cheque en cartera |
 | *(foto de varios)* + "son 4 al 8%" | Carga los 4 |
+| *(foto)* + "¿de quién vino este?" | **No carga nada**: te dice si pasó por acá y a quién se lo compraste |
 | "Vendí el 4581 al 3% a Gómez" | Registra la venta y te dice la ganancia |
 | "Se lo fié a Juan Pérez al 3%" | Queda como deuda abierta de Juan |
 | "Cobré el 4581" | Marca cobrado en ventanilla |
@@ -231,6 +232,16 @@ avisale en el momento.
 - "¿Qué cheques tengo?"
 - "¿Qué me debe Juan?"
 - "¿Qué préstamos tengo por cobrar?"
+- *(foto)* + "¿este cheque lo tuve? ¿a quién se lo compré?"
+
+**La foto con una pregunta NO carga nada.** Es para cuando un cliente te devuelve un
+cheque rebotado y necesitás saber a quién reclamarle: mandás la foto, preguntás, y te
+contesta de quién vino ese papel, cuándo, a qué porcentaje y a quién se lo vendiste
+después. Busca en todo el historial, no solo en lo que tenés hoy en cartera.
+
+Si el bot ya te había preguntado el porcentaje y vos en vez de contestarle preguntás
+esto, te contesta la pregunta: la carga queda sin hacer y la volvés a mandar cuando
+quieras.
 
 ---
 
