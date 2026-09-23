@@ -198,6 +198,22 @@ def _correr() -> None:
         _check("la entrega suma como una venta", ganancia(HOY, HOY).ventas,
                Decimal("100000.00"))
 
+        # Y con una fecha de cancelación pasada, la ganancia va al día de la
+        # operación y no al de la carga: el pasivo queda cancelado ese día y el
+        # cheque tiene que salir de cartera el mismo.
+        pasivo_viejo = svc_pas.create_pasivo(db, PasivoCreate(
+            acreedor="Proveedor SA", concepto="mercadería de ayer",
+            monto=Decimal("400000"), moneda=Moneda.ARS))
+        entregado_ayer = alta("90012", "500000", "10")
+        svc_pas.cancelar_con_cheque(db, pasivo_viejo.id, PasivoCancelarConChequeRequest(
+            cheque_id=entregado_ayer.id, porcentaje_venta=Decimal("4"),
+            operador_id="smoke", motivo="pago de ayer",
+            fecha_cancelacion=AYER, vuelto_modo="QUEDA_DEBIENDO"))
+        _check("la entrega de ayer no ensucia hoy", ganancia(HOY, HOY).ventas,
+               Decimal("100000.00"))
+        _check("y cae en el día de la operación", ganancia(AYER, AYER).ventas,
+               Decimal("130000.00"))  # los $100.000 de la venta de ayer + $30.000
+
         # ── Anular y revertir ────────────────────────────────────────────
         print("\n▸ Anular y revertir dejan de sumar")
         anulado = alta("90008", "800000", "10")

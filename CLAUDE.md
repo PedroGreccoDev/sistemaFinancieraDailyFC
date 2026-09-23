@@ -1437,6 +1437,16 @@ el mismo agujero de los dólares de apertura y de los ajustes que suman USD.
   - **La moneda de pago puede diferir de la de la deuda.** Si difiere, el operador ingresa la **cotización (pesos por 1 USD)**, que se usa **solo** para imputar cuánto baja el `saldo_pendiente` (que se lleva en la moneda de la deuda): deuda USD pagada en ARS → `saldo -= monto/cotizacion`; deuda ARS pagada en USD → `saldo -= monto*cotizacion`. La conversión vive en la función pura `calcular_reduccion_saldo` (testeable sin BD), en `app/services/conversion.py` — **compartida** por pasivos, fiados y préstamos (se re-exporta desde `svc_pasivos` por compatibilidad).
   - **La cotización es por pago:** cada cancelación parcial puede usar una distinta. La **primera** se guarda en `pasivos.cotizacion_pago` y el panel la propone como default editable. Cada línea de caja guarda su `cotizacion` aplicada (para reporte/auditoría).
   - Tolerancia de redondeo: un exceso de hasta un centavo sobre el saldo (por convertir de moneda) se trata como cancelación exacta; más que eso es error.
+- **La entrega del cheque se anota en el día que dictó el operador** _(emparejado
+  2026-09-22)_. Pagar con un cheque acepta una `fecha_cancelacion` pasada ("esto lo pagué
+  el jueves"), y hasta acá esa fecha solo llegaba al pasivo: el cheque salía de cartera con
+  el timestamp de la **carga**, así que su renglón en Movimientos y su ganancia (§7) caían
+  en otro día que la deuda que cancelaron. Los dos call sites que entregan un cheque
+  —`cancelar_con_cheque` y el pago por acreedor— pasan ahora `event_at=momento_en(fecha)`.
+  `core.fechas.momento_en` es el inverso de `fecha_local`: **mueve el día y conserva la
+  hora** de carga, porque de esa hora sale el orden de las operaciones dentro de la jornada
+  (§Historial unificado) y mandarlas a medianoche las dejaría empatadas. La venta y el
+  cobro normales no cambian: ahí no hay fecha que elegir, el evento es el momento.
 - **Pago con cheque "de más" (régimen definido 2026-06-25):** cuando el valor neto del cheque
   supera el saldo del pasivo, el operador elige qué hacer con el vuelto:
   **(a)** paga la diferencia al cliente en efectivo/transferencia y queda saldada, o

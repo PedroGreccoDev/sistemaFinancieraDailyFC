@@ -39,3 +39,22 @@ def fecha_local(dt: datetime | None) -> date:
 def hora_local(dt: datetime | None) -> time:
     """Hora local de Argentina para `dt` (ahora local si es None)."""
     return datetime_local(dt).time().replace(microsecond=0)
+
+
+def momento_en(dia: date, ahora: datetime | None = None) -> datetime:
+    """Timestamp UTC que cae en ese día **local**, con la hora del reloj.
+
+    El inverso de `fecha_local`, para cuando el operador elige el día de una
+    operación que se registra en un timestamp: "esto lo pagué el jueves". Sin
+    esto, el evento queda con el día de la carga y la operación se imputa al
+    período equivocado.
+
+    Conserva la hora real de carga a propósito —solo mueve el día—: de esa hora
+    sale el orden de las operaciones dentro de la jornada (§Historial unificado),
+    y ponerlas todas a medianoche las amontonaría en un empate. Cuando el día
+    elegido es el de hoy devuelve el ahora exacto, que es el caso normal.
+    """
+    ref = datetime_local(ahora)
+    if ref.date() == dia:
+        return ref.astimezone(timezone.utc)
+    return datetime.combine(dia, ref.time(), tzinfo=TZ_LOCAL).astimezone(timezone.utc)

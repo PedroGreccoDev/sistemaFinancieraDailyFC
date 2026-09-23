@@ -23,7 +23,7 @@ from app.db.models import (
     Pasivo,
     PasivoEstado,
 )
-from app.core.fechas import fecha_local, hoy_local
+from app.core.fechas import fecha_local, hoy_local, momento_en
 from app.services import apertura as svc_apertura
 from app.services import caja as svc_caja
 from app.services import eventos as svc_eventos
@@ -546,11 +546,17 @@ def cancelar_con_cheque(
     try:
         # Pagar la deuda entregando un cheque de cartera NO mueve efectivo (el desembolso
         # ya ocurrió al comprar el cheque); por eso pasa por el modelo, no por svc_cheques.
+        # El día de la entrega es el que dictó el operador, no el de la carga
+        # (`momento_en` mueve el día y conserva la hora). Un pago de ayer cargado
+        # hoy dejaba el pasivo cancelado ayer y el cheque saliendo de cartera
+        # hoy: la ganancia de ese papel (§7) y su renglón en Movimientos caían
+        # en el día equivocado.
         cheque.transition_to(
             ChequeEstado.VENDIDO,
             operador_id=payload.operador_id,
             motivo=payload.motivo,
             porcentaje_venta=payload.porcentaje_venta,
+            event_at=momento_en(fecha_canc),
         )
         # Quién se llevó el papel. El estado queda igual que en una venta, así
         # que sin esto la operación no deja rastro de su destinatario y en
@@ -939,6 +945,9 @@ def cancelar_a_acreedor_con_cheque(
             operador_id=operador_id,
             motivo=motivo,
             porcentaje_venta=porcentaje_venta,
+            # Mismo criterio que el pago de una deuda puntual: manda el día que
+            # eligió el operador, con la hora real de carga.
+            event_at=momento_en(fecha),
         )
         # Quién se llevó el papel (§Historial unificado): el estado no distingue
         # esta entrega de una venta, y el nombre no vive en ninguna otra columna.
