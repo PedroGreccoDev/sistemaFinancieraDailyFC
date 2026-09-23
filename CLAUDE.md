@@ -1581,6 +1581,34 @@ el panel; sí la sesión de carga): es la vista por cuota, con su vencimiento.
     concepto" en vez de desaparecer —perderlo descuadraría el recuadro contra los egresos—.
   - Las monedas no se suman y **los pesos van primero**: ordenadas juntas, 200 USD quedarían
     arriba de $150.000.
+- **`ganancia_cheques` — lo que dejó el papel** _(agregado 2026-09-22, a pedido del dueño)_.
+  El espejo de `ganancia_divisas` para el otro mostrador: cuánto se ganó comprando cheques
+  con descuento y sacándolos de la cartera en el período. **Es un dato, no una línea de
+  caja** —la plata ya está contada en los ingresos de venta y de cobro—, así que no suma a
+  ningún neto. Lo calcula `_get_ganancia_cheques`, y la cuenta de cada cheque vive en
+  `svc_cheques.ganancia_realizada`.
+  - **Se cuenta el día en que el cheque SALE de la cartera**, que es cuando la ganancia
+    queda fijada. Comprarlo no gana nada: el papel todavía puede venderse, cobrarse o rebotar.
+  - **Las tres salidas que la realizan, cada una con su cuenta** _(decisión del dueño)_:
+    `ventas` —vendido, o entregado a un acreedor (§5), que lo deja igual de `VENDIDO`— es
+    `monto · (%compra − %venta)` y sale de `cheques.ganancia`, el número que ya reconoció la
+    venta; `cobros` —cobrado al vencimiento— es **todo** el descuento de compra,
+    `monto · %compra`, porque entró el nominal entero; y `fiados` es la misma diferencia que
+    una venta, reconocida **el día que se entrega el papel** aunque el cliente todavía deba
+    esa plata. Es la única de las tres sin un ingreso de caja detrás.
+  - **`rechazos` va aparte y NO se resta** (decisión del dueño): es lo que se había pagado
+    por los cheques que rebotaron en el período (`monto · (1 − %compra)`). El papel se le
+    reclama al cliente y el desenlace no se sabe todavía, así que restarlo escondería lo que
+    el negocio efectivamente ganó. Tampoco entra en `cantidad`.
+  - **La fuente es la tabla `cheques`, no el libro de caja** —al revés que `ganancia_divisas`—:
+    el fiado y el cheque entregado a un acreedor no dejan una sola línea de caja, así que por
+    el libro no se verían. De ahí que las fechas se lean de dos lugares: `ultimo_evento_manual_at`
+    para venta, cobro y rechazo (timestamp UTC: ventana ensanchada un día por lado y filtro
+    exacto por fecha local, como en Movimientos) y `fiados.fecha_fiado` para el fiado, que es
+    donde vive su **fecha operativa**.
+  - **Lo muestra el panel** en la fila de netos, con el desglose debajo, y **también el bot**
+    en la consulta de caja y en el resumen: los números tienen que coincidir mirando el
+    celular o la pantalla.
 - **Neto ≠ saldo.** El `neto` es el **flujo** del período; el **saldo** es la plata que hay.
   Cada moneda expone `saldo_apertura` (todo lo anterior al período, vía `_saldo_hasta`, más el
   `SALDO_INICIAL` que caiga dentro) y `saldo_cierre = apertura + ingresos − egresos`. Un día de
@@ -1668,7 +1696,8 @@ el panel; sí la sesión de carga): es la vista por cuota, con su vencimiento.
 > `movimientos_caja` filtrando por `fecha` y arma **una caja por moneda** (ARS y USD) con
 > `ingresos_total`, `egresos_total`, `neto` y sus saldos (el detalle línea por línea salió del
 > reporte el 2026-09-14: está en `/reportes/movimientos`). Expone además `ganancia_divisas`
-> (suma de la ganancia FIFO de las ventas de USD — ver §4) y `saldo_pasivos` (snapshot de
+> (suma de la ganancia FIFO de las ventas de USD — ver §4), `ganancia_cheques` (lo que dejaron
+> los cheques que salieron de cartera en el período) y `saldo_pasivos` (snapshot de
 > `PENDIENTE` por moneda, sin filtro de período). Ya **no existe** el endpoint devengado
 > `…/ganancias`. El frontend consume `/reportes/caja` (`frontend/src/api/reportes.ts`).
 >

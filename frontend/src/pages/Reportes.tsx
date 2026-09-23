@@ -20,12 +20,14 @@ function getRangeForPreset(preset: Preset, customDesde: string | null, customHas
   return { desde: customDesde ?? hoy, hasta: customHasta ?? hoy }
 }
 
-function MetricCard({ label, value, color = 'default', accentColor, prefix }: {
+function MetricCard({ label, value, color = 'default', accentColor, prefix, sub }: {
   label: string
   value: string
   color?: 'default' | 'green' | 'red' | 'indigo'
   accentColor?: string
   prefix?: string
+  /** Línea chica bajo el número, para lo que el número solo no dice. */
+  sub?: string
 }) {
   const numColor = { default: 'var(--text-1)', green: 'var(--success)', red: 'var(--danger)', indigo: '#818cf8' }[color]
   return (
@@ -42,6 +44,9 @@ function MetricCard({ label, value, color = 'default', accentColor, prefix }: {
       <p style={{ fontFamily: FN, fontSize: '1.25rem', color: numColor, letterSpacing: '0.02em', lineHeight: 1, fontVariantNumeric: 'tabular-nums', wordBreak: 'break-all' }}>
         {prefix}{value}
       </p>
+      {sub && (
+        <p style={{ fontFamily: FM, fontSize: '0.63rem', color: 'rgba(100,116,139,0.55)', lineHeight: 1.25 }}>{sub}</p>
+      )}
     </div>
   )
 }
@@ -280,7 +285,7 @@ export default function Reportes() {
         <>
           {/* Netos destacados + ganancia de divisas */}
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Neto del período</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3" style={{ gap: '0.75rem', marginBottom: '1.5rem' }}>
+          <div className="grid grid-cols-2 sm:grid-cols-4" style={{ gap: '0.75rem', marginBottom: '0.6rem' }}>
             <MetricCard
               label="Neto ARS"
               value={fmtARS(data.ars.neto)}
@@ -299,7 +304,31 @@ export default function Reportes() {
               color="indigo"
               accentColor="rgba(167,139,250,0.55)"
             />
+            {/* Lo que dejaron los cheques que SALIERON de cartera en el período:
+                vendidos, cobrados al vencimiento y fiados. Es un dato del
+                período —la plata ya está contada en los ingresos de la caja de
+                abajo—, por eso va en esta fila y no suma a ningún neto. */}
+            <MetricCard
+              label="Ganancia cheques"
+              value={fmtARS(data.ganancia_cheques.total)}
+              color="indigo"
+              accentColor="rgba(251,191,36,0.55)"
+              sub={`${data.ganancia_cheques.cantidad} cheque${data.ganancia_cheques.cantidad === 1 ? '' : 's'} fuera de cartera`}
+            />
           </div>
+
+          {/* De dónde salió esa ganancia, y lo que rebotó. El rechazo va acá y
+              NO restado del total (decisión del dueño): el papel se le reclama
+              al cliente y el desenlace todavía no se sabe. */}
+          <p style={{ fontFamily: FM, fontSize: '0.68rem', color: 'rgba(100,116,139,0.6)', marginBottom: '1.5rem', lineHeight: 1.5 }}>
+            Cheques — venta {fmtARS(data.ganancia_cheques.ventas)} · cobro al vencimiento{' '}
+            {fmtARS(data.ganancia_cheques.cobros)} · fiado {fmtARS(data.ganancia_cheques.fiados)}
+            {parseFloat(data.ganancia_cheques.rechazos) > 0 && (
+              <span style={{ color: 'var(--danger)', opacity: 0.75 }}>
+                {' '}· rechazados {fmtARS(data.ganancia_cheques.rechazos)} (no se descuentan)
+              </span>
+            )}
+          </p>
 
           {/* Cajas por moneda */}
           <p style={{ fontFamily: FM, fontSize: '0.63rem', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'rgba(100,116,139,0.6)', marginBottom: '0.75rem' }}>Cierre por caja</p>

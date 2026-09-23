@@ -137,6 +137,27 @@ export interface GastoPorConcepto {
   total: string
 }
 
+/**
+ * Lo que dejó el negocio de cheques en el período consultado.
+ *
+ * El espejo de `ganancia_divisas` para el otro mostrador. Se cuenta el día en
+ * que el papel SALE de la cartera, que es cuando la ganancia queda fijada:
+ * `ventas` (vendido o entregado a un acreedor), `cobros` (cobrado al
+ * vencimiento: ahí lo ganado es todo el descuento de compra) y `fiados` (se le
+ * entregó a un cliente que queda debiendo, así que es la única sin plata
+ * detrás). `rechazos` es lo que se había pagado por los cheques que rebotaron:
+ * va aparte y NO se resta del total.
+ */
+export interface GananciaCheques {
+  total: string
+  ventas: string
+  cobros: string
+  fiados: string
+  /** Cuántos cheques salieron de cartera en el período (sin contar rechazos). */
+  cantidad: number
+  rechazos: string
+}
+
 export interface PlataEnLaCalle {
   creditos_ars: string
   creditos_usd: string
@@ -181,6 +202,7 @@ export interface ReporteCaja {
   ars: CajaMoneda
   usd: CajaMoneda
   ganancia_divisas: string
+  ganancia_cheques: GananciaCheques
   saldo_pasivos: SaldoPasivos
   plata_en_calle: PlataEnLaCalle
   gastos_periodo: GastoPorConcepto[]

@@ -45,6 +45,12 @@ from app.services.exceptions import (
 
 _CIEN = Decimal("100")
 _CERO = Decimal("0.00")
+_CENTAVO = Decimal("0.01")
+
+
+def _money(valor: Decimal | None) -> Decimal:
+    """Un importe con sus dos decimales, tolerando el `None` de una columna vacía."""
+    return _CERO if valor is None else valor.quantize(_CENTAVO)
 
 # De qué operación salen los dólares que se entregaron al comprar un cheque. Lo
 # usa el catálogo de `anulacion._ORIGENES_STOCK`, que tiene que encontrarlos para
@@ -57,6 +63,38 @@ def neto_compra(cheque: Cheque) -> Decimal:
     return (cheque.monto * (_CIEN - cheque.porcentaje_compra) / _CIEN).quantize(
         Decimal("0.01")
     )
+
+
+def ganancia_realizada(cheque: Cheque) -> Decimal:
+    """Lo que dejó este cheque al salir de la cartera. Cero si sigue adentro.
+
+    La ganancia se fija cuando el papel sale, y depende de por dónde salió:
+
+    - **Vendido** (o entregado a un acreedor, §5, que lo deja igual de VENDIDO):
+      la diferencia entre los dos descuentos. Se lee de `cheque.ganancia`, que es
+      el número que reconoció la venta (`Cheque.transition_to`) y el que muestra
+      la cartera: recalcularlo acá daría lo mismo hoy y dos números distintos el
+      día que uno de los dos cambie.
+    - **Cobrado** al vencimiento: entró el nominal completo, así que lo ganado es
+      **todo** el descuento de compra. Este no vive en `cheque.ganancia` —la
+      venta es la única que lo escribe— y por eso se calcula acá.
+    - **Fiado**: el papel se le entregó a un cliente por su valor neto de venta,
+      así que la ganancia es la misma que en una venta, solo que la plata todavía
+      no entró. También se calcula: fiar no escribe `ganancia`.
+
+    Un cheque **rechazado** no devuelve pérdida: lo que costó se mira aparte
+    (§7, `GananciaCheques.rechazos`), porque el papel se le reclama al cliente y
+    el desenlace no se sabe todavía.
+    """
+    if cheque.estado == ChequeEstado.VENDIDO:
+        return _money(cheque.ganancia)
+    if cheque.estado == ChequeEstado.COBRADO:
+        return (cheque.monto * cheque.porcentaje_compra / _CIEN).quantize(_CENTAVO)
+    if cheque.estado == ChequeEstado.FIADO and cheque.porcentaje_venta is not None:
+        return (
+            cheque.monto * (cheque.porcentaje_compra - cheque.porcentaje_venta) / _CIEN
+        ).quantize(_CENTAVO)
+    return _CERO
 
 
 def cubierto_en_usd(cheque: Cheque) -> Decimal:

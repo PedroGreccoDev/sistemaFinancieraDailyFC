@@ -36,6 +36,7 @@ from app.schemas.reportes import (
     CajaMoneda,
     CajaPorMedio,
     CuotaCobradaHistorialItem,
+    GananciaCheques,
     GastoPorConcepto,
     MovimientoUnificadoRead,
     PlataEnLaCalle,
@@ -44,7 +45,7 @@ from app.schemas.reportes import (
 )
 from app.services import deudores as svc_deudores
 from app.services import prestamos as svc_prestamos
-from app.services.cheques import describir
+from app.services.cheques import describir, ganancia_realizada, neto_compra
 from app.services.exceptions import ValidationError
 
 
@@ -202,6 +203,7 @@ def get_reporte_caja(db: Session, desde: date, hasta: date) -> ReporteCajaRead:
         ars=_caja(Moneda.ARS),
         usd=_caja(Moneda.USD),
         ganancia_divisas=ganancia_divisas,
+        ganancia_cheques=_get_ganancia_cheques(db, desde, hasta),
         saldo_pasivos=_get_saldo_pasivos(db),
         plata_en_calle=_get_plata_en_calle(db),
         gastos_periodo=_get_gastos_periodo(db, desde, hasta),
@@ -928,6 +930,87 @@ def _get_gastos_periodo(db: Session, desde: date, hasta: date) -> list[GastoPorC
         )
     ).all()
     return agrupar_gastos_por_concepto([(d, m, monto) for d, m, monto in filas])
+
+
+def _get_ganancia_cheques(db: Session, desde: date, hasta: date) -> GananciaCheques:
+    """Lo que dejó la compra-venta de cheques en el período (§7).
+
+    **Se cuenta el día en que el papel sale de la cartera**, que es cuando la
+    ganancia queda fijada, y entran las tres salidas que la realizan —venta,
+    cobro al vencimiento y fiado— cada una con su regla (`ganancia_realizada`).
+
+    La fuente es la tabla `cheques` y **no** el libro de caja, al revés que
+    `ganancia_divisas`: el fiado y el cheque entregado a un acreedor (§5) no
+    dejan una sola línea de caja —no mueven plata— y por el libro no se verían.
+
+    De dónde sale la fecha de cada salida:
+
+    - Venta, cobro y rechazo: de `ultimo_evento_manual_at`, el timestamp del
+      evento. Es UTC, así que se pide con la ventana ensanchada un día por lado y
+      se filtra exacto por fecha local, igual que hace Movimientos: comparar el
+      día UTC traspapelaría lo que se cargó de noche.
+    - Fiado: de `fiados.fecha_fiado`, que es donde vive la **fecha operativa** de
+      la entrega —la que el operador eligió, que puede no ser la de carga—.
+    """
+    ventas = cobros = fiados = rechazos = Decimal("0.00")
+    cantidad = 0
+
+    salidos = list(
+        db.scalars(
+            select(Cheque).where(
+                Cheque.estado.in_(
+                    (ChequeEstado.VENDIDO, ChequeEstado.COBRADO, ChequeEstado.RECHAZADO)
+                ),
+                Cheque.anulado_at.is_(None),
+                Cheque.ultimo_evento_manual_at.is_not(None),
+                func.date(Cheque.ultimo_evento_manual_at) >= desde - timedelta(days=1),
+                func.date(Cheque.ultimo_evento_manual_at) <= hasta + timedelta(days=1),
+            )
+        )
+    )
+    for c in salidos:
+        fecha = fecha_local(c.ultimo_evento_manual_at)
+        if fecha < desde or fecha > hasta:
+            continue
+        if c.estado == ChequeEstado.RECHAZADO:
+            # Aparte y sin restar (decisión del dueño): lo que se había pagado por
+            # un papel que rebotó, se haya abonado en el acto o quedado a deber.
+            rechazos += neto_compra(c)
+            continue
+        cantidad += 1
+        if c.estado == ChequeEstado.VENDIDO:
+            ventas += ganancia_realizada(c)
+        else:
+            cobros += ganancia_realizada(c)
+
+    # El fiado va por su propia fecha, así que es su propia consulta. El cheque
+    # tiene que seguir en FIADO y el fiado vivo: si se anuló cualquiera de los
+    # dos, esa entrega no ocurrió.
+    fiados_del_periodo = list(
+        db.scalars(
+            select(Cheque)
+            .join(Fiado, Fiado.cheque_id == Cheque.id)
+            .where(
+                Fiado.fecha_fiado >= desde,
+                Fiado.fecha_fiado <= hasta,
+                Fiado.anulado_at.is_(None),
+                Cheque.anulado_at.is_(None),
+                Cheque.estado == ChequeEstado.FIADO,
+            )
+        )
+    )
+    for c in fiados_del_periodo:
+        cantidad += 1
+        fiados += ganancia_realizada(c)
+
+    return GananciaCheques(
+        total=_money(ventas + cobros + fiados),
+        ventas=_money(ventas),
+        cobros=_money(cobros),
+        fiados=_money(fiados),
+        cantidad=cantidad,
+        rechazos=_money(rechazos),
+    )
 
 
 def _get_plata_en_calle(db: Session) -> PlataEnLaCalle:

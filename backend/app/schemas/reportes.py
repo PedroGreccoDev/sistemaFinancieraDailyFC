@@ -27,6 +27,43 @@ class GastoPorConcepto(BaseModel):
     total: Decimal
 
 
+class GananciaCheques(BaseModel):
+    """Lo que dejó el negocio de cheques en el período consultado (§7).
+
+    El espejo de `ganancia_divisas`, para el otro mostrador: cuánto se ganó
+    comprando papel con descuento y sacándolo de la cartera. **Es un dato de
+    reporte, no una línea de caja** —la plata ya está contada en los ingresos de
+    venta y de cobro—, y por eso no entra en ningún neto.
+
+    Se cuenta **el día en que el cheque sale de la cartera**, que es cuando la
+    ganancia queda fijada, y de las tres maneras en que eso pasa
+    _(decisión del dueño, 2026-09-22)_:
+
+    - `ventas` — se vendió (o se le entregó a un acreedor para pagarle, §5, que
+      deja el cheque igual de VENDIDO): la diferencia entre los dos descuentos,
+      `monto · (%compra − %venta)`.
+    - `cobros` — se cobró al vencimiento: entró el nominal completo, así que lo
+      ganado es **todo** el descuento con el que se compró, `monto · %compra`.
+    - `fiados` — se le fio a un cliente: la ganancia se reconoce el día que el
+      papel se entrega, aunque esa plata todavía no haya entrado (el cliente la
+      debe). Es la única de las tres que **no** tiene un ingreso de caja detrás.
+
+    `rechazos` va **aparte y no se resta** (decisión del dueño): es lo que se
+    había pagado por los cheques que rebotaron en el período —`monto · (1 −
+    %compra)`, se haya abonado en el acto o quedado a deber—. No es una ganancia
+    negativa: el papel se reclama al cliente y el desenlace no se sabe todavía,
+    así que restarlo escondería lo que el negocio efectivamente ganó.
+    """
+
+    total: Decimal
+    ventas: Decimal
+    cobros: Decimal
+    fiados: Decimal
+    # Cuántos cheques salieron de cartera en el período (los tres tipos juntos).
+    cantidad: int
+    rechazos: Decimal
+
+
 class PlataEnLaCalle(BaseModel):
     """Lo que el negocio tiene AFUERA al momento del arqueo (no filtrado por período).
 
@@ -92,6 +129,9 @@ class ReporteCajaRead(BaseModel):
     usd: CajaMoneda
     # Ganancia FIFO realizada por venta de divisas en el período (dato, no movimiento).
     ganancia_divisas: Decimal
+    # Lo que dejó la compra-venta de cheques en el período (dato, no movimiento):
+    # la plata ya está contada en los ingresos de venta y de cobro.
+    ganancia_cheques: GananciaCheques
     saldo_pasivos: SaldoPasivos
     # Lo que está afuera, el espejo del anterior. Snapshot al día de hoy, sin
     # filtro de período: no es plata que se movió, es plata que falta volver.

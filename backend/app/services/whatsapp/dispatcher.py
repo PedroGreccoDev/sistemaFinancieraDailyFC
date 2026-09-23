@@ -3556,6 +3556,16 @@ def _consulta_caja(
         lines.append("")
         lines.append(f"Ganancia por venta de dólares: {_ars(reporte.ganancia_divisas)}")
 
+    # Lo que dejaron los cheques que salieron de cartera en el período (§7). Va
+    # con la de divisas: las dos son datos del período, no plata de la caja.
+    if reporte.ganancia_cheques.total:
+        if not reporte.ganancia_divisas:
+            lines.append("")
+        lines.append(
+            f"Ganancia por cheques: {_ars(reporte.ganancia_cheques.total)} "
+            f"({reporte.ganancia_cheques.cantidad} cheque(s))"
+        )
+
     pendientes = {
         Moneda.ARS: reporte.saldo_pasivos.pendiente_ars,
         Moneda.USD: reporte.saldo_pasivos.pendiente_usd,
@@ -3725,6 +3735,8 @@ def _consulta_resumen(
     )
     if reporte.ganancia_divisas:
         lines.append(f"Ganancia por venta de dólares: {_ars(reporte.ganancia_divisas)}")
+    if reporte.ganancia_cheques.total:
+        lines.append(f"Ganancia por cheques: {_ars(reporte.ganancia_cheques.total)}")
 
     return "\n".join(lines)
 
