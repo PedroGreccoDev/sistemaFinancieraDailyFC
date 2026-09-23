@@ -2647,7 +2647,7 @@ que sería un loop infinito).
 - **Convención:** mantené la lógica de negocio en funciones/métodos testeables sin BD; si una
   pieza nueva necesita una sesión, extraé la parte pura para poder cubrirla en este estilo.
 
-### Lo que los unitarios NO pueden ver: el OCR _(scripts, 2026-08-31)_
+### Lo que los unitarios NO pueden ver: el OCR y la base _(scripts, 2026-08-31)_
 
 La suite verifica el prompt **como texto** —que diga lo que tiene que decir—, pero no
 que el modelo lo **obedezca mirando una foto**. Eso solo se sabe llamándolo, así que
@@ -2659,6 +2659,7 @@ pero no es gratis y no puede correr en cada commit):
 | `backend/scripts/probar_ocr.py` | Que el modelo **lea** bien la captura, y que haga con ella **lo que el mensaje dice**: campo por campo contra lo esperado, más el `intent` y los campos sueltos de `data` (ej. el `tipo` de una consulta). El `.json` puede traer `historial` para simular una sesión ya empezada |
 | `backend/scripts/smoke_echeq.py` | Lo que pasa **después**: que el cheque quede en la base, que la caja salga por el neto y que el comprobante avise lo que tiene que avisar |
 | `backend/scripts/chat_bot.py` | La **conversación**: se le escribe al bot como el operador y se ve qué contesta. Mismo modelo, mismo dispatcher, misma base; solo se reemplaza el envío por WhatsApp |
+| `backend/scripts/smoke_ganancia_cheques.py` | La **ganancia de cheques** del reporte (§7) contra una base de verdad: que cada salida caiga en el día correcto, que el fiado entre por su fecha operativa, que la entrega a un acreedor sume aunque no deje línea de caja, y que anular o revertir la saquen. No cuesta plata (no llama a ningún modelo), pero necesita PostgreSQL local |
 
 ```bash
 # Conversar, o correr un guion (un mensaje por línea)
@@ -2670,6 +2671,11 @@ backend\.venv\Scripts\python.exe scripts/chat_bot.py --db dailyfc_panel --guion 
 backend termina usando— y fuerza WAHA y Telegram a inalcanzables: el `.env` del repo
 apunta a producción y bajo `railway run` el entorno trae los gateways reales. Con esto se
 encontró que la consulta de cartera contestaba "📄 Nº None" para un e-cheq sin número.
+
+```bash
+# La ganancia de cheques del reporte, contra una base local que se crea y se borra
+backend\.venv\Scripts\python.exe scripts/smoke_ganancia_cheques.py
+```
 
 ```bash
 # Qué lee, comparado contra el .json de al lado de cada imagen
