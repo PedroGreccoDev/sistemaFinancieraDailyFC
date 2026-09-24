@@ -6,6 +6,7 @@ import { DolarPill, DolarBlock } from './DolarInline'
 import { useDarkMode } from '../hooks/useDarkMode'
 import { useCurrentUser } from '../lib/auth'
 import { useAuth } from '../auth/AuthContext'
+import GrevexSeal from './GrevexSeal'
 
 function SunIcon() {
   return (
@@ -77,6 +78,11 @@ function Brand({ compact = false, action }: { compact?: boolean; action?: React.
             Sistema Financiero
           </span>
         )}
+        {/* Sello de la agencia. El menú mide 200px: "Desarrollado por" no entra
+            en una línea, por eso acá va la versión corta. */}
+        <div style={{ marginTop: compact ? "4px" : "0.6rem" }}>
+          <GrevexSeal size="sm" align="start" label="Hecho por" />
+        </div>
       </div>
       {action}
     </div>

@@ -54,6 +54,9 @@
   --bd-010:  rgba(15,23,42,0.14);
   --bd-012:  rgba(15,23,42,0.16);
   --hatch:   rgba(15,23,42,1);
+
+  /* Sello de la agencia (grevex): índigo de su marca en claro, lavanda en oscuro */
+  --grevex: #2f2a85;
 }
 
 html.dark {
@@ -90,6 +93,8 @@ html.dark {
   --bd-010:  rgba(255,255,255,0.1);
   --bd-012:  rgba(255,255,255,0.12);
   --hatch:   rgba(255,255,255,1);
+
+  --grevex: #b4aef5;
 }
 
 * {

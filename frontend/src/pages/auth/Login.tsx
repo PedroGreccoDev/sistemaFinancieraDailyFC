@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
+import GrevexSeal from '../../components/GrevexSeal'
 import { AuthScreen, AuthFrame, AuthBottom, BrandMark, Field, PrimaryButton, ErrorBanner, TextLink, FM, FB } from './authUi'
 
 export default function Login() {
@@ -97,11 +98,12 @@ export default function Login() {
             Cheques, préstamos, divisas y caja — todo tu negocio financiero en un solo lugar.
           </p>
         </div>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
-          <div style={{ width: '100%', maxWidth: 420 }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '3rem' }}>
+          <div style={{ flex: 1, width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             {campos}
             <div style={{ marginTop: '1.6rem' }}>{botonIngresar}</div>
           </div>
+          <GrevexSeal />
         </div>
       </form>
     </>

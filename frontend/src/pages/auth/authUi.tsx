@@ -6,6 +6,7 @@
 import { useRef, useState } from 'react'
 import type { CSSProperties, FormEvent, ReactNode } from 'react'
 import { IconAlert } from '../../components/icons'
+import GrevexSeal from '../../components/GrevexSeal'
 
 export const FM = "'Manrope', sans-serif"
 export const FB = "'Bebas Neue', sans-serif"
@@ -63,7 +64,12 @@ export function AuthScreen({ children, maxWidth = 380 }: { children: ReactNode; 
         fontFamily: FM,
       }}
     >
-      <div style={{ width: '100%', maxWidth }}>{children}</div>
+      <div style={{ width: '100%', maxWidth }}>
+        {children}
+        <div style={{ marginTop: '1.4rem' }}>
+          <GrevexSeal />
+        </div>
+      </div>
     </div>
   )
 }
