@@ -1,9 +1,11 @@
-> **Note (EN):** This is the backend + frontend for an internal financial management
-> system I built end-to-end for a real client — loan and check-portfolio management,
-> with a WhatsApp bot as the primary operator interface and a cascading multi-model
-> OCR pipeline for check processing that cut image-processing costs by ~8x. Backed by
-> 630+ automated tests and in active production use. Full docs below are in Spanish
-> (the client's working language).
+> **Note (EN):** This is the backend + frontend of an internal management system for a
+> loans and check-portfolio company, co-developed by Pedro Grecco and Ramiro Vélez
+> (Grevex). The operator works mainly through a WhatsApp bot: Claude turns text, photos
+> and voice notes into structured operations that the operator confirms before anything
+> is saved. Check photos are read with a multimodal model (several checks per photo),
+> text uses a cheaper model with escalation, and simple confirmations use the smallest
+> one. FastAPI + PostgreSQL + React/TypeScript, with 800+ automated tests. In daily use
+> by the client. Full docs below are in Spanish (the client's working language).
 
 ---
 

@@ -1,7 +1,7 @@
 """El bot paga las deudas del negocio y mueve plata entre las dos cajas.
 
 Hasta acá el bot **anotaba** los pasivos pero no los pagaba: "le pagué 500 lucas
-a Cuello" caía en DESCONOCIDO y el bot ni siquiera avisaba que había que ir al
+a Aguirre" caía en DESCONOCIDO y el bot ni siquiera avisaba que había que ir al
 panel. Lo que se custodia acá es que esa frase se distinga de las dos que se
 dicen casi igual —"Juan me pagó" (entra plata) y "Juan le transfirió a Pedro"
 (no se mueve nada)— y que el traspaso no se confunda con un cobro.

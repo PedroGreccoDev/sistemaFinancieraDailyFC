@@ -2373,7 +2373,7 @@ def _resolver_para_anular(db: Session, tipo: str, identificador: str):
             )
             if len(candidatos) > 1:
                 # Dos situaciones distintas, y una sola tiene salida por chat.
-                # Si coinciden acreedores DISTINTOS ("Cuello" y "Cuello Hermanos"),
+                # Si coinciden acreedores DISTINTOS ("Aguirre" y "Aguirre Hermanos"),
                 # precisar el nombre alcanza. Si es el MISMO acreedor con varias
                 # deudas, todas se llaman igual: pedir "más precisión" ahí es un
                 # loop —el operador no tiene nada más preciso que decir— y por eso

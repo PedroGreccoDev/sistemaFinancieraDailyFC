@@ -148,7 +148,7 @@ reporte muestra como "corrección de descuadre".
 ### El bot paga los pasivos _(2026-08-25)_
 
 Hasta acá el bot **anotaba** las deudas del negocio pero no las pagaba: "le pagué 500
-lucas a Cuello" no tenía intent, caía en `DESCONOCIDO` y el bot **ni siquiera avisaba**
+lucas a Aguirre" no tenía intent, caía en `DESCONOCIDO` y el bot **ni siquiera avisaba**
 que había que ir al panel. El backend ya sabía hacerlo (`POST /pasivos/{id}/pagar`);
 faltaba la punta del chat.
 
@@ -168,8 +168,8 @@ faltaba la punta del chat.
   renglón se calcula por diferencia**, para que la suma sea exactamente lo que salió.
 - **Un aviso que el operador no puede contestar es un loop, no una pregunta**
   _(decisión del dueño, 2026-08-26)_. Al borrar un pasivo por chat hay dos casos que se ven
-  parecidos y solo uno tiene salida: si coinciden acreedores **distintos** ("Cuello" y
-  "Cuello Hermanos") precisar el nombre alcanza y se pregunta; si es el **mismo** acreedor
+  parecidos y solo uno tiene salida: si coinciden acreedores **distintos** ("Aguirre" y
+  "Aguirre Hermanos") precisar el nombre alcanza y se pregunta; si es el **mismo** acreedor
   con varias deudas, todas se llaman igual y no hay nada más preciso que decir — ahí se
   manda al panel. El criterio de agrupar por nombre normalizado es el mismo de
   `_resolver_acreedor`, que ya lo hacía bien para cobrar.
@@ -1476,7 +1476,7 @@ pagando una de esas: está pagando lo que le debe**.
   agregación, igual que General y Otras deudas. **El criterio tiene que ser el mismo que el
   del backend** (`cargar_pasivos_acreedor`: trim + case-insensitive) o la fila mostraría
   un total y el botón pagaría otro. `acreedor` es **texto libre y no un cliente con id**
-  (§Compensación), así que "Cuello" y "Cuello Hermanos" son dos acreedores y no hay forma
+  (§Compensación), así que "Aguirre" y "Aguirre Hermanos" son dos acreedores y no hay forma
   de que el sistema sepa lo contrario.
 - **El acreedor conserva su fila aunque ya no se le deba nada**, para poder sumarle la
   próxima; el filtro de estado decide qué deudas se traen.

@@ -181,7 +181,7 @@ def test_la_plata_prestada_al_negocio_entra_por_su_caja(medio: MedioPago) -> Non
     db = FakeDB()
     pasivo = Pasivo(
         id=uuid.uuid4(),
-        acreedor="Cuello",
+        acreedor="Aguirre",
         concepto="Préstamo",
         monto=_MIL,
         saldo_pendiente=_MIL,
@@ -199,11 +199,11 @@ def test_la_plata_prestada_al_negocio_entra_por_su_caja(medio: MedioPago) -> Non
 
 @pytest.mark.parametrize("medio", list(MedioPago))
 def test_pagar_una_deuda_del_negocio_sale_por_su_caja(medio: MedioPago) -> None:
-    """El caso que el bot resolvió recién: "le transferí 200 mil a Cuello"."""
+    """El caso que el bot resolvió recién: "le transferí 200 mil a Aguirre"."""
     db = FakeDB()
     pasivo = Pasivo(
         id=uuid.uuid4(),
-        acreedor="Cuello",
+        acreedor="Aguirre",
         concepto="Mercadería",
         monto=Decimal("5000.00"),
         saldo_pendiente=Decimal("5000.00"),

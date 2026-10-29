@@ -66,7 +66,7 @@ def _pasivo(concepto: str, saldo: str) -> Pasivo:
     monto = Decimal(saldo)
     return Pasivo(
         id=uuid.uuid4(),
-        acreedor="Cuello",
+        acreedor="Aguirre",
         concepto=concepto,
         monto=monto,
         saldo_pendiente=monto,
@@ -89,7 +89,7 @@ def _cheque(monto: str) -> Cheque:
 def _entregar(db: FakeDB, cheque: Cheque, **kwargs):
     return svc_pasivos.cancelar_a_acreedor_con_cheque(
         db,
-        acreedor="Cuello",
+        acreedor="Aguirre",
         cheque=cheque,
         porcentaje_venta=Decimal("0"),
         operador_id="test",
@@ -216,7 +216,7 @@ def test_la_consulta_del_bot_agrupa_con_el_mismo_criterio_que_el_pago() -> None:
     from app.services.whatsapp import dispatcher
 
     pasivos = [_pasivo("Lote de dólares", "100000"), _pasivo("Vuelto cheque", "63500")]
-    pasivos[1].acreedor = "  cuello "
+    pasivos[1].acreedor = "  aguirre "
 
     original = dispatcher._pasivos_pendientes
     dispatcher._pasivos_pendientes = lambda _db: pasivos
@@ -228,4 +228,4 @@ def test_la_consulta_del_bot_agrupa_con_el_mismo_criterio_que_el_pago() -> None:
     # Un solo renglón de acreedor, por el total de las dos deudas.
     assert texto.count("👤") == 1
     assert "2 deudas" in texto
-    assert "cuello" not in texto  # se muestra con el nombre tal como se escribió
+    assert "aguirre" not in texto  # se muestra con el nombre tal como se escribió

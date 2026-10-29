@@ -49,10 +49,10 @@ from app.services.ia.contrato import IntentResult
 from app.services.whatsapp import dispatcher as wa_dispatcher
 
 NOMBRES = (
-    "Juan Pérez", "Kiosco El Ñandú", "María González", "Olivero", "Cuello",
+    "Juan Pérez", "Kiosco El Ñandú", "María González", "Olivero", "Aguirre",
     "Pedrón", "Martín Ávila", "Distribuidora San José", "Bono", "Rodríguez e Hijos",
 )
-ACREEDORES = ("Pedro Mayorista", "Cuello", "Martín Ávila", "Financiera Sur")
+ACREEDORES = ("Pedro Mayorista", "Aguirre", "Martín Ávila", "Financiera Sur")
 BANCOS = ("Galicia", "Nación", "Santander", "Macro", None)
 CONCEPTOS_GASTO = ("nafta", "almuerzo", "estacionamiento", "insumos", "peaje", "café")
 

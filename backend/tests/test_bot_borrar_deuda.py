@@ -2,8 +2,8 @@
 
 Hay dos situaciones que se ven parecidas y solo una tiene salida por chat:
 
-- **Acreedores distintos** que coinciden con lo que dijo el operador ("Cuello" y
-  "Cuello Hermanos"): precisar el nombre alcanza, así que se pregunta.
+- **Acreedores distintos** que coinciden con lo que dijo el operador ("Aguirre" y
+  "Aguirre Hermanos"): precisar el nombre alcanza, así que se pregunta.
 - **El mismo acreedor con varias deudas**: todas se llaman igual. Pedir "más
   precisión" ahí es un loop —el operador no tiene nada más preciso que decir— y
   por eso se manda al panel (decisión del dueño, 2026-08-26).
@@ -40,15 +40,15 @@ class _DbFalsa:
 
 def _resolver(filas: list[str]):
     return dispatcher._resolver_para_anular(
-        _DbFalsa([_PasivoFalso(n) for n in filas]), "PASIVO", "Cuello"
+        _DbFalsa([_PasivoFalso(n) for n in filas]), "PASIVO", "Aguirre"
     )
 
 
 def test_varias_deudas_del_mismo_acreedor_mandan_al_panel() -> None:
     """El caso del loop: "decime cuál con más precisión" cuando las tres se llaman
-    Cuello no se puede contestar. Ahora dice que se resuelve en el panel."""
+    Aguirre no se puede contestar. Ahora dice que se resuelve en el panel."""
     with pytest.raises(ValueError) as exc:
-        _resolver(["Cuello", "Cuello", "Cuello"])
+        _resolver(["Aguirre", "Aguirre", "Aguirre"])
     msg = str(exc.value)
     assert "3 deudas" in msg
     assert "todas se llaman igual" in msg
@@ -59,17 +59,17 @@ def test_varias_deudas_del_mismo_acreedor_mandan_al_panel() -> None:
 def test_acreedores_distintos_si_se_preguntan() -> None:
     """Acá precisar el nombre SÍ resuelve, así que preguntar tiene sentido."""
     with pytest.raises(ValueError) as exc:
-        _resolver(["Cuello", "Cuello Hermanos"])
+        _resolver(["Aguirre", "Aguirre Hermanos"])
     msg = str(exc.value)
-    assert "Cuello Hermanos" in msg
+    assert "Aguirre Hermanos" in msg
     assert "¿A cuál de todos?" in msg
     assert "panel" not in msg
 
 
 def test_una_sola_deuda_se_resuelve_sin_preguntar() -> None:
-    entidad, pasivo = _resolver(["Cuello"])
+    entidad, pasivo = _resolver(["Aguirre"])
     assert entidad == "pasivo"
-    assert pasivo.acreedor == "Cuello"
+    assert pasivo.acreedor == "Aguirre"
 
 
 def test_sin_deudas_lo_dice() -> None:
