@@ -18,10 +18,10 @@ from app.services.whatsapp.dispatcher import _CLAVES_DE_LOTE, _lote_no_soportado
 # ── La guarda: un lote donde no entra un lote ─────────────────────────
 
 def test_dos_pagos_a_un_intent_de_a_uno_no_cargan_nada() -> None:
-    """"Le pagué 500 a Cuello y 300 a Pedro": sale plata por uno y la otra deuda
+    """"Le pagué 500 a Aguirre y 300 a Pedro": sale plata por uno y la otra deuda
     queda viva. Frenar el lote entero es la decisión: cargar la primera y perder
     la segunda es exactamente el bug."""
-    data = {"pagos": [{"acreedor": "Cuello", "monto": 500}, {"acreedor": "Pedro", "monto": 300}]}
+    data = {"pagos": [{"acreedor": "Aguirre", "monto": 500}, {"acreedor": "Pedro", "monto": 300}]}
     aviso = _lote_no_soportado("PAGAR_PASIVO", data)
     assert aviso is not None
     assert "2 operaciones" in aviso
@@ -43,13 +43,13 @@ def test_los_intents_con_array_propio_pasan_derecho() -> None:
 
 def test_una_sola_operacion_en_lista_no_frena() -> None:
     """Un solo ítem no pierde nada: los handlers leen la raíz igual."""
-    data = {"pagos": [{"acreedor": "Cuello", "monto": 500}], "acreedor": "Cuello", "monto": 500}
+    data = {"pagos": [{"acreedor": "Aguirre", "monto": 500}], "acreedor": "Aguirre", "monto": 500}
     assert _lote_no_soportado("PAGAR_PASIVO", data) is None
 
 
 def test_una_lista_que_no_son_operaciones_no_frena() -> None:
     """Una lista de strings o de números no es un lote de operaciones."""
-    data = {"acreedor": "Cuello", "monto": 500, "etiquetas": ["a", "b", "c"]}
+    data = {"acreedor": "Aguirre", "monto": 500, "etiquetas": ["a", "b", "c"]}
     assert _lote_no_soportado("PAGAR_PASIVO", data) is None
 
 

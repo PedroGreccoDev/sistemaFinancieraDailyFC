@@ -23,7 +23,7 @@ from __future__ import annotations
 # (frase, intent esperado, por qué importa)
 FRASES: tuple[tuple[str, str, str], ...] = (
     # ── La dirección de la deuda: quién le debe a quién ───────────────
-    ("Le debo 500 mil a Cuello por el lote de dólares", "REGISTRAR_DEUDA",
+    ("Le debo 500 mil a Aguirre por el lote de dólares", "REGISTRAR_DEUDA",
      "el negocio debe: NO mueve la caja al anotarse"),
     ("Kiosco El Ñandú me debe 200 lucas de mercadería", "REGISTRAR_DEUDA_CLIENTE",
      "el cliente debe: asienta un EGRESO el día que se carga"),

@@ -1,8 +1,8 @@
 # Arquitectura y Requerimientos - Sistema de Gestión Financiera Inteligente
 
 ## 1. Contexto del Negocio y Reglas Core
-* **Nicho:** Financiera informal (mercado negro / "cuevas").
-* **Regla de Oro:** Cero facturación, cero AFIP. Los cheques y divisas se tratan estrictamente como **inventario/stock físico**.
+* **Nicho:** Empresa de préstamos y cartera de cheques.
+* **Alcance:** el sistema no incluye módulos de facturación fiscal ni impuestos. Los cheques y divisas se tratan estrictamente como **inventario/stock físico**.
 * **Flujo "Human in the Loop":** El sistema automatiza la extracción de datos y la matemática, pero **el operador tiene el control total**. La IA no asume cotizaciones ni toma decisiones autónomas de estado sin la orden explícita del usuario por WhatsApp.
 
 ## 2. Stack Tecnológico

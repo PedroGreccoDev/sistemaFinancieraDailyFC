@@ -71,7 +71,7 @@ const cheques: Cheque[] = [
   vendido('ch-v5', '00094567', 'Santander', '420000', '10.50', '6.50', '16800', -1,  'cli-5', 'cli-3'),
   // Las otras salidas de cartera, para el historial de salidas
   { ...vendido('ch-fi-1', '00055111', 'Galicia', '300000', '10.00', '8.00', '0', -7, 'cli-3', 'cli-2'), estado: 'FIADO', ganancia: '0.00' },
-  { ...vendido('ch-e1', '00095678', 'Macro', '800000', '9.50', '6.00', '28000', -3, 'cli-1', 'cli-4'), cliente_destino_id: null, acreedor_destino: 'Cuello Hermanos' },
+  { ...vendido('ch-e1', '00095678', 'Macro', '800000', '9.50', '6.00', '28000', -3, 'cli-1', 'cli-4'), cliente_destino_id: null, acreedor_destino: 'Aguirre Hermanos' },
   { ...vendido('ch-co1', '00096789', 'Nación', '250000', '8.00', '0', '0', -6, 'cli-2', 'cli-1'), estado: 'COBRADO', porcentaje_venta: null, ganancia: '0.00', cliente_destino_id: null },
   { ...vendido('ch-re1', '00097890', 'BBVA', '175000', '12.00', '0', '0', -4, 'cli-4', 'cli-1'), estado: 'RECHAZADO', porcentaje_venta: null, ganancia: '0.00', cliente_destino_id: null },
 ]

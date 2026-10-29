@@ -649,7 +649,7 @@ def aplicar_vuelto_cheque(
 #
 # El panel paga una deuda puntual: el operador la ve en pantalla y la clickea,
 # así que manda el `pasivo_id`. Por WhatsApp no hay pantalla — el operador dice
-# un nombre ("le pagué 500 lucas a Cuello") y puede haberle quedado debiendo
+# un nombre ("le pagué 500 lucas a Aguirre") y puede haberle quedado debiendo
 # tres veces. Estas dos funciones son la puerta por nombre: juntan las deudas
 # vivas con ese acreedor y reparten el pago de la más vieja a la más nueva,
 # igual que la compensación (§2.c).

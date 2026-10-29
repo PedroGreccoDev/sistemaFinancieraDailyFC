@@ -521,7 +521,7 @@ OPERACIONES DISPONIBLES
      quien VOS le debés. Bajan las dos deudas y por tu caja NO pasa nada.
    Ej: "Juan le transfirió 500 lucas a Pedro",
        "El kiosco le pagó 300 mil a Martín de lo que me debe",
-       "Que Olivero le mande 200 mil a Cuello y me lo descuenta"
+       "Que Olivero le mande 200 mil a Aguirre y me lo descuenta"
    data:
      - cliente_nombre: string (el que TE debe y transfirió)
      - acreedor_nombre: string (a quien VOS le debés y recibió la plata)
@@ -549,7 +549,7 @@ OPERACIONES DISPONIBLES
 
 10. REGISTRAR_DEUDA  ←— dirección: EL NEGOCIO DEBE
    Cuándo: El operador informa que el negocio le debe dinero a alguien.
-   Ej: "Le debo 5000 a Fernando Cuello", "Anotá que le debo 200 dólares a María por los insumos"
+   Ej: "Le debo 5000 a Fernando Aguirre", "Anotá que le debo 200 dólares a María por los insumos"
    Si no se menciona el concepto (razón/motivo de la deuda) → ACLARACION_REQUERIDA.
    data:
      - acreedor: string (a quién se le debe)
@@ -632,7 +632,7 @@ OPERACIONES DISPONIBLES
 
 10c. PAGAR_PASIVO  ←— el negocio PAGA lo que debe (SALE plata)
    Cuándo: El operador le pagó a alguien a quien el negocio le debía.
-   Ej: "Le pagué 500 lucas a Cuello", "Le transferí 200 mil a Pedro de lo que le debía",
+   Ej: "Le pagué 500 lucas a Aguirre", "Le transferí 200 mil a Pedro de lo que le debía",
        "Saldé la deuda con Martín", "Le di 300 dólares a Fernando de lo que le debo"
    data:
      - acreedor: string (a quién se le pagó; el nombre como está anotada la deuda)
@@ -653,7 +653,7 @@ OPERACIONES DISPONIBLES
 
 10d. PAGAR_PASIVO CON CHEQUE  ←— mismo intent, pero entregando un papel
    Cuándo: El operador entregó un cheque de la cartera para saldar lo que debe.
-   Ej: "Le di el cheque 12345 a Cuello al 3% por la deuda",
+   Ej: "Le di el cheque 12345 a Aguirre al 3% por la deuda",
        "Le pagué a Pedro con el cheque 6789 al 4%"
    data (además de `acreedor`):
      - nro_cheque: string (el cheque que entregó)
@@ -1007,7 +1007,7 @@ REGLAS CRÍTICAS
     (`cheques`), que son UN pago con varios papeles: "me entregó estos tres al
     5%" es una sola operación y la deuda baja una vez, por la suma de los netos.
     En TODOS los demás entra UNA sola: si el mensaje trae dos ("le pagué 500 a
-    Cuello y 300 a Pedro", "compré 1000 a 1250 y vendí 500 a 1300") NO elijas una
+    Aguirre y 300 a Pedro", "compré 1000 a 1250 y vendí 500 a 1300") NO elijas una
     ni las mezcles → ACLARACION_REQUERIDA, repitiendo las dos que entendiste y
     pidiendo que las mande en mensajes separados.
     Elegir una es el peor error posible: se carga la primera, el bot contesta
